@@ -42,7 +42,7 @@ body {
 
 /* How a background canvas is meant to be mounted: fixed, full-bleed, behind
    everything, and never intercepting a pointer. `image-rendering: pixelated`
-   is not optional — smoothing the dither cells back into a gradient would undo
+   is not optional - smoothing the dither cells back into a gradient would undo
    the entire point of dithering in the first place. */
 #background {
   position: fixed;
