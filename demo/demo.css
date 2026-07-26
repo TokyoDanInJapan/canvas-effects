@@ -83,7 +83,7 @@ code {
   position: fixed;
   top: 1rem;
   right: 1rem;
-  width: 15rem;
+  width: 17rem;
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
   padding: 0.9rem;
@@ -96,12 +96,18 @@ code {
 
 .row {
   display: flex;
+  /* Wraps, because flex items do not shrink below their own content width -
+     five effect buttons needed 273px of a 209px row and the last two were
+     pushed clean outside the panel. */
+  flex-wrap: wrap;
   gap: 0.4rem;
   margin-bottom: 0.5rem;
 }
 
 button {
-  flex: 1;
+  /* A basis rather than `flex: 1`, so a wrapped row divides evenly instead of
+     leaving one button stretched across a whole line. */
+  flex: 1 1 4.5rem;
   padding: 0.4rem;
   border: 1px solid var(--line);
   border-radius: 4px;
