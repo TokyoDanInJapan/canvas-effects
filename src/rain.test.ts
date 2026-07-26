@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import { makeRandom } from './noise';
-import { RAIN_DEFAULTS, createRain, meanBrightness, rollLane, stepRain, type Rain, type RainLane } from './rain';
+import {
+  RAIN_DEFAULTS,
+  createRain,
+  distortField,
+  meanBrightness,
+  rollLane,
+  stepRain,
+  type Distortion,
+  type Rain,
+  type RainLane,
+} from './rain';
 
 const W = 40;
 const H = 30;
@@ -257,5 +267,183 @@ describe('stepRain', () => {
       };
       expect(density(0.6)).toBeGreaterThan(density(8));
     });
+  });
+});
+
+describe('distortField', () => {
+  const params = RAIN_DEFAULTS;
+  const spot = (over: Partial<Distortion> = {}): Distortion => ({ x: 20, y: 15, age: 0.15, strength: 1, ...over });
+
+  /** A field with a recognisable pattern, so displacement is detectable. */
+  const patterned = () => {
+    const rain = createRain(W, H, makeRandom(1), params);
+    for (const lane of rain.lanes) {
+      lane.falling = false;
+      lane.delay = Infinity;
+    }
+    // A grid, varying on *both* axes. Vertical stripes alone have a blind spot:
+    // they are invariant under vertical displacement, so along the centre column
+    // - where the push is purely vertical - a real distortion shows as no change
+    // at all.
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) rain.field[y * W + x] = x % 4 === 0 || y % 4 === 0 ? 1 : 0;
+    }
+    return rain;
+  };
+
+  const changed = (a: Float32Array, b: Float32Array) => {
+    let n = 0;
+    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 1e-6) n++;
+    return n;
+  };
+
+  it('returns the field untouched when there is nothing to do', () => {
+    // An idle page must not even pay for a copy.
+    const rain = patterned();
+    expect(distortField(rain, [], params)).toBe(rain.field);
+  });
+
+  it('returns the warped buffer when there is a distortion', () => {
+    const rain = patterned();
+    const out = distortField(rain, [spot()], params);
+    expect(out).toBe(rain.warped);
+  });
+
+  it('displaces what is already there rather than adding light', () => {
+    // The difference from a splash, and the reason it reads: total brightness is
+    // essentially conserved, but it has moved.
+    const rain = patterned();
+    const before = Array.from(rain.field);
+    const out = distortField(rain, [spot({ age: 0.2 })], params);
+
+    expect(changed(new Float32Array(before), out)).toBeGreaterThan(20);
+
+    const sum = (xs: ArrayLike<number>) => {
+      let t = 0;
+      for (let i = 0; i < xs.length; i++) t += xs[i];
+      return t;
+    };
+    // Within a few percent - a lens moves light, it does not make it.
+    expect(sum(out)).toBeGreaterThan(sum(before) * 0.85);
+    expect(sum(out)).toBeLessThan(sum(before) * 1.15);
+  });
+
+  it('leaves the field itself alone, so the simulation is unaffected', () => {
+    const rain = patterned();
+    const snapshot = Array.from(rain.field);
+    distortField(rain, [spot()], params);
+    expect(Array.from(rain.field)).toEqual(snapshot);
+  });
+
+  it('stays local rather than touching the whole field', () => {
+    // Asserted as a fraction rather than by picking corners. This test field is
+    // 40x30, so its corners are 25 cells from the centre - inside the Gaussian
+    // tail of even a young ring, which reaches three widths past its radius. The
+    // property that matters is that the work is local, not that any given cell
+    // is untouched.
+    const rain = patterned();
+    const tight = { ...params, distortSpeed: 20, distortWidth: 2 };
+    const out = distortField(rain, [spot({ age: 0.1 })], tight);
+
+    let touched = 0;
+    for (let i = 0; i < out.length; i++) if (Math.abs(out[i] - rain.field[i]) > 1e-6) touched++;
+    expect(touched).toBeGreaterThan(0);
+    expect(touched).toBeLessThan(out.length * 0.5);
+  });
+
+  it('reaches further as the ring expands', () => {
+    // Measured along the centre row. Two things rule out the obvious
+    // alternatives: taking the furthest changed cell in *any* direction fails
+    // because x wraps like the lanes do, so the bounding box spans every column
+    // and the answer is the corner distance whatever the age; and the ring has to
+    // be slowed down, or at 90 cells a second it leaves this 40x30 field entirely
+    // and the measure saturates.
+    const slow = { ...params, distortSpeed: 20, distortWidth: 2 };
+    const reachAcross = (age: number) => {
+      const rain = patterned();
+      const out = distortField(rain, [spot({ age })], slow);
+      let far = 0;
+      for (let x = 0; x < W; x++) {
+        if (Math.abs(out[15 * W + x] - rain.field[15 * W + x]) <= 1e-6) continue;
+        far = Math.max(far, Math.abs(x - 20));
+      }
+      return far;
+    };
+    expect(reachAcross(0.4)).toBeGreaterThan(reachAcross(0.1));
+  });
+
+  it('does nothing once its lifetime is up', () => {
+    const rain = patterned();
+    for (const age of [params.distortLifetime, params.distortLifetime + 1, 99]) {
+      const out = distortField(rain, [spot({ age })], params);
+      expect(changed(rain.field, out)).toBe(0);
+    }
+  });
+
+  it('ignores a negative age', () => {
+    const rain = patterned();
+    const out = distortField(rain, [spot({ age: -1 })], params);
+    expect(changed(rain.field, out)).toBe(0);
+  });
+
+  it('scales with strength', () => {
+    const spread = (strength: number) => {
+      const rain = patterned();
+      const out = distortField(rain, [spot({ strength })], params);
+      return changed(rain.field, out);
+    };
+    expect(spread(1)).toBeGreaterThan(spread(0.1));
+  });
+
+  it('keeps the field inside 0..1', () => {
+    const rain = patterned();
+    const out = distortField(rain, [spot()], params);
+    for (const v of out) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('wraps sideways, so a distortion near an edge is not smeared', () => {
+    // Lanes wrap, so this must too - otherwise the outermost column drags.
+    const rain = patterned();
+    const out = distortField(rain, [spot({ x: 1, y: 15, age: 0.2 })], params);
+    for (const v of out) expect(Number.isFinite(v)).toBe(true);
+
+    // Something on the far side moved, pulled round the edge.
+    let farSide = 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = W - 4; x < W; x++) {
+        if (Math.abs(out[y * W + x] - rain.field[y * W + x]) > 1e-6) farSide++;
+      }
+    }
+    expect(farSide).toBeGreaterThan(0);
+  });
+
+  it('clamps vertically rather than wrapping, unlike the smoke', () => {
+    // Rain has a top it falls from and a bottom it retires at. Wrapping y would
+    // drag the bottom of the screen back up into the top.
+    const rain = patterned();
+    rain.field.fill(0);
+    for (let x = 0; x < W; x++) rain.field[(H - 1) * W + x] = 1;
+
+    const out = distortField(rain, [spot({ x: 20, y: 1, age: 0.2 })], params);
+    // Nothing from the bright bottom row should appear near the top.
+    for (let x = 0; x < W; x++) expect(out[x]).toBeLessThan(0.5);
+  });
+
+  it('adds several distortions together', () => {
+    const rain = patterned();
+    const one = Array.from(distortField(rain, [spot({ x: 10 })], params));
+    const two = Array.from(distortField(rain, [spot({ x: 10 }), spot({ x: 30 })], params));
+    expect(two).not.toEqual(one);
+  });
+
+  it('survives a distortion centred outside the field', () => {
+    const rain = patterned();
+    for (const d of [spot({ x: -20 }), spot({ x: W + 20 }), spot({ y: -30 }), spot({ y: H + 30 })]) {
+      const out = distortField(rain, [d], params);
+      for (const v of out) expect(Number.isFinite(v)).toBe(true);
+    }
   });
 });

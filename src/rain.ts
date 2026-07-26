@@ -64,6 +64,15 @@ export interface RainParams {
   boldChance: number;
   /** Speed and brightness multiplier for those. */
   boldFactor: number;
+
+  /** How fast a click distortion's ring expands, in cells per second. */
+  distortSpeed: number;
+  /** Thickness of that ring, in cells. */
+  distortWidth: number;
+  /** Seconds a distortion lasts. */
+  distortLifetime: number;
+  /** How far it displaces the field at its peak, in cells. */
+  distortStrength: number;
 }
 
 export const RAIN_DEFAULTS: RainParams = {
@@ -88,6 +97,14 @@ export const RAIN_DEFAULTS: RainParams = {
   flicker: 0.22,
   boldChance: 0.12,
   boldFactor: 1.9,
+  // A ring crossing a 1080p field in about a second, which reads as a shock
+  // travelling through the rain rather than as a flash.
+  distortSpeed: 90,
+  distortWidth: 7,
+  distortLifetime: 1.1,
+  // In cells, so it does not need re-tuning when the field resolution changes.
+  // Six is roughly a bold drop's width - enough to visibly kink a streak.
+  distortStrength: 6,
 };
 
 /** One falling lane. There is exactly one per field column. */
@@ -111,8 +128,13 @@ export interface Rain {
   w: number;
   h: number;
   lanes: RainLane[];
-  /** Brightness per cell, 0 to 1, row-major. This is what gets shaded. */
+  /** Brightness per cell, 0 to 1, row-major. The simulation writes this. */
   field: Float32Array;
+  /**
+   * `field` with any click distortions applied. Only written when there are
+   * some, and `distortField` returns whichever of the two should be shaded.
+   */
+  warped: Float32Array;
 }
 
 /**
@@ -160,7 +182,7 @@ export function createRain(w: number, h: number, rand: () => number = Math.rando
     lanes.push(lane);
   }
 
-  return { w, h, lanes, field: new Float32Array(w * h) };
+  return { w, h, lanes, field: new Float32Array(w * h), warped: new Float32Array(w * h) };
 }
 
 /**
@@ -211,6 +233,121 @@ export function stepRain(rain: Rain, params: RainParams, rand: () => number, dt:
       lane.delay = params.respawn * (0.4 + rand() * 1.2);
     }
   }
+}
+
+/** Where a click landed, in grid cells. */
+export interface Distortion {
+  x: number;
+  y: number;
+  /** Seconds since the click. */
+  age: number;
+  /** Multiplier on `distortStrength`. */
+  strength: number;
+}
+
+/**
+ * Bilinear sample of the field, wrapping sideways and clamping vertically.
+ *
+ * Wrapping in x matches the lanes, which wrap, so a distortion near an edge
+ * pulls in streaks from the far side instead of smearing one column. Clamping in
+ * y is right for the same reason it is wrong in the smoke: rain has a top it
+ * falls from and a bottom it retires at, and wrapping would drag the bottom of
+ * the screen back up into the top.
+ *
+ * Deliberately not the smoke's `sampleWrapped`. That wraps both axes, and these
+ * two effects have no business importing each other's internals.
+ */
+function sampleField(field: Float32Array, w: number, h: number, x: number, y: number): number {
+  const fx = Math.floor(x);
+  const fy = Math.floor(y);
+  const tx = x - fx;
+  const ty = y - fy;
+
+  const x0 = (((fx % w) + w) % w) | 0;
+  const x1 = (x0 + 1) % w;
+  const y0 = fy < 0 ? 0 : fy > h - 1 ? h - 1 : fy;
+  const y1 = y0 + 1 > h - 1 ? h - 1 : y0 + 1;
+
+  const a = field[y0 * w + x0];
+  const b = field[y0 * w + x1];
+  const c = field[y1 * w + x0];
+  const d = field[y1 * w + x1];
+
+  const top = a + (b - a) * tx;
+  const bottom = c + (d - c) * tx;
+  return top + (bottom - top) * ty;
+}
+
+/**
+ * Applies click distortions, returning the buffer that should be shaded.
+ *
+ * A distortion *displaces what is already there* rather than adding light of its
+ * own, which is what makes it read where a splash did not: the rain's streaks
+ * are the highest-contrast thing on screen, so bending them is far more visible
+ * than drawing a faint new shape among them. It is a droplet on glass acting as
+ * a lens.
+ *
+ * Returns `field` untouched when there is nothing to do, so an idle page pays
+ * nothing - not even a copy.
+ *
+ * Only the cells a ring can actually reach are recomputed. The rings are thin
+ * and short-lived, so that bounding box is a small part of the field even while
+ * one is running.
+ */
+export function distortField(rain: Rain, distortions: readonly Distortion[], params: RainParams): Float32Array {
+  const { w, h, field, warped } = rain;
+  if (distortions.length === 0) return field;
+
+  warped.set(field);
+
+  // How far out a ring can still be felt: its radius plus a few widths of tail.
+  const reach = (d: Distortion) => d.age * params.distortSpeed + params.distortWidth * 3;
+
+  let x0 = w;
+  let x1 = -1;
+  let y0 = h;
+  let y1 = -1;
+  for (const d of distortions) {
+    if (d.age < 0 || d.age >= params.distortLifetime) continue;
+    const r = reach(d);
+    x0 = Math.min(x0, Math.floor(d.x - r));
+    x1 = Math.max(x1, Math.ceil(d.x + r));
+    y0 = Math.max(0, Math.min(y0, Math.floor(d.y - r)));
+    y1 = Math.min(h - 1, Math.max(y1, Math.ceil(d.y + r)));
+  }
+  if (x1 < x0 || y1 < y0) return field;
+
+  for (let y = y0; y <= y1; y++) {
+    for (let xi = x0; xi <= x1; xi++) {
+      let ox = 0;
+      let oy = 0;
+
+      for (const d of distortions) {
+        if (d.age < 0 || d.age >= params.distortLifetime) continue;
+
+        const dx = xi - d.x;
+        const dy = y - d.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < 1e-6) continue;
+
+        const radius = d.age * params.distortSpeed;
+        const offset = (distance - radius) / params.distortWidth;
+        const band = Math.exp(-offset * offset);
+        const fade = 1 - d.age / params.distortLifetime;
+        const push = params.distortStrength * d.strength * band * fade * fade;
+
+        ox += (dx / distance) * push;
+        oy += (dy / distance) * push;
+      }
+
+      if (ox === 0 && oy === 0) continue;
+      // Read from where the content came from, so it appears pushed outward.
+      const gx = (((xi % w) + w) % w) | 0;
+      warped[y * w + gx] = sampleField(field, w, h, xi - ox, y - oy);
+    }
+  }
+
+  return warped;
 }
 
 /** Mean brightness of the field. Exported for tests and for tuning. */

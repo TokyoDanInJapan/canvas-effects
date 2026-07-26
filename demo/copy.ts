@@ -58,6 +58,10 @@ export const COPY: Record<string, Copy> = {
       'That turns out to matter. A fast drop leaves a <em>longer</em> streak than a slow one, because its brightness ' +
         'has had less time to fade over the same distance, and a drop that retires at the bottom leaves its trail to ' +
         'fade in place instead of taking it along.',
+      '<strong>Click anywhere to send a distortion through it.</strong> It displaces what is already there rather ' +
+        'than adding light of its own — an expanding ring that bends the streaks as it passes, like a droplet on ' +
+        'glass acting as a lens. Bending the highest-contrast thing on screen reads far better than drawing a faint ' +
+        'new shape among it.',
       'These are streaks of falling light, not glyphs. At a six-pixel dither cell a character would be about three ' +
         'cells tall and would read as noise — streaks survive the palette, letterforms do not.',
       SHARED,

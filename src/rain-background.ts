@@ -11,7 +11,7 @@
 import { createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
-import { RAIN_DEFAULTS, createRain, stepRain, type Rain, type RainParams } from './rain';
+import { RAIN_DEFAULTS, createRain, distortField, stepRain, type Distortion, type Rain, type RainParams } from './rain';
 
 export interface RainBackgroundOptions {
   /** CSS pixels per rendered pixel - one dither cell. Bigger is coarser and cheaper. */
@@ -56,6 +56,17 @@ export interface RainBackgroundOptions {
   shading: Shading | (() => Shading);
   /** Rain parameters. Anything omitted falls back to `RAIN_DEFAULTS`. */
   rain: Partial<RainParams>;
+  /**
+   * Let a click send a distortion through the rain - a ring that bends the
+   * streaks as it passes, like a droplet on glass acting as a lens.
+   *
+   * Listened for on the window rather than the canvas, like the smoke's stirring
+   * and the plasma's ripples: a background canvas is `pointer-events: none`, so
+   * it never sees a pointer itself.
+   */
+  interactive: boolean;
+  /** Most distortions at once. A spare click is dropped rather than queued. */
+  maxDistortions: number;
   /** Draw one settled frame and stop when the visitor has asked for less motion. */
   respectReducedMotion: boolean;
   /** Stop the loop while the tab is hidden. */
@@ -87,6 +98,8 @@ export const RAIN_BACKGROUND_DEFAULTS: RainBackgroundOptions = {
   settleSteps: 48,
   shading: defaultShading,
   rain: {},
+  interactive: true,
+  maxDistortions: 4,
   respectReducedMotion: true,
   pauseWhenHidden: true,
   watchThemeClass: true,
@@ -127,12 +140,17 @@ export function createRainBackground(
   let rain: Rain | null = null;
   let shading: Shading = { base: 0, amplitude: 0 };
 
+  // Live click distortions, aged in real seconds.
+  const distortions: Distortion[] = [];
+
   function readShading() {
     shading = typeof config.shading === 'function' ? config.shading() : config.shading;
   }
 
   function shade() {
-    if (rain) surface.shade(rain.field, shading, config.gamma);
+    // `distortField` hands back the plain field when there is nothing to apply,
+    // so an idle page pays nothing for this - not even a copy.
+    if (rain) surface.shade(distortField(rain, distortions, params), shading, config.gamma);
   }
 
   function rebuild() {
@@ -146,6 +164,12 @@ export function createRainBackground(
     fps: config.fps,
     onFrame() {
       if (rain) stepRain(rain, params, config.random, dt);
+
+      for (let i = distortions.length - 1; i >= 0; i--) {
+        distortions[i].age += dt;
+        if (distortions[i].age >= params.distortLifetime) distortions.splice(i, 1);
+      }
+
       shade();
     },
     onResize() {
@@ -162,6 +186,26 @@ export function createRainBackground(
     watchThemeClass: config.watchThemeClass,
     watchColorScheme: config.watchColorScheme,
   });
+
+  /** A click sends a distortion out from where it landed. */
+  function onPointerDown(event: PointerEvent) {
+    if (still || !rain) return;
+    if (distortions.length >= config.maxDistortions) return;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    distortions.push({
+      x: ((event.clientX - rect.left) / rect.width) * rain.w,
+      y: ((event.clientY - rect.top) / rect.height) * rain.h,
+      age: 0,
+      strength: 1,
+    });
+  }
+
+  if (config.interactive && !still) {
+    window.addEventListener('pointerdown', onPointerDown, { passive: true });
+  }
 
   readShading();
   surface.resize();
@@ -181,6 +225,8 @@ export function createRainBackground(
     },
     destroy() {
       driver.destroy();
+      window.removeEventListener('pointerdown', onPointerDown);
+      distortions.length = 0;
       rain = null;
     },
   };

@@ -309,6 +309,9 @@ const RAIN_DIALS: Dial[] = [
   { key: 'speedVariance', label: 'speedVariance', min: 0, max: 0.9, step: 0.05, value: RAIN_DEFAULTS.speedVariance },
   { key: 'flicker', label: 'flicker', min: 0, max: 0.8, step: 0.02, value: RAIN_DEFAULTS.flicker },
   { key: 'boldChance', label: 'boldChance', min: 0, max: 0.6, step: 0.02, value: RAIN_DEFAULTS.boldChance },
+  { key: 'distortStrength', label: 'distortStrength', min: 0, max: 20, step: 1, value: 6, note: 'click to distort' },
+  { key: 'distortSpeed', label: 'distortSpeed', min: 10, max: 250, step: 5, value: 90 },
+  { key: 'distortWidth', label: 'distortWidth', min: 1, max: 25, step: 1, value: 7 },
   { key: 'minBrightness', label: 'minBrightness', min: 0.1, max: 1, step: 0.05, value: RAIN_DEFAULTS.minBrightness },
 ];
 
@@ -572,6 +575,9 @@ function mount() {
         flicker: values.flicker,
         boldChance: values.boldChance,
         minBrightness: values.minBrightness,
+        distortStrength: values.distortStrength,
+        distortSpeed: values.distortSpeed,
+        distortWidth: values.distortWidth,
       },
     });
     if (!handle) fpsOut.textContent = 'no 2D context';
