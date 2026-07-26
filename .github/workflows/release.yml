@@ -1,0 +1,91 @@
+# Turns a pushed `v*` tag into a verified GitHub Release.
+#
+# The tag stays the manual step, deliberately. Choosing a version number is a
+# judgement about what changed - whether a behaviour change is a minor or a major
+# is not something a workflow can decide - so this automates everything after
+# that decision and nothing before it.
+#
+# `ci.yml` does not cover this. It runs on pushes to `main` and on pull requests,
+# and a tag push is neither, so the verification below is not a duplicate of a run
+# that already happened: it is the only one that ever looks at the tagged tree.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Only to create the release. Nothing here writes to a branch.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The annotated tag's own message becomes the release notes, and that
+          # message lives in the tag object rather than in the ref - which a
+          # shallow checkout does not bring with it.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The tag and the manifest have to agree, or `npm pack` produces a tarball
+      # whose version contradicts the release it is attached to. Cheap to check
+      # and tedious to notice afterwards.
+      - name: Check the tag matches the version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $manifest"
+            exit 1
+          fi
+          echo "$GITHUB_REF_NAME matches package.json"
+
+      # The same three gates `ci.yml` applies, run against the tagged tree.
+      - run: npm run check
+      - run: npm run test:coverage
+      - name: Build the demo
+        run: npx vite build
+
+      # Proof the published shape is intact: the build the `prepare` script would
+      # run for a consumer, and the file list `files` would ship them.
+      - name: Build the library
+        run: npm run build
+      - name: Show what a consumer would get
+        run: npm pack --dry-run
+
+      # The tag's message, minus its first line - `gh` uses the tag name as the
+      # title, so repeating it in the body would print it twice.
+      #
+      # Write the message as Markdown, because that is what it becomes. Use `-`
+      # for bullets and leave a blank line before a list, or GitHub folds the
+      # whole section into one run-on paragraph; keep continuation lines under
+      # four spaces of indent, or they render as a code block.
+      - name: Take the notes from the tag
+        run: |
+          git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::$GITHUB_REF_NAME has no annotated message; releasing without notes"
+            echo "See the commit log for what changed." > release-notes.md
+          fi
+          cat release-notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+# There is no `npm publish` step, and not by oversight: `canvas-effects` on npm
+# belongs to someone else's package, so publishing under that name would fail with
+# a 403. Adding one means scoping the package first - `@owner/canvas-effects`, with
+# `publishConfig.access: "public"` - and an `NPM_TOKEN` secret. Until then a
+# release is a tag and a GitHub Release, which is what the tags before it were.
