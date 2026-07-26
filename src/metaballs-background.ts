@@ -16,12 +16,15 @@ import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
 import {
   METABALL_DEFAULTS,
+  advanceThrow,
   createMetaballs,
   nearestBall,
   renderMetaballs,
+  startThrow,
   type BallOverride,
   type MetaballParams,
   type Metaballs,
+  type Throw,
 } from './metaballs';
 
 export interface MetaballsBackgroundOptions {
@@ -134,6 +137,15 @@ export function createMetaballsBackground(
   let holdY = 0;
   let weight = 0;
 
+  // Drag velocity, in field-height units a second, smoothed so one jittery
+  // sample cannot decide the throw. Handed to `startThrow` on release.
+  let velocityX = 0;
+  let velocityY = 0;
+  let lastMoveAt = 0;
+
+  // The coast after letting go. Null while held or once settled.
+  let flight: Throw | null = null;
+
   function readShading() {
     shading = typeof config.shading === 'function' ? config.shading() : config.shading;
   }
@@ -155,6 +167,7 @@ export function createMetaballsBackground(
     heldIndex = -1;
     holding = false;
     weight = 0;
+    flight = null;
     metaballs = createMetaballs(surface.fieldW, surface.fieldH, config.random, params);
     renderMetaballs(metaballs, params, elapsed);
   }
@@ -178,10 +191,22 @@ export function createMetaballsBackground(
         const towards = holding ? 1 : 0;
         const rate = holding ? params.grabEase : params.releaseEase;
         weight += (towards - weight) * (rate > 0 ? Math.min(1, dt / rate) : 1);
+
+        // Let go: the ball coasts on in the direction it was thrown while the
+        // blend reels it back, so the two together read as an elastic tether
+        // rather than a spring snapping shut.
+        if (flight && metaballs) {
+          const aspect = metaballs.h > 0 ? metaballs.w / metaballs.h : 1;
+          advanceThrow(flight, params, dt, aspect);
+          holdX = flight.x;
+          holdY = flight.y;
+        }
+
         // Settled back on its path: stop overriding it at all.
         if (!holding && weight < 0.002) {
           heldIndex = -1;
           weight = 0;
+          flight = null;
         }
       }
 
@@ -214,8 +239,21 @@ export function createMetaballsBackground(
           onEmit(u, v) {
             if (!metaballs) return;
             const aspect = metaballs.h > 0 ? metaballs.w / metaballs.h : 1;
-            holdX = u * aspect;
-            holdY = v;
+            const nextX = u * aspect;
+            const nextY = v;
+            const now = performance.now();
+
+            if (holding && lastMoveAt) {
+              // Smoothed rather than taken raw: emissions are spaced by distance,
+              // so a single short interval can imply an absurd speed.
+              const gap = Math.max(0.004, (now - lastMoveAt) / 1000);
+              velocityX += ((nextX - holdX) / gap - velocityX) * 0.35;
+              velocityY += ((nextY - holdY) / gap - velocityY) * 0.35;
+            }
+            lastMoveAt = now;
+
+            holdX = nextX;
+            holdY = nextY;
 
             // Only the first emission of a drag chooses a ball; the rest move
             // whichever one was picked up, or nothing if the press missed.
@@ -223,6 +261,9 @@ export function createMetaballsBackground(
               holding = true;
               heldIndex = nearestBall(metaballs.balls, holdX, holdY, params.grabReach);
               weight = 0;
+              velocityX = 0;
+              velocityY = 0;
+              flight = null;
             }
           },
         })
@@ -231,7 +272,12 @@ export function createMetaballsBackground(
   // `createDragSource` has no notion of release, since every other effect only
   // cares where a pointer *was*. This one has to know when it stops.
   function onRelease() {
+    if (!holding) return;
     holding = false;
+    lastMoveAt = 0;
+    // Hand the drag's velocity over, so the ball carries on rather than being
+    // pulled straight back to its path.
+    flight = startThrow(holdX, holdY, velocityX, velocityY, params);
   }
 
   if (config.interactive && !still) {

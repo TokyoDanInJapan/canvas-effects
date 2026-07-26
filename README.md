@@ -526,6 +526,12 @@ one interaction here that needs no emissions at all: the held ball simply _is_ w
 nothing to space out or interpolate, and it comes out smooth for free. Measured against the smoke, which is the yardstick
 for that: variability 0.16 against 0.11, with no stalled samples.
 
+**Letting go throws it.** The drag's velocity is handed over on release, so the ball coasts on in the direction it was
+moving and _then_ curves back onto its path. Without that it reads as losing momentum: the blend pulls it straight back,
+and a hard flick and a careful placement look identical. Damping is exponential so it behaves the same at 24fps and
+60fps, the handover speed is capped so a violent flick cannot fling the ball off the edge before the blend reels it in,
+and the position is held inside the field so a throw at an edge slides along it rather than vanishing and reappearing.
+
 **Releasing has to be a blend, not a handover.** A ball's position is a closed-form function of the clock, so it never
 stopped moving while you held it — hand control straight back and it jumps from your cursor to wherever its orbit had got
 to. `BallOverride.weight` eases from 1 to 0 instead, so the ball converges on a target that is itself still travelling.
@@ -788,16 +794,17 @@ Metaballs only:
 
 And the `metaballs` sub-options, documented inline on `MetaballParams`:
 
-| Parameter                   | Default         | Does                                                                             |
-| --------------------------- | --------------- | -------------------------------------------------------------------------------- |
-| `count`                     | `7`             | How many balls. Few and large merge; many and small just mill about.             |
-| `radius` / `radiusVariance` | `0.26` / `0.4`  | Mean ball radius in field-height units, and the spread on it.                    |
-| `iso`                       | `0.55`          | The field value taken as the surface.                                            |
-| `shoulder`                  | `0.38`          | Width of the gradient across it. **0 gives a hard edge and wastes the palette.** |
-| `strength`                  | `1`             | Peak contribution of one ball at its centre.                                     |
-| `speed` / `wander`          | `0.16` / `0.72` | How fast they move, and how far from centre they stray.                          |
-| `grabReach`                 | `0.4`           | How near a press must be to take hold of a blob, in field-height units.          |
-| `grabEase` / `releaseEase`  | `0.16` / `0.9`  | Seconds to come to the pointer, and to settle back onto its path.                |
+| Parameter                        | Default         | Does                                                                             |
+| -------------------------------- | --------------- | -------------------------------------------------------------------------------- |
+| `count`                          | `7`             | How many balls. Few and large merge; many and small just mill about.             |
+| `radius` / `radiusVariance`      | `0.26` / `0.4`  | Mean ball radius in field-height units, and the spread on it.                    |
+| `iso`                            | `0.55`          | The field value taken as the surface.                                            |
+| `shoulder`                       | `0.38`          | Width of the gradient across it. **0 gives a hard edge and wastes the palette.** |
+| `strength`                       | `1`             | Peak contribution of one ball at its centre.                                     |
+| `speed` / `wander`               | `0.16` / `0.72` | How fast they move, and how far from centre they stray.                          |
+| `grabReach`                      | `0.4`           | How near a press must be to take hold of a blob, in field-height units.          |
+| `grabEase` / `releaseEase`       | `0.16` / `0.9`  | Seconds to come to the pointer, and to settle back onto its path.                |
+| `throwDamping` / `throwMaxSpeed` | `2.4` / `2.5`   | How fast a thrown ball slows, and the cap on its release speed.                  |
 
 The full parameter sets are documented inline where they are declared - `SmokeParams` in `src/smoke.ts`,
 `PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts`, `RidgeParams` in `src/ridges.ts`, `FireParams` in `src/fire.ts`, `MetaballParams` in `src/metaballs.ts` - with a

@@ -71,6 +71,21 @@ export interface MetaballParams {
   grabEase: number;
   /** Seconds a released ball takes to settle back onto its path. */
   releaseEase: number;
+  /**
+   * How fast a thrown ball loses its speed, as a proportion per second.
+   *
+   * Without a throw at all, letting go of a ball mid-flick reads as it losing
+   * momentum: the blend pulls it straight back towards its path and the
+   * direction you were moving it counts for nothing.
+   */
+  throwDamping: number;
+  /**
+   * Ceiling on release speed, in field-height units per second.
+   *
+   * A hard flick can hand over a very large velocity, and without this the ball
+   * leaves the screen before the blend has any chance to reel it in.
+   */
+  throwMaxSpeed: number;
 }
 
 export const METABALL_DEFAULTS: MetaballParams = {
@@ -94,6 +109,10 @@ export const METABALL_DEFAULTS: MetaballParams = {
   grabEase: 0.16,
   // Slower than the grab. Letting go should look like release, not retraction.
   releaseEase: 0.9,
+  // Loses about two thirds of its speed in half a second, which is long enough
+  // for the throw to read as a throw before the blend takes over.
+  throwDamping: 2.4,
+  throwMaxSpeed: 2.5,
 };
 
 /** One ball, positioned in field-height units. */
@@ -207,6 +226,58 @@ export interface BallOverride {
   y: number;
   /** 1 for fully held, 0 for fully back on its path. */
   weight: number;
+}
+
+/**
+ * A ball let go of mid-drag: where it is, and how fast it is still going.
+ *
+ * The velocity is what stops a release reading as the ball losing momentum. On
+ * its own, easing the blend weight to zero pulls the ball straight back towards
+ * its path, so a hard flick and a gentle placement look identical. Carrying the
+ * drag's velocity means it coasts on in the direction it was thrown and *then*
+ * curves back, which is what makes the tether feel elastic rather than sprung.
+ */
+export interface Throw {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
+/**
+ * Starts a throw, clamping the handover speed.
+ *
+ * A hard flick can produce a velocity of many screen heights a second, and
+ * unclamped the ball is off the edge before the blend has any chance to reel it
+ * back. The direction survives the clamp; only the magnitude is capped.
+ */
+export function startThrow(x: number, y: number, vx: number, vy: number, params: MetaballParams): Throw {
+  const speed = Math.hypot(vx, vy);
+  if (speed > params.throwMaxSpeed && speed > 0) {
+    const scale = params.throwMaxSpeed / speed;
+    return { x, y, vx: vx * scale, vy: vy * scale };
+  }
+  return { x, y, vx, vy };
+}
+
+/**
+ * Coasts a throw forward by `dt`, damping it and keeping it on screen.
+ *
+ * Damping is exponential rather than a flat subtraction, so it is frame-rate
+ * independent: two half-steps leave the same speed as one whole one. Position is
+ * held inside the field, so a ball flung at an edge slides along it instead of
+ * disappearing and reappearing when the blend catches up.
+ */
+export function advanceThrow(state: Throw, params: MetaballParams, dt: number, aspect: number): void {
+  const keep = Math.exp(-params.throwDamping * dt);
+  state.vx *= keep;
+  state.vy *= keep;
+
+  state.x += state.vx * dt;
+  state.y += state.vy * dt;
+
+  state.x = state.x < 0 ? 0 : state.x > aspect ? aspect : state.x;
+  state.y = state.y < 0 ? 0 : state.y > 1 ? 1 : state.y;
 }
 
 /**

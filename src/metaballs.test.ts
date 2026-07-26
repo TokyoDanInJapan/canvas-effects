@@ -4,7 +4,9 @@ import { makeRandom } from './noise';
 import {
   METABALL_DEFAULTS,
   ballsAt,
+  advanceThrow,
   nearestBall,
+  startThrow,
   type BallOverride,
   coverage,
   createMetaballs,
@@ -472,6 +474,98 @@ describe('grabbing a ball', () => {
         expect(v).toBeGreaterThanOrEqual(0);
         expect(v).toBeLessThanOrEqual(1);
       }
+    });
+  });
+});
+
+describe('throwing a released ball', () => {
+  const params = METABALL_DEFAULTS;
+
+  describe('startThrow', () => {
+    it('keeps a modest velocity as given', () => {
+      const t = startThrow(0.5, 0.5, 0.4, -0.3, params);
+      expect(t.vx).toBeCloseTo(0.4, 6);
+      expect(t.vy).toBeCloseTo(-0.3, 6);
+    });
+
+    it('caps a hard flick without changing its direction', () => {
+      // Unclamped, a flick hands over many screen heights a second and the ball
+      // is gone before the blend can reel it back.
+      const t = startThrow(0.5, 0.5, 30, 40, params);
+      expect(Math.hypot(t.vx, t.vy)).toBeCloseTo(params.throwMaxSpeed, 6);
+      // 3:4 in, 3:4 out.
+      expect(t.vx / t.vy).toBeCloseTo(30 / 40, 6);
+    });
+
+    it('copes with no velocity at all', () => {
+      const t = startThrow(0.5, 0.5, 0, 0, params);
+      expect(t.vx).toBe(0);
+      expect(t.vy).toBe(0);
+    });
+  });
+
+  describe('advanceThrow', () => {
+    it('carries the ball along its velocity', () => {
+      const t = startThrow(0.5, 0.5, 1, 0, params);
+      advanceThrow(t, params, 0.1, 1.8);
+      expect(t.x).toBeGreaterThan(0.5);
+      expect(t.y).toBeCloseTo(0.5, 6);
+    });
+
+    it('bleeds the speed off', () => {
+      const t = startThrow(0.5, 0.5, 1, 0, params);
+      advanceThrow(t, params, 0.25, 1.8);
+      expect(t.vx).toBeLessThan(1);
+      expect(t.vx).toBeGreaterThan(0);
+    });
+
+    it('damps frame-rate independently', () => {
+      // Exponential, not a flat subtraction: two half-steps must leave the same
+      // speed as one whole one, or the throw would behave differently at 24fps
+      // and 60fps.
+      const coarse = startThrow(0.5, 0.5, 1, 0, params);
+      advanceThrow(coarse, params, 0.2, 1.8);
+
+      const fine = startThrow(0.5, 0.5, 1, 0, params);
+      advanceThrow(fine, params, 0.1, 1.8);
+      advanceThrow(fine, params, 0.1, 1.8);
+
+      expect(fine.vx).toBeCloseTo(coarse.vx, 9);
+    });
+
+    it('comes to a stop rather than drifting forever', () => {
+      const t = startThrow(0.5, 0.5, 2, 0, params);
+      for (let i = 0; i < 200; i++) advanceThrow(t, params, 1 / 60, 1.8);
+      expect(Math.hypot(t.vx, t.vy)).toBeLessThan(0.001);
+    });
+
+    it('stays on screen, sliding along an edge rather than leaving', () => {
+      const aspect = 1.8;
+      const t = startThrow(0.1, 0.1, -5, -5, params);
+      for (let i = 0; i < 60; i++) advanceThrow(t, params, 1 / 60, aspect);
+      expect(t.x).toBeGreaterThanOrEqual(0);
+      expect(t.y).toBeGreaterThanOrEqual(0);
+
+      const far = startThrow(aspect - 0.1, 0.9, 5, 5, params);
+      for (let i = 0; i < 60; i++) advanceThrow(far, params, 1 / 60, aspect);
+      expect(far.x).toBeLessThanOrEqual(aspect);
+      expect(far.y).toBeLessThanOrEqual(1);
+    });
+
+    it('goes further for a harder throw', () => {
+      const distance = (speed: number) => {
+        const t = startThrow(0.9, 0.5, speed, 0, params);
+        for (let i = 0; i < 30; i++) advanceThrow(t, params, 1 / 60, 4);
+        return t.x - 0.9;
+      };
+      expect(distance(2)).toBeGreaterThan(distance(0.4));
+    });
+
+    it('stays put when it was not thrown', () => {
+      const t = startThrow(0.6, 0.4, 0, 0, params);
+      for (let i = 0; i < 30; i++) advanceThrow(t, params, 1 / 60, 1.8);
+      expect(t.x).toBeCloseTo(0.6, 9);
+      expect(t.y).toBeCloseTo(0.4, 9);
     });
   });
 });
