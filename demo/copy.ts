@@ -40,8 +40,12 @@ export const COPY: Record<string, Copy> = {
         'something with filaments in it.',
       'Time enters twice and needs to. One term slides the whole domain, which alone would look like a photograph ' +
         'being panned; the other moves the inner fields against each other, which is what makes it evolve in place.',
-      'Stateless in time — the field is a pure function of the clock, so a frame can be drawn at any moment without ' +
-        'having drawn the ones before it.',
+      '<strong>Click anywhere to send a ripple out from where it lands.</strong> It is a ring of radial displacement ' +
+        'added to the finished warp coordinate, anchored in screen space — so it stays where you clicked while the ' +
+        'field drifts underneath it, and it ages on a real-time clock rather than on animation time, so changing ' +
+        '<code>speed</code> does not stretch it out.',
+      'Otherwise stateless in time — the field is a pure function of the clock and the live ripples, so a frame can be ' +
+        'drawn at any moment without having drawn the ones before it.',
       SHARED,
     ],
   },

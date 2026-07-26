@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   WARP_GRID_X,
+  rippleDisplacement,
+  type Ripple,
   WARP_GRID_Y,
   PLASMA_WARP_DEFAULTS,
   buildPlasmaTile,
@@ -266,5 +268,149 @@ describe('samplePlasma', () => {
         expect(Number.isFinite(samplePlasma(tile, SIZE, u, v))).toBe(true);
       }
     }
+  });
+});
+
+describe('ripples', () => {
+  const params = PLASMA_WARP_DEFAULTS;
+  const out = new Float32Array(2);
+  const at = (su: number, sv: number, ripple: Ripple) => {
+    rippleDisplacement(su, sv, ripple, params, out);
+    return [out[0], out[1]];
+  };
+  const ripple = (over: Partial<Ripple> = {}): Ripple => ({ x: 0.5, y: 0.5, age: 0.3, strength: 1, ...over });
+  const magnitude = (su: number, sv: number, r: Ripple) => {
+    const [u, v] = at(su, sv, r);
+    return Math.hypot(u, v);
+  };
+
+  it('pushes radially outward from its centre', () => {
+    // Right of centre pushes right, below pushes down.
+    const r = ripple({ age: 0.3 });
+    const right = at(0.5 + 0.7 * params.rippleSpeed * 0.3, 0.5, r);
+    expect(right[0]).toBeGreaterThan(0);
+
+    const below = at(0.5, 0.5 + params.rippleSpeed * 0.3, r);
+    expect(below[1]).toBeGreaterThan(0);
+
+    const left = at(0.5 - params.rippleSpeed * 0.3, 0.5, r);
+    expect(left[0]).toBeLessThan(0);
+  });
+
+  it('is zero at the exact centre, where there is no outward direction', () => {
+    expect(at(0.5, 0.5, ripple())).toEqual([0, 0]);
+  });
+
+  it('travels: the ring sits further out as it ages', () => {
+    // Where the push is strongest should move outward with age.
+    const peakDistance = (age: number) => {
+      let best = 0;
+      let bestAt = 0;
+      for (let d = 0.005; d < 1.2; d += 0.005) {
+        const m = magnitude(0.5 + d, 0.5, ripple({ age }));
+        if (m > best) {
+          best = m;
+          bestAt = d;
+        }
+      }
+      return bestAt;
+    };
+    expect(peakDistance(0.8)).toBeGreaterThan(peakDistance(0.2));
+  });
+
+  it('is a band rather than a whole heaving disc', () => {
+    // Well inside the ring is quiet; at the ring it is not.
+    const age = 0.9;
+    const radius = age * params.rippleSpeed;
+    const onRing = magnitude(0.5 + radius, 0.5, ripple({ age }));
+    const inside = magnitude(0.5 + radius * 0.2, 0.5, ripple({ age }));
+    expect(onRing).toBeGreaterThan(inside * 5);
+  });
+
+  it('fades to nothing by its lifetime and stays there', () => {
+    const spot = 0.5 + params.rippleSpeed * 0.5;
+    const early = magnitude(spot, 0.5, ripple({ age: 0.1 }));
+    expect(early).toBeGreaterThan(0);
+
+    for (const age of [params.rippleLifetime, params.rippleLifetime + 1, 99]) {
+      expect(at(spot, 0.5, ripple({ age }))).toEqual([0, 0]);
+    }
+  });
+
+  it('weakens as it ages, at a matched distance', () => {
+    const onItsOwnRing = (age: number) => magnitude(0.5 + age * params.rippleSpeed, 0.5, ripple({ age }));
+    expect(onItsOwnRing(1.4)).toBeLessThan(onItsOwnRing(0.2));
+  });
+
+  it('ignores a negative age, so a ripple can be scheduled', () => {
+    expect(at(0.7, 0.5, ripple({ age: -0.5 }))).toEqual([0, 0]);
+  });
+
+  it('scales with strength', () => {
+    const spot = 0.5 + params.rippleSpeed * 0.3;
+    const weak = magnitude(spot, 0.5, ripple({ strength: 0.3 }));
+    const strong = magnitude(spot, 0.5, ripple({ strength: 1 }));
+    expect(strong).toBeGreaterThan(weak);
+    expect(strong / weak).toBeCloseTo(1 / 0.3, 3);
+  });
+
+  it('makes a circular ring, not an ellipse on a wide window', () => {
+    // Distances are aspect-corrected. Equal *screen* distances away from the
+    // centre should feel the same push, which means the horizontal offset has to
+    // be smaller by the aspect ratio.
+    const aspect = 4 / 3;
+    const r = ripple({ age: 0.5 });
+    const radius = 0.5 * params.rippleSpeed;
+    const across = magnitude(0.5 + radius / aspect, 0.5, r);
+    const down = magnitude(0.5, 0.5 + radius, r);
+    expect(across).toBeCloseTo(down, 4);
+  });
+
+  describe('through the grid', () => {
+    it('changes nothing when there are none', () => {
+      const state = seeded();
+      const a = grid();
+      const b = grid();
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, a);
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, b, []);
+      expect(Array.from(a)).toEqual(Array.from(b));
+    });
+
+    it('displaces the grid when there is one', () => {
+      const state = seeded();
+      const plain = grid();
+      const rippled = grid();
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, plain);
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, rippled, [ripple({ age: 0.4 })]);
+      expect(Array.from(rippled)).not.toEqual(Array.from(plain));
+    });
+
+    it('stays put while the field drifts under it', () => {
+      // Anchored in screen space, not the warp's drifting domain. Two very
+      // different animation times must displace the same grid cells.
+      const state = seeded();
+      const displaced = (animTime: number) => {
+        const plain = grid();
+        const rippled = grid();
+        fillDisplacementGrid(animTime, PLASMA_WARP_DEFAULTS, state, plain);
+        fillDisplacementGrid(animTime, PLASMA_WARP_DEFAULTS, state, rippled, [ripple({ age: 0.5 })]);
+        const moved: number[] = [];
+        for (let k = 0; k < plain.length; k++) if (Math.abs(plain[k] - rippled[k]) > 1e-6) moved.push(k);
+        return moved.join(',');
+      };
+      expect(displaced(0)).toBe(displaced(140));
+    });
+
+    it('adds several ripples together', () => {
+      const state = seeded();
+      const one = grid();
+      const two = grid();
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, one, [ripple({ x: 0.3, age: 0.4 })]);
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, two, [
+        ripple({ x: 0.3, age: 0.4 }),
+        ripple({ x: 0.8, y: 0.2, age: 0.4 }),
+      ]);
+      expect(Array.from(two)).not.toEqual(Array.from(one));
+    });
   });
 });

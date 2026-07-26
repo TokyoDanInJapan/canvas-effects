@@ -24,6 +24,7 @@ import {
   sampleDisplacementGrid,
   samplePlasma,
   type PlasmaWarpConfig,
+  type Ripple,
 } from './plasma-warp';
 
 export interface PlasmaBackgroundOptions {
@@ -55,6 +56,17 @@ export interface PlasmaBackgroundOptions {
   shading: Shading | (() => Shading);
   /** Warp parameters. Anything omitted falls back to `PLASMA_WARP_DEFAULTS`. */
   warp: Partial<PlasmaWarpConfig>;
+  /**
+   * Let a click send a ripple out from where it landed.
+   *
+   * Listened for on the window rather than the canvas, for the same reason the
+   * smoke's stirring is: a background canvas is `pointer-events: none` so it
+   * never intercepts anything meant for the page, which also means it never sees
+   * a pointer itself.
+   */
+  interactive: boolean;
+  /** Most ripples alive at once. A spare click is dropped rather than queued. */
+  maxRipples: number;
   /** Draw one frame and stop when the visitor has asked for less motion. */
   respectReducedMotion: boolean;
   /** Stop the loop while the tab is hidden. */
@@ -89,6 +101,8 @@ export const PLASMA_BACKGROUND_DEFAULTS: PlasmaBackgroundOptions = {
   tileSize: 128,
   shading: defaultShading,
   warp: {},
+  interactive: true,
+  maxRipples: 5,
   respectReducedMotion: true,
   pauseWhenHidden: true,
   watchThemeClass: true,
@@ -129,6 +143,9 @@ export function createPlasmaBackground(
     dither: config.dither,
   });
 
+  // Live click ripples. Aged in real seconds, not animation time - see `Ripple`.
+  const ripples: Ripple[] = [];
+
   // The low-resolution field, and the previous frame of it for the blur.
   let field = new Float32Array(0);
   let previous = new Float32Array(0);
@@ -146,7 +163,7 @@ export function createPlasmaBackground(
 
   /** The expensive half: warp and sample the plasma, coarsely. */
   function updateField(animTime: number) {
-    fillDisplacementGrid(animTime, params, state, grid);
+    fillDisplacementGrid(animTime, params, state, grid, ripples);
 
     const { fieldW, fieldH } = surface;
     const sx = fieldW > 1 ? 1 / (fieldW - 1) : 0;
@@ -183,10 +200,20 @@ export function createPlasmaBackground(
     fps: config.fps,
     onFrame() {
       const now = performance.now();
+      // Clamped, so a backgrounded tab does not lurch on return.
+      const dt = lastNow ? Math.min(now - lastNow, 100) * 0.001 : 0;
       // Accumulated rather than read off the clock, so pausing resumes where it
-      // stopped. Clamped, so a backgrounded tab does not lurch on return.
-      if (lastNow) elapsed += Math.min(now - lastNow, 100) * 0.001 * config.speed;
+      // stopped.
+      elapsed += dt * config.speed;
       lastNow = now;
+
+      // Real seconds, deliberately unscaled by `speed`: a splash should not
+      // slow down because the field it is disturbing is drifting slowly.
+      for (let i = ripples.length - 1; i >= 0; i--) {
+        ripples[i].age += dt;
+        if (ripples[i].age >= params.rippleLifetime) ripples.splice(i, 1);
+      }
+
       draw(elapsed);
     },
     onResize() {
@@ -203,6 +230,28 @@ export function createPlasmaBackground(
     watchThemeClass: config.watchThemeClass,
     watchColorScheme: config.watchColorScheme,
   });
+
+  /** A click starts a ripple where it landed. */
+  function onPointerDown(event: PointerEvent) {
+    if (still) return;
+    // Full rather than queued: a burst of clicks should not produce a backlog
+    // that keeps rippling long after the reader has stopped.
+    if (ripples.length >= config.maxRipples) return;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    ripples.push({
+      x: (event.clientX - rect.left) / rect.width,
+      y: (event.clientY - rect.top) / rect.height,
+      age: 0,
+      strength: 1,
+    });
+  }
+
+  if (config.interactive && !still) {
+    window.addEventListener('pointerdown', onPointerDown, { passive: true });
+  }
 
   readShading();
   surface.resize();
@@ -230,6 +279,8 @@ export function createPlasmaBackground(
     },
     destroy() {
       driver.destroy();
+      window.removeEventListener('pointerdown', onPointerDown);
+      ripples.length = 0;
     },
   };
 }

@@ -259,6 +259,17 @@ const PLASMA_DIALS: Dial[] = [
   { key: 'warp2', label: 'warp2', min: 0, max: 3, step: 0.05, value: 0.85, note: 'the marbling' },
   { key: 'spread', label: 'spread', min: 0, max: 2, step: 0.02, value: 0.34 },
   { key: 'octaves', label: 'octaves', min: 1, max: 6, step: 1, value: 3 },
+  {
+    key: 'rippleStrength',
+    label: 'rippleStrength',
+    min: 0,
+    max: 0.3,
+    step: 0.01,
+    value: 0.09,
+    note: 'click to ripple',
+  },
+  { key: 'rippleSpeed', label: 'rippleSpeed', min: 0.1, max: 2, step: 0.05, value: 0.7 },
+  { key: 'rippleLifetime', label: 'rippleLifetime', min: 0.3, max: 5, step: 0.1, value: 1.6 },
 ];
 
 const RAIN_DIALS: Dial[] = [
@@ -587,6 +598,9 @@ function mount() {
           speed: values.speed,
           blend: values.blend,
           warp: {
+            rippleStrength: values.rippleStrength,
+            rippleSpeed: values.rippleSpeed,
+            rippleLifetime: values.rippleLifetime,
             frequency: values.frequency,
             warp1: values.warp1,
             warp2: values.warp2,

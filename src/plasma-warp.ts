@@ -69,6 +69,15 @@ export interface PlasmaWarpConfig {
   octaves: number;
   /** How much of the unwarped position survives, spreading the tile out. */
   spread: number;
+
+  /** How fast a click ripple's ring expands, in screen heights per second. */
+  rippleSpeed: number;
+  /** Thickness of that ring, in screen heights. */
+  rippleWidth: number;
+  /** Seconds a ripple lasts before it is gone. */
+  rippleLifetime: number;
+  /** Peak displacement a ripple applies, in tile units. */
+  rippleStrength: number;
 }
 
 export const PLASMA_WARP_DEFAULTS: PlasmaWarpConfig = {
@@ -77,6 +86,12 @@ export const PLASMA_WARP_DEFAULTS: PlasmaWarpConfig = {
   warp2: 0.85,
   octaves: 3,
   spread: 0.34,
+  // A ring crossing the screen in about a second and a half, which reads as a
+  // disturbance travelling rather than as a flash.
+  rippleSpeed: 0.7,
+  rippleWidth: 0.16,
+  rippleLifetime: 1.6,
+  rippleStrength: 0.09,
 };
 
 /** The seeds and offsets that give one run of the warp its character. */
@@ -115,6 +130,68 @@ export function randomizePlasmaWarp(rand: () => number = Math.random): PlasmaWar
 }
 
 /**
+ * A click disturbance: an expanding ring that fades.
+ *
+ * Its `age` is in real seconds, kept by the caller, deliberately not the warp's
+ * own animation time. Animation time is scaled by the plasma's `speed`, so
+ * ageing a ripple on it would make a ripple last four times as long at quarter
+ * speed - the disturbance would slow down along with the field it is disturbing,
+ * which is not how a splash behaves.
+ */
+export interface Ripple {
+  /** Centre, in normalised screen coordinates: 0..1 across and down. */
+  x: number;
+  y: number;
+  /** Seconds since the click. */
+  age: number;
+  /** Multiplier on `rippleStrength`. */
+  strength: number;
+}
+
+/**
+ * Radial displacement one ripple applies at a normalised screen position,
+ * written into `out` as `[du, dv]`.
+ *
+ * Anchored in *screen* space rather than the warp's domain, which drifts. A
+ * ripple placed in domain coordinates would slide across the page along with the
+ * field, so it would not stay where it was clicked.
+ *
+ * The ring is a Gaussian band about the expanding radius, so the disturbance
+ * travels outward instead of the whole disc heaving at once. Distances are
+ * aspect-corrected, or the ring would be an ellipse on a wide window.
+ */
+export function rippleDisplacement(
+  su: number,
+  sv: number,
+  ripple: Ripple,
+  params: PlasmaWarpConfig,
+  out: Float32Array
+): void {
+  out[0] = 0;
+  out[1] = 0;
+
+  const life = params.rippleLifetime;
+  if (ripple.age < 0 || ripple.age >= life) return;
+
+  const dx = (su - ripple.x) * DOMAIN_ASPECT;
+  const dy = sv - ripple.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  // Dead centre has no outward direction to push along.
+  if (distance < 1e-6) return;
+
+  const radius = ripple.age * params.rippleSpeed;
+  const offset = (distance - radius) / params.rippleWidth;
+  const band = Math.exp(-offset * offset);
+
+  // Squared, so a ripple thins out rather than stopping abruptly.
+  const fade = 1 - ripple.age / life;
+  const push = params.rippleStrength * ripple.strength * band * fade * fade;
+
+  out[0] = (dx / distance) * push;
+  out[1] = (dy / distance) * push;
+}
+
+/**
  * Fills the warp grid for one frame: `WARP_GRID_X * WARP_GRID_Y * 2` floats, row-major,
  * packed `[u0, v0, u1, v1, ...]`, in source-texture space.
  *
@@ -133,11 +210,13 @@ export function fillDisplacementGrid(
   animTime: number,
   params: PlasmaWarpConfig,
   state: PlasmaWarpSeed,
-  gridOut: Float32Array
+  gridOut: Float32Array,
+  ripples: readonly Ripple[] = []
 ): void {
   const { frequency, warp1, warp2, octaves, spread } = params;
   const { seeds, offsets, drift, churn } = state;
 
+  const ripple = new Float32Array(2);
   const driftX = drift[0] * animTime;
   const driftY = drift[1] * animTime;
   const churnA = churn * animTime;
@@ -146,10 +225,12 @@ export function fillDisplacementGrid(
   // y spans one unit and x spans `DOMAIN_ASPECT` of them - which is why the
   // grid is 36 x 28 rather than square. See the note on `WARP_GRID_X`.
   for (let j = 0; j < WARP_GRID_Y; j++) {
-    const py = (j / (WARP_GRID_Y - 1) - 0.5) * frequency + driftY;
+    const sv = WARP_GRID_Y > 1 ? j / (WARP_GRID_Y - 1) : 0.5;
+    const py = (sv - 0.5) * frequency + driftY;
 
     for (let i = 0; i < WARP_GRID_X; i++) {
-      const px = (i / (WARP_GRID_X - 1) - 0.5) * DOMAIN_ASPECT * frequency + driftX;
+      const su = WARP_GRID_X > 1 ? i / (WARP_GRID_X - 1) : 0.5;
+      const px = (su - 0.5) * DOMAIN_ASPECT * frequency + driftX;
 
       // First fold: where does this point get pushed to?
       const qx = fbm(px + offsets[0], py + offsets[1], seeds[0], octaves) - 0.5;
@@ -165,6 +246,14 @@ export function fillDisplacementGrid(
       const idx = (j * WARP_GRID_X + i) * 2;
       gridOut[idx] = px * spread + warp2 * rx + 0.5;
       gridOut[idx + 1] = py * spread + warp2 * ry + 0.5;
+
+      // Applied to the finished coordinate, in screen space, so a ripple stays
+      // where it was clicked while the field drifts underneath it.
+      for (let k = 0; k < ripples.length; k++) {
+        rippleDisplacement(su, sv, ripples[k], params, ripple);
+        gridOut[idx] += ripple[0];
+        gridOut[idx + 1] += ripple[1];
+      }
     }
   }
 }
