@@ -78,7 +78,17 @@ export function fbm(x: number, y: number, seed: number, octaves: number): number
   return total > 0 ? sum / total : 0;
 }
 
-/** A small, fast, seeded generator - so a background can be reproducible. */
+/**
+ * A small, fast, seeded generator - so a background can be reproducible.
+ *
+ * Scaled by 2^32 rather than reduced modulo 100,000, which is what this used to
+ * do. The modulo threw away all but five digits of the state, so it drew from
+ * 100,000 values rather than four billion, and unevenly at that: 2^32 is not a
+ * multiple of 100,000, so the low buckets came up slightly more often than the
+ * high ones. Nothing here was visibly wrong because of it - a background rolls a
+ * few dozen numbers - but a generator whose whole point is reproducible
+ * randomness should not quietly be biased.
+ */
 export function makeRandom(seed: number): () => number {
   let state = seed >>> 0 || 1;
   return () => {
@@ -86,6 +96,6 @@ export function makeRandom(seed: number): () => number {
     state ^= state << 13;
     state ^= state >>> 17;
     state ^= state << 5;
-    return ((state >>> 0) % 100000) / 100000;
+    return (state >>> 0) / 4294967296;
   };
 }

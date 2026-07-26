@@ -23,6 +23,24 @@ describe('makeRandom', () => {
     const seen = new Set(Array.from({ length: 200 }, () => rand()));
     expect(seen.size).toBeGreaterThan(100);
   });
+
+  it('draws from the whole 32-bit state, not a truncation of it', () => {
+    // It used to reduce modulo 100,000, which left 2,000 draws colliding a couple
+    // of dozen times by the birthday bound. Scaled by 2^32 they are all distinct.
+    const rand = makeRandom(4242);
+    const seen = new Set(Array.from({ length: 2000 }, () => rand()));
+    expect(seen.size).toBe(2000);
+  });
+
+  it('is not biased towards the low end', () => {
+    // The old modulo made the low buckets slightly likelier, because 2^32 is not
+    // a multiple of 100,000. Halves either side of 0.5 should be even.
+    const rand = makeRandom(31337);
+    let low = 0;
+    const draws = 20_000;
+    for (let i = 0; i < draws; i++) if (rand() < 0.5) low++;
+    expect(low / draws).toBeCloseTo(0.5, 1);
+  });
 });
 
 describe('hash2', () => {
