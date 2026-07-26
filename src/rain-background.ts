@@ -9,6 +9,7 @@
 // once up front and then leaving it alone.
 
 import { createDriver, prefersReducedMotion } from './driver';
+import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
 import { RAIN_DEFAULTS, createRain, stepRain, type Rain, type RainParams } from './rain';
 
@@ -102,8 +103,8 @@ export function createRainBackground(
   canvas: HTMLCanvasElement,
   options: Partial<RainBackgroundOptions> = {}
 ): BackgroundHandle | null {
-  const config: RainBackgroundOptions = { ...RAIN_BACKGROUND_DEFAULTS, ...options };
-  const params: RainParams = { ...RAIN_DEFAULTS, ...config.rain };
+  const config: RainBackgroundOptions = withDefaults(RAIN_BACKGROUND_DEFAULTS, options);
+  const params: RainParams = withDefaults(RAIN_DEFAULTS, config.rain);
 
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return null;

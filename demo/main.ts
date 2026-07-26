@@ -6,9 +6,12 @@ import {
   PLASMA_BACKGROUND_DEFAULTS,
   RAIN_BACKGROUND_DEFAULTS,
   RAIN_DEFAULTS,
+  RIDGE_DEFAULTS,
+  RIDGES_BACKGROUND_DEFAULTS,
   SMOKE_BACKGROUND_DEFAULTS,
   createPlasmaBackground,
   createRainBackground,
+  createRidgesBackground,
   createSmokeBackground,
   type BackgroundHandle,
   type Shading,
@@ -50,7 +53,7 @@ const panel = document.getElementById('panel') as HTMLElement;
 const themeButton = document.getElementById('theme') as HTMLButtonElement;
 const fpsOut = document.getElementById('fps') as HTMLSpanElement;
 
-type Effect = 'smoke' | 'plasma' | 'rain';
+type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges';
 
 interface Dial {
   key: string;
@@ -142,6 +145,58 @@ const RAIN_DIALS: Dial[] = [
   { key: 'minBrightness', label: 'minBrightness', min: 0.1, max: 1, step: 0.05, value: RAIN_DEFAULTS.minBrightness },
 ];
 
+const RIDGE_DIALS: Dial[] = [
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 46, note: 'the readability dial' },
+  { key: 'green', label: 'green tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
+  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.levels },
+  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 12, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.fps },
+  { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: RIDGES_BACKGROUND_DEFAULTS.gamma },
+  { key: 'rows', label: 'rows', min: 8, max: 90, step: 1, value: RIDGE_DEFAULTS.rows },
+  { key: 'speed', label: 'speed', min: 0.1, max: 8, step: 0.1, value: RIDGE_DEFAULTS.speed, note: 'rows per second' },
+  { key: 'ridgeAmp', label: 'peak height', min: 0.02, max: 0.7, step: 0.01, value: RIDGE_DEFAULTS.amplitude },
+  {
+    key: 'focus',
+    label: 'focus',
+    min: 0.06,
+    max: 2,
+    step: 0.02,
+    value: RIDGE_DEFAULTS.focus,
+    note: 'central band width',
+  },
+  { key: 'sharpness', label: 'sharpness', min: 0.6, max: 6, step: 0.1, value: RIDGE_DEFAULTS.sharpness },
+  { key: 'xScale', label: 'xScale', min: 0.5, max: 10, step: 0.1, value: RIDGE_DEFAULTS.xScale },
+  {
+    key: 'zScale',
+    label: 'zScale',
+    min: 0.05,
+    max: 1.5,
+    step: 0.01,
+    value: RIDGE_DEFAULTS.zScale,
+    note: 'row to row change',
+  },
+  {
+    key: 'perspective',
+    label: 'perspective',
+    min: 1,
+    max: 3.5,
+    step: 0.05,
+    value: RIDGE_DEFAULTS.perspective,
+    note: '1 = flat stack',
+  },
+  { key: 'ampFalloff', label: 'ampFalloff', min: 0, max: 4, step: 0.1, value: RIDGE_DEFAULTS.ampFalloff },
+  {
+    key: 'depthFade',
+    label: 'depthFade',
+    min: 0.05,
+    max: 1,
+    step: 0.05,
+    value: RIDGE_DEFAULTS.depthFade,
+    note: 'distance haze',
+  },
+  { key: 'octaves', label: 'octaves', min: 1, max: 6, step: 1, value: RIDGE_DEFAULTS.octaves },
+];
+
 let effect: Effect = 'smoke';
 let values: Record<string, number> = {};
 let handle: BackgroundHandle | null = null;
@@ -165,6 +220,27 @@ function mount() {
     fps: Math.round(values.fps),
     random,
   };
+
+  if (effect === 'ridges') {
+    handle = createRidgesBackground(canvas, {
+      ...common,
+      ridges: {
+        rows: Math.round(values.rows),
+        speed: values.speed,
+        amplitude: values.ridgeAmp,
+        focus: values.focus,
+        sharpness: values.sharpness,
+        xScale: values.xScale,
+        zScale: values.zScale,
+        perspective: values.perspective,
+        ampFalloff: values.ampFalloff,
+        depthFade: values.depthFade,
+        octaves: Math.round(values.octaves),
+      },
+    });
+    if (!handle) fpsOut.textContent = 'no 2D context';
+    return;
+  }
 
   if (effect === 'rain') {
     handle = createRainBackground(canvas, {
@@ -218,7 +294,14 @@ function mount() {
 }
 
 function buildDials() {
-  const list = effect === 'smoke' ? SMOKE_DIALS : effect === 'plasma' ? PLASMA_DIALS : RAIN_DIALS;
+  const list =
+    effect === 'smoke'
+      ? SMOKE_DIALS
+      : effect === 'plasma'
+        ? PLASMA_DIALS
+        : effect === 'rain'
+          ? RAIN_DIALS
+          : RIDGE_DIALS;
   values = Object.fromEntries(list.map((d) => [d.key, d.value]));
   dials.replaceChildren();
 

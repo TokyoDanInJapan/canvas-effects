@@ -1,6 +1,6 @@
 # canvas-effects
 
-Three animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
+Four animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
 they modulate the page colour rather than becoming a picture, and they are quiet enough that a reader should not
 consciously notice them.
 
@@ -25,6 +25,13 @@ drawn the moments before it.
 whole field decaying behind it. Greyscale by default like its siblings, with an optional tint if you want the green.
 Note what it is not — these are streaks of falling light, **not glyphs**. See [Why no characters](#why-no-characters).
 
+![The ridges background behind a page of text](docs/ridges.png)
+
+**Ridges** is a landscape flown over as a stack of horizontal profiles, each hiding the ones behind it. The look is the
+ridgeline plot made famous by the cover of Joy Division's _Unknown Pleasures_ — Peter Saville's design of a figure from
+Harold Craft's 1970 thesis plotting radio pulses from the pulsar CP 1919. That is the visual reference; the plot type
+itself is an ordinary statistical graphic and nothing here derives from the cover or the data.
+
 ---
 
 ## Contents
@@ -36,6 +43,7 @@ Note what it is not — these are streaks of falling light, **not glyphs**. See 
   - [Smoke: a fluid solver](#smoke-a-fluid-solver)
   - [Plasma: a domain warp](#plasma-a-domain-warp)
   - [Rain: falling lanes](#rain-falling-lanes)
+  - [Ridges: a landscape flown over](#ridges-a-landscape-flown-over)
 - [Using it](#using-it)
   - [Shading and themes](#shading-and-themes)
   - [The handle](#the-handle)
@@ -272,6 +280,39 @@ to five greys through a 4×4 Bayer matrix on a 6px cell — at that size a chara
 as noise. Streaks survive the palette; letterforms do not. Glyphs would need their own renderer and would not share the
 dither at all, which is a different library rather than a fourth effect in this one.
 
+### Ridges: a landscape flown over
+
+`src/ridges.ts`. Rows of a 2D terrain drawn as stacked 1D curves, with the near rows hiding the far ones.
+
+**Hidden lines are the effect.** Without occlusion this is a tangle of overlapping squiggles. With it you get depth,
+and the characteristic bitten-out look where a near crest eats into the rows above. It is done with a floating horizon:
+draw from nearest to farthest, keep the highest point covered so far per column, and skip anything at or below it. One
+pass, no z-buffer, no sorting — `rows × width` work for a whole frame.
+
+**Rows are indexed by travel, not by screen position.** A profile is tied to a whole number of `travel`, so it keeps
+its own shape for its whole life and simply slides down as you fly past it; a new one enters at the top each time
+`travel` crosses an integer. Tying profiles to screen slots instead makes the terrain churn in place without ever
+arriving, which looks like morphing rather than flight.
+
+The terrain is _ridged_ noise — `1 - |2n - 1|` folds fbm about its midpoint and turns smooth hills into sharp crests.
+Plain fbm gives rolling dunes, which read as a landscape rather than as a signal. A Gaussian window (`focus`)
+concentrates the activity into a central band and lets the edges lie flat, which is the signature of the reference.
+
+#### Why line art survives the dither
+
+Posterising to five greys through a Bayer matrix would normally shred one-cell-wide lines into dashes. It does not
+here, because **0 and 1 are fixed points of the ordered dither** — a cell at full brightness lands on the top level for
+every Bayer position, so a line drawn at 1 comes through intact.
+
+Values _between_ palette levels are the ones that break up, and that is put to work: distant rows are drawn dimmer via
+`depthFade`, land off-level, and dither into haze. Atmospheric perspective for free, from the thing that would
+otherwise be a problem.
+
+Two consequences worth knowing. `fieldScale` is 1, for the same reason as the rain — interpolating between cells smears
+line art. And `pixelSize` defaults to **4** rather than 6: a line is one cell wide, and at 6 the lines are thick
+relative to the gaps between rows, so the stack reads as static rather than as a plot. Four still clears the pixel
+ceiling at 1080p (480 × 270 = 129,600 against a 160,000 cap).
+
 ---
 
 ## Using it
@@ -382,8 +423,33 @@ And the `rain` sub-options, all documented inline on `RainParams`:
 | `boldChance` / `boldFactor` | `0.12` / `1.9` | Chance of a much faster, brighter drop, and how much faster.           |
 | `minBrightness`             | `0.45`         | Dimmest a head can be.                                                 |
 
+Ridges only:
+
+| Option          | Default  | Does                                                                          |
+| --------------- | -------- | ----------------------------------------------------------------------------- |
+| `pixelSize`     | `4`      | Finer than the others — a line is one cell wide and 6 reads as static.        |
+| `fieldScale`    | `1`      | **Leave at 1.** Interpolating between cells smears line art.                  |
+| `maxFieldCells` | `160000` | Matched to `maxPixels`, so the field is never capped into being interpolated. |
+| `gamma`         | `1`      | No dark bias; the field is already mostly empty.                              |
+| `ridges`        | `{}`     | Landscape parameters, merged over `RIDGE_DEFAULTS`.                           |
+
+And the `ridges` sub-options, all documented inline on `RidgeParams`:
+
+| Parameter                    | Default         | Does                                                                                                            |
+| ---------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
+| `rows`                       | `34`            | Profiles on screen. Too many and they merge into static.                                                        |
+| `speed`                      | `1.6`           | Rows crossed per second — the flying speed.                                                                     |
+| `amplitude` / `ampFalloff`   | `0.18` / `1.5`  | Peak height of the nearest row, and how fast peaks shrink with distance.                                        |
+| `focus`                      | `0.2`           | Width of the central band. The signature of the look.                                                           |
+| `sharpness`                  | `3.2`           | Exponent on the ridged noise — higher is spikier, flatter between.                                              |
+| `xScale` / `zScale`          | `3.1` / `0.32`  | Terrain frequency across and into the screen. Keep `zScale` small or consecutive rows stop being one landscape. |
+| `perspective`                | `1.35`          | 1 is an even stack (the flat plot); above 1 crowds the far rows.                                                |
+| `depthFade`                  | `0.45`          | Brightness of the farthest row. Below 1 it dithers into haze.                                                   |
+| `topMargin` / `bottomMargin` | `0.12` / `0.94` | Where the farthest and nearest rows sit.                                                                        |
+
 The full parameter sets are documented inline where they are declared - `SmokeParams` in `src/smoke.ts`,
-`PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts` - with a note on each about what it does and
+`PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts`, `RidgeParams` in `src/ridges.ts` - with a
+note on each about what it does and
 where its default came from.
 
 ### Tuning
@@ -433,7 +499,7 @@ dozen or more times a frame — six passes plus every Jacobi iteration — where
 Left uncapped, a 1440p window would simulate five times the cells of a 1080p one and fall over on exactly the machines
 least able to take it. After that, `iterations` (the Jacobi count) is the next biggest lever.
 
-All three together are 6.1 kB minified and gzipped, with no dependencies. The package is `sideEffects: false`, so
+All four together are 6.8 kB minified and gzipped, with no dependencies. The package is `sideEffects: false`, so
 importing one of them tree-shakes the others away.
 
 ---
@@ -441,7 +507,7 @@ importing one of them tree-shakes the others away.
 ## Accessibility
 
 - The canvas is decoration. Mark it `aria-hidden="true"`.
-- With `prefers-reduced-motion: reduce` all three draw a single frame and stop. The smoke and the rain settle
+- With `prefers-reduced-motion: reduce` all four draw a single frame and stop. The smoke and the rain settle
   themselves with `settleSteps` first, so the still frame is smoke or mid-storm rain rather than an empty field. Cursor
   stirring is disabled too.
 - With JavaScript off nothing is painted at all and the page keeps its ordinary background — which is the other reason

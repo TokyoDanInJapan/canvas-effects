@@ -16,6 +16,7 @@
 //     clock; a slow frame makes the smoke drift slower, never further.
 
 import { createDriver, prefersReducedMotion } from './driver';
+import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
 import {
   SMOKE_DEFAULTS,
@@ -119,8 +120,8 @@ export function createSmokeBackground(
   canvas: HTMLCanvasElement,
   options: Partial<SmokeBackgroundOptions> = {}
 ): BackgroundHandle | null {
-  const config: SmokeBackgroundOptions = { ...SMOKE_BACKGROUND_DEFAULTS, ...options };
-  const params: SmokeParams = { ...SMOKE_DEFAULTS, ...config.simulation };
+  const config: SmokeBackgroundOptions = withDefaults(SMOKE_BACKGROUND_DEFAULTS, options);
+  const params: SmokeParams = withDefaults(SMOKE_DEFAULTS, config.simulation);
 
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return null;

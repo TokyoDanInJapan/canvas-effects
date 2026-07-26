@@ -16,6 +16,8 @@ export { createPlasmaBackground, PLASMA_BACKGROUND_DEFAULTS, type PlasmaBackgrou
 
 export { createRainBackground, RAIN_BACKGROUND_DEFAULTS, type RainBackgroundOptions } from './rain-background';
 
+export { createRidgesBackground, RIDGES_BACKGROUND_DEFAULTS, type RidgesBackgroundOptions } from './ridges-background';
+
 export {
   createSurface,
   planSurface,
@@ -39,6 +41,24 @@ export {
   type RainLane,
   type RainParams,
 } from './rain';
+
+// The ridgeline landscape.
+export {
+  RIDGE_DEFAULTS,
+  createRidges,
+  randomizeRidges,
+  renderRidges,
+  ridgeHeight,
+  rowAmplitude,
+  rowBrightness,
+  rowY,
+  stepRidges,
+  type RidgeParams,
+  type RidgeState,
+  type Ridges,
+} from './ridges';
+
+export { withDefaults } from './options';
 
 export { BAYER_4X4, darken, orderedDither, quantise } from './dither';
 

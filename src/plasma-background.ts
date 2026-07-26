@@ -11,6 +11,7 @@
 // palette levels rather than flicking between them.
 
 import { createDriver, prefersReducedMotion } from './driver';
+import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
 import { darken } from './dither';
 import {
@@ -104,8 +105,8 @@ export function createPlasmaBackground(
   canvas: HTMLCanvasElement,
   options: Partial<PlasmaBackgroundOptions> = {}
 ): BackgroundHandle | null {
-  const config: PlasmaBackgroundOptions = { ...PLASMA_BACKGROUND_DEFAULTS, ...options };
-  const params: PlasmaWarpConfig = { ...PLASMA_WARP_DEFAULTS, ...config.warp };
+  const config: PlasmaBackgroundOptions = withDefaults(PLASMA_BACKGROUND_DEFAULTS, options);
+  const params: PlasmaWarpConfig = withDefaults(PLASMA_WARP_DEFAULTS, config.warp);
 
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return null;
