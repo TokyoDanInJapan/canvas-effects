@@ -311,6 +311,23 @@ everywhere, and the streaks stay sharp. `maxFieldCells` is matched to `maxPixels
 field would silently reintroduce the interpolation the scale of one exists to avoid. Raising `fieldScale` is the single
 biggest thing you can do to make this look wrong.
 
+#### Click to distort
+
+A click sends an expanding ring through the rain that _displaces what is already there_ rather than adding light of its
+own — a droplet on glass acting as a lens, bending the streaks as it passes. `distortField` returns the plain field
+untouched when nothing is running, so an idle page pays nothing, not even a copy, and only the cells a ring can reach
+are recomputed.
+
+Sampling wraps sideways and clamps vertically. Wrapping in x matches the lanes, so a ring near an edge pulls streaks
+round from the far side; clamping in y is right for exactly the reason it would be wrong in the smoke — rain has a top it
+falls from and a bottom it retires at, and wrapping would drag the bottom of the screen back up into the top.
+
+**It is subtler than the plasma's ripple, and structurally so.** The plasma is a dense continuous field, so a
+displacement always has something to move. The rain is about 13% covered, so a ring frequently passes through empty space
+with nothing to bend. Measured, a ring mid-flight nearly doubles how much of the screen changes frame to frame — 2191
+pixels against 1169 idle — and it reads better in motion than in a still, where the eye follows the moving
+discontinuity. `distortStrength` is the dial if you want more of it.
+
 #### Why no characters
 
 This is the falling-light half of the Matrix look, not the glyphs. The renderer takes a scalar field and posterises it
