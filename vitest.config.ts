@@ -18,23 +18,27 @@ export default defineConfig({
       // Naming the source set means these numbers describe the maths as a
       // whole, and a new untested module pushes them down instead of hiding.
       include: ['src/**/*.ts'],
-      // Everything excluded here needs a canvas, a window or a frame loop, and
-      // is covered by the demo page rather than by vitest. `render.ts` is on
-      // the list for its `createSurface` half; the pure `planSurface` half it
-      // also holds is tested in render.test.ts regardless of the exclusion.
-      exclude: [
-        'src/**/*.test.ts',
-        'src/index.ts',
-        'src/driver.ts',
-        'src/render.ts',
-        'src/smoke-background.ts',
-        'src/plasma-background.ts',
-        'src/rain-background.ts',
-        'src/ridges-background.ts',
-        'src/metaballs-background.ts',
-        'src/tunnel-background.ts',
-      ],
-      thresholds: { statements: 95, branches: 85, functions: 95, lines: 95 },
+      // `driver.ts` and `render.ts` used to be on this list, on the grounds that
+      // they need a canvas and a frame loop. They are here now with the DOM
+      // stubbed, and finding three bugs in them the moment they were tested is
+      // the argument against ever excluding a file for being awkward: the
+      // untested half is where the bugs were, which is not a coincidence.
+      //
+      // Nothing is excluded now but the tests themselves and `index.ts`, which is
+      // re-exports only. The six mounts are covered by backgrounds.test.ts, which
+      // mounts each of them against a stubbed canvas and reads the bytes back.
+      exclude: ['src/**/*.test.ts', 'src/index.ts'],
+      // Re-baselined once the driver, the renderer and the six mounts came under
+      // test, with a point or two of headroom rather than pinned to the current
+      // numbers: a threshold that fails on an unrelated refactor teaches people
+      // to lower it.
+      //
+      // Branches sit lower than the rest and are meant to. What is left uncovered
+      // is almost entirely the `?? null` and `if (!field) return` guards in the
+      // mount specs, which hold against a state that cannot arise while the
+      // harness is calling them in order. Testing them would mean constructing
+      // that impossible state, which tests the test rather than the library.
+      thresholds: { statements: 99, branches: 93, functions: 100, lines: 99 },
     },
   },
 });

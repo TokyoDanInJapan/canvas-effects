@@ -26,11 +26,11 @@ import { COPY } from './copy';
 
 const canvas = document.getElementById('background') as HTMLCanvasElement;
 
-// Frames actually drawn, which is the number worth watching - both effects
-// deliberately draw well below the refresh rate.
+// Frames actually drawn, which is the number worth watching - every effect
+// deliberately draws well below the refresh rate.
 //
 // Counted by wrapping `putImageData`, which is crude but is the only paint
-// either effect makes. Done here, before anything mounts, and with the same
+// any of them makes. Done here, before anything mounts, and with the same
 // `{ alpha: false }` the library asks for: a canvas hands back the context it
 // was first given, so fetching it without that flag would quietly downgrade
 // every later caller to a transparent canvas.
@@ -704,8 +704,8 @@ function buildRampPicker() {
 }
 
 function buildDials() {
-  // A lookup rather than the ternary chain this used to be: seven effects deep
-  // it had stopped being readable, and the fall-through arm meant a new effect
+  // A lookup rather than the ternary chain this used to be: six effects deep it
+  // had stopped being readable, and the fall-through arm meant a new effect
   // silently showed the ridges' dials instead of failing to compile.
   const list = DIALS[effect];
   values = Object.fromEntries(list.map((d) => [d.key, d.value]));

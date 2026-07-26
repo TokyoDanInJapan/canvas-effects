@@ -1,4 +1,4 @@
-// The half both effects share: a coarse field interpolated up to a fat-pixel
+// The half every effect shares: a coarse field interpolated up to a fat-pixel
 // canvas and ordered-dithered on the way.
 //
 // TWO RESOLUTIONS
@@ -6,8 +6,8 @@
 // What makes these cheap is that they render at two scales at once:
 //
 //   • The **field** - the expensive part, whatever generates it - is computed
-//     at `pixelSize * fieldScale` CSS pixels per cell. Both fields here are
-//     soft and low-frequency and gain nothing from more samples, and this is
+//     at `pixelSize * fieldScale` CSS pixels per cell. The smooth fields here
+//     gain nothing from more samples, and this is
 //     where all the real work happens. It stays at a few thousand cells
 //     whatever the window is doing.
 //   • The **output** is `pixelSize` CSS pixels per pixel, interpolated up from
@@ -116,6 +116,40 @@ export function buildPalette(shading: Shading, levels: number): Uint8ClampedArra
     for (let c = 0; c < 3; c++) out[i * 3 + c] = base + level * amplitude * scale[c];
   }
   return out;
+}
+
+/**
+ * True if two shadings would paint the same picture.
+ *
+ * What it is for: a theme change hands back a shading that is usually identical
+ * to the one already in force, because most theme changes are not about the
+ * canvas. Comparing before repainting is what keeps an unrelated class change on
+ * `<html>` - which is most of them - from costing a full pass over the output.
+ *
+ * All four fields, deliberately. Comparing only `base` and `amplitude` looks
+ * sufficient and is not: a page whose light and dark themes share a page colour
+ * and differ only in `ramp` or `tint` - a dark page changing its accent, say -
+ * would return an unequal shading that compares equal, and the theme change
+ * would silently do nothing.
+ */
+export function sameShading(a: Shading, b: Shading): boolean {
+  if (a.base !== b.base || a.amplitude !== b.amplitude) return false;
+
+  if (a.tint !== b.tint) {
+    if (!a.tint || !b.tint) return false;
+    for (let c = 0; c < 3; c++) if (a.tint[c] !== b.tint[c]) return false;
+  }
+
+  // Compared by value rather than by identity, because the natural way to write
+  // a `shading` callback builds its ramp fresh on every call.
+  if (a.ramp !== b.ramp) {
+    if (!a.ramp || !b.ramp || a.ramp.length !== b.ramp.length) return false;
+    for (let i = 0; i < a.ramp.length; i++) {
+      for (let c = 0; c < 3; c++) if (a.ramp[i][c] !== b.ramp[i][c]) return false;
+    }
+  }
+
+  return true;
 }
 
 /**

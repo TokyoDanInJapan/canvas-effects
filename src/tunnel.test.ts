@@ -155,13 +155,32 @@ describe('tunnelCentre', () => {
   });
 
   it('does not fall into a short common period', () => {
+    // Two sines on independent random rates will pass near any given point now
+    // and then, so "never comes back" is not the property worth asserting - it
+    // holds or fails on the seed. What a reader would actually notice is a
+    // *beat*: the vanishing point returning to where it started on a regular
+    // interval. So collect the near-returns and check they are neither frequent
+    // nor evenly spaced.
     const first = centreAt(0);
-    let repeats = 0;
+    const returns: number[] = [];
     for (let t = 1; t < 400; t += 1) {
       const now = centreAt(t);
-      if (Math.abs(now[0] - first[0]) < 0.002 && Math.abs(now[1] - first[1]) < 0.002) repeats++;
+      if (Math.abs(now[0] - first[0]) < 0.002 && Math.abs(now[1] - first[1]) < 0.002) returns.push(t);
     }
-    expect(repeats).toBe(0);
+
+    // A genuine short period would bring it back scores of times in 400 seconds.
+    expect(returns.length).toBeLessThan(10);
+
+    const gaps = returns.slice(1).map((t, i) => t - returns[i]);
+    if (gaps.length >= 2) {
+      const spread = Math.max(...gaps) - Math.min(...gaps);
+      expect(spread).toBeGreaterThan(1);
+    }
+  });
+
+  it('drifts on two incommensurable rates', () => {
+    // The reason the above holds: the axes are not locked to one another.
+    expect(state.swayRateX).not.toBeCloseTo(state.swayRateY, 3);
   });
 });
 
