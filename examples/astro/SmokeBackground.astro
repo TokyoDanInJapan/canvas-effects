@@ -1,0 +1,69 @@
+---
+/**
+ * The smoke as an Astro component: mount it once in your layout and every page
+ * gets it.
+ *
+ * Three things here are Astro-specific and worth copying if you use it:
+ *
+ *   • `transition:persist` keeps the same canvas across a client-side
+ *     navigation, so the smoke carries on rather than restarting on every link.
+ *   • The `astro:page-load` listener re-runs the mount after a view transition,
+ *     because a fresh page may bring a fresh canvas.
+ *   • The `dataset` guard makes those two safe together: a persisted canvas
+ *     arrives already running, and mounting a second background on it would
+ *     leave two loops fighting over one context.
+ *
+ * It is decoration and treated as such: `aria-hidden`, `pointer-events: none`,
+ * behind everything at `z-index: -1`, and absent entirely without JavaScript -
+ * the page keeps its ordinary background colour and nothing shifts.
+ */
+---
+
+<canvas id="smoke" class="smoke" aria-hidden="true" transition:persist></canvas>
+
+<script>
+  import { createSmokeBackground } from 'canvas-effects';
+
+  function init() {
+    const canvas = document.getElementById('smoke') as HTMLCanvasElement | null;
+    if (!canvas) return;
+
+    // Persisted across a navigation: it is already running, so leave it be.
+    if (canvas.dataset.mounted === '1') return;
+    canvas.dataset.mounted = '1';
+
+    const handle = createSmokeBackground(canvas, {
+      shading: () => {
+        const dark = document.documentElement.classList.contains('dark');
+        // These must match your page background. The canvas is opaque, so it
+        // paints the page colour itself rather than letting CSS show through.
+        return dark ? { base: 18, amplitude: 26 } : { base: 255, amplitude: -22 };
+      },
+    });
+
+    // No 2D context: drop the element rather than leave a blank rectangle.
+    if (!handle) canvas.remove();
+  }
+
+  init();
+  document.addEventListener('astro:page-load', init);
+</script>
+
+<style>
+  .smoke {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* Behind every page's content, above the propagated page background. */
+    z-index: -1;
+    /* Never intercept anything meant for the page. Note that this is also why
+       the cursor-stirring listener lives on the window: a canvas that cannot
+       be hit by a pointer never sees one either. */
+    pointer-events: none;
+    /* The dither cells must stay crisp - smoothing them back into a gradient
+       would undo the whole point of dithering in the first place. */
+    image-rendering: pixelated;
+  }
+</style>

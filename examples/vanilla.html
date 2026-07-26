@@ -1,0 +1,57 @@
+<!doctype html>
+<!--
+  The smallest thing that works: one canvas, one script tag, no build step.
+
+  Served from a CDN here so it runs by double-clicking the file. In a real
+  project you would `npm install canvas-effects` and import from the package.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>canvas-effects — vanilla</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        /* Must match `base` in the shading below. */
+        background: #121212;
+        color: #e8e8e8;
+        font:
+          16px/1.6 system-ui,
+          sans-serif;
+      }
+      #bg {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        pointer-events: none;
+        image-rendering: pixelated;
+      }
+      main {
+        max-width: 34rem;
+        margin: 0 auto;
+        padding: 20vh 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="bg" aria-hidden="true"></canvas>
+
+    <main>
+      <h1>Smoke</h1>
+      <p>Drag with a mouse button held down to stir it.</p>
+    </main>
+
+    <script type="module">
+      import { createSmokeBackground } from 'https://esm.sh/canvas-effects';
+
+      createSmokeBackground(document.getElementById('bg'), {
+        // A fixed pair rather than a function: this page has one theme.
+        shading: { base: 18, amplitude: 26 },
+      });
+    </script>
+  </body>
+</html>

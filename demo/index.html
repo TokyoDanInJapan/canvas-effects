@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>canvas-effects</title>
+    <link rel="stylesheet" href="./demo.css" />
+  </head>
+  <body>
+    <canvas id="background" aria-hidden="true"></canvas>
+
+    <main>
+      <h1>canvas-effects</h1>
+      <p class="lede">
+        Two animated, ordered-dithered greyscale backgrounds for a 2D canvas. Both of them are behind this text right
+        now, which is the point: they modulate the page colour rather than becoming a picture, so body copy stays
+        readable on top.
+      </p>
+      <p>
+        Drag anywhere with the mouse held down to stir the smoke. Every ten seconds or so a jet fires in from one edge —
+        about half of them dark, carving a clear channel rather than painting a bright one.
+      </p>
+      <p>
+        The controls are live. <code>amplitude</code> is the readability dial; wind it up and watch this paragraph get
+        harder to read. <code>levels</code> is the palette size — drop it to two and the dither is doing all the work
+        that is left.
+      </p>
+      <p class="small">
+        Everything here is CPU-side: a 2D context, typed arrays and <code>putImageData</code>. There is no WebGL and no
+        shader. What makes it cheap is that the expensive field is computed coarse and interpolated up.
+      </p>
+    </main>
+
+    <aside id="panel">
+      <div class="row effect">
+        <button type="button" data-effect="smoke" class="active">Smoke</button>
+        <button type="button" data-effect="plasma">Plasma</button>
+      </div>
+      <div class="row">
+        <button type="button" id="theme">Light</button>
+        <button type="button" id="reseed">Reseed</button>
+      </div>
+      <div id="dials"></div>
+      <p class="fps"><span id="fps">–</span> fps drawn</p>
+    </aside>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

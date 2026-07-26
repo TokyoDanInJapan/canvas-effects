@@ -1,0 +1,49 @@
+---
+/**
+ * The plasma as an Astro component. A sibling of SmokeBackground - mount one or
+ * the other, not both: two opaque full-bleed canvases would simply stack.
+ *
+ * See SmokeBackground.astro for why `transition:persist`, the `astro:page-load`
+ * listener and the `dataset` guard are all needed together.
+ */
+---
+
+<canvas id="plasma" class="plasma" aria-hidden="true" transition:persist></canvas>
+
+<script>
+  import { createPlasmaBackground } from 'canvas-effects';
+
+  function init() {
+    const canvas = document.getElementById('plasma') as HTMLCanvasElement | null;
+    if (!canvas) return;
+
+    if (canvas.dataset.mounted === '1') return;
+    canvas.dataset.mounted = '1';
+
+    const handle = createPlasmaBackground(canvas, {
+      shading: () => {
+        const dark = document.documentElement.classList.contains('dark');
+        // These must match your page background - the canvas is opaque.
+        return dark ? { base: 18, amplitude: 24 } : { base: 255, amplitude: -20 };
+      },
+    });
+
+    if (!handle) canvas.remove();
+  }
+
+  init();
+  document.addEventListener('astro:page-load', init);
+</script>
+
+<style>
+  .plasma {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    image-rendering: pixelated;
+  }
+</style>
