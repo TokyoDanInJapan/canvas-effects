@@ -29,6 +29,7 @@ export {
 export {
   createSurface,
   planSurface,
+  buildPalette,
   defaultShading,
   type BackgroundHandle,
   type Shading,

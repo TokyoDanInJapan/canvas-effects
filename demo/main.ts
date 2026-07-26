@@ -22,6 +22,7 @@ import {
   type BackgroundHandle,
   type Shading,
 } from '../src/index';
+import { COPY } from './copy';
 
 const canvas = document.getElementById('background') as HTMLCanvasElement;
 
@@ -58,8 +59,115 @@ const dials = document.getElementById('dials') as HTMLDivElement;
 const panel = document.getElementById('panel') as HTMLElement;
 const themeButton = document.getElementById('theme') as HTMLButtonElement;
 const fpsOut = document.getElementById('fps') as HTMLSpanElement;
+const heading = document.getElementById('heading') as HTMLHeadingElement;
+const copyOut = document.getElementById('copy') as HTMLDivElement;
+const rampPick = document.getElementById('ramp') as HTMLSelectElement;
+const rampName = document.getElementById('ramp-name') as HTMLElement;
 
 type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'fire' | 'metaballs';
+
+type Stops = ReadonlyArray<readonly [number, number, number]>;
+
+/**
+ * Colour ramps. The first stop is substituted with the page colour at use time -
+ * the canvas is opaque, so the darkest level has to match what is behind it or
+ * the canvas edge shows a seam.
+ */
+const RAMPS: Array<{ id: string; name: string; dark: Stops | null; light: Stops | null }> = [
+  { id: 'grey', name: 'greyscale', dark: null, light: null },
+  {
+    id: 'fire',
+    name: 'fire',
+    dark: [
+      [18, 18, 18],
+      [92, 16, 4],
+      [190, 66, 8],
+      [244, 158, 30],
+      [255, 240, 200],
+    ],
+    light: [
+      [255, 255, 255],
+      [250, 214, 150],
+      [235, 140, 40],
+      [170, 52, 10],
+      [70, 16, 4],
+    ],
+  },
+  {
+    id: 'matrix',
+    name: 'matrix green',
+    dark: [
+      [18, 18, 18],
+      [10, 54, 22],
+      [22, 122, 46],
+      [60, 200, 88],
+      [190, 255, 200],
+    ],
+    light: [
+      [255, 255, 255],
+      [186, 232, 196],
+      [70, 168, 96],
+      [22, 96, 44],
+      [8, 40, 18],
+    ],
+  },
+  {
+    id: 'ice',
+    name: 'ice',
+    dark: [
+      [18, 18, 18],
+      [20, 46, 82],
+      [40, 110, 168],
+      [110, 190, 232],
+      [225, 246, 255],
+    ],
+    light: [
+      [255, 255, 255],
+      [198, 226, 246],
+      [96, 158, 208],
+      [34, 84, 140],
+      [12, 34, 62],
+    ],
+  },
+  {
+    id: 'amber',
+    name: 'amber terminal',
+    dark: [
+      [18, 18, 18],
+      [64, 38, 4],
+      [140, 88, 8],
+      [214, 150, 24],
+      [255, 224, 150],
+    ],
+    light: [
+      [255, 255, 255],
+      [248, 222, 168],
+      [206, 152, 32],
+      [130, 84, 10],
+      [54, 34, 4],
+    ],
+  },
+  {
+    id: 'violet',
+    name: 'violet',
+    dark: [
+      [18, 18, 18],
+      [46, 22, 74],
+      [104, 48, 152],
+      [172, 118, 214],
+      [238, 220, 252],
+    ],
+    light: [
+      [255, 255, 255],
+      [224, 206, 244],
+      [150, 100, 200],
+      [86, 42, 132],
+      [34, 16, 56],
+    ],
+  },
+];
+
+let rampId = 'grey';
 
 interface Dial {
   key: string;
@@ -80,13 +188,28 @@ function shading(): Shading {
   const dark = document.documentElement.classList.contains('dark');
   // `tint` scales the amplitude per channel. At 0 the green dial is off and
   // all three match, which is the greyscale the other effects use.
-  const g = values.green ?? 0;
-  const warm = values.warm ?? 0;
-  const tint: [number, number, number] | undefined =
-    g > 0 ? [1 - g, 1, 1 - g * 0.75] : warm > 0 ? [1, 1 - warm * 0.55, 1 - warm * 0.88] : undefined;
+  const chosen = RAMPS.find((r) => r.id === rampId);
+  const stops = dark ? chosen?.dark : chosen?.light;
+
+  if (stops) {
+    // `amplitude` still has to mean something with a ramp on, or the readability
+    // dial would go dead. It scales each stop back towards the page colour.
+    const page = stops[0];
+    const strength = Math.min(1, values.amplitude / 60);
+    const ramp = stops.map(
+      (stop) =>
+        [
+          page[0] + (stop[0] - page[0]) * strength,
+          page[1] + (stop[1] - page[1]) * strength,
+          page[2] + (stop[2] - page[2]) * strength,
+        ] as [number, number, number]
+    );
+    return { base: page[0], amplitude: 0, ramp };
+  }
+
   return dark
-    ? { base: 18, amplitude: values.amplitude, tint }
-    : { base: 255, amplitude: -Math.round(values.amplitude * 0.85), tint };
+    ? { base: 18, amplitude: values.amplitude }
+    : { base: 255, amplitude: -Math.round(values.amplitude * 0.85) };
 }
 
 const SMOKE_DIALS: Dial[] = [
@@ -99,7 +222,7 @@ const SMOKE_DIALS: Dial[] = [
     max: 12,
     step: 1,
     value: SMOKE_BACKGROUND_DEFAULTS.levels,
-    note: 'greys in the palette',
+    note: 'colours in the palette',
   },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: SMOKE_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: SMOKE_BACKGROUND_DEFAULTS.fps },
@@ -123,7 +246,7 @@ const PLASMA_DIALS: Dial[] = [
     max: 12,
     step: 1,
     value: PLASMA_BACKGROUND_DEFAULTS.levels,
-    note: 'greys in the palette',
+    note: 'colours in the palette',
   },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: PLASMA_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: PLASMA_BACKGROUND_DEFAULTS.fps },
@@ -138,7 +261,6 @@ const PLASMA_DIALS: Dial[] = [
 
 const RAIN_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 52, note: 'the readability dial' },
-  { key: 'green', label: 'green tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
   {
     key: 'levels',
     label: 'levels',
@@ -146,7 +268,7 @@ const RAIN_DIALS: Dial[] = [
     max: 12,
     step: 1,
     value: RAIN_BACKGROUND_DEFAULTS.levels,
-    note: 'greys in the palette',
+    note: 'colours in the palette',
   },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: RAIN_BACKGROUND_DEFAULTS.pixelSize },
   {
@@ -179,7 +301,6 @@ const RAIN_DIALS: Dial[] = [
 
 const RIDGE_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 46, note: 'the readability dial' },
-  { key: 'green', label: 'green tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
   {
     key: 'levels',
     label: 'levels',
@@ -187,7 +308,7 @@ const RIDGE_DIALS: Dial[] = [
     max: 12,
     step: 1,
     value: RIDGES_BACKGROUND_DEFAULTS.levels,
-    note: 'greys in the palette',
+    note: 'colours in the palette',
   },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 12, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.fps },
@@ -239,7 +360,6 @@ const RIDGE_DIALS: Dial[] = [
 
 const FIRE_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 140, step: 1, value: 60, note: 'the readability dial' },
-  { key: 'warm', label: 'warm tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
   {
     key: 'levels',
     label: 'levels',
@@ -247,7 +367,7 @@ const FIRE_DIALS: Dial[] = [
     max: 12,
     step: 1,
     value: FIRE_BACKGROUND_DEFAULTS.levels,
-    note: 'greys in the palette',
+    note: 'colours in the palette',
   },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: FIRE_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fieldScale', label: 'fieldScale', min: 1, max: 5, step: 1, value: FIRE_BACKGROUND_DEFAULTS.fieldScale },
@@ -289,7 +409,7 @@ const METABALL_DIALS: Dial[] = [
     max: 12,
     step: 1,
     value: METABALLS_BACKGROUND_DEFAULTS.levels,
-    note: 'greys in the palette',
+    note: 'colours in the palette',
   },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fieldScale', label: 'fieldScale', min: 1, max: 4, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.fieldScale },
@@ -453,6 +573,36 @@ function mount() {
   }
 }
 
+function renderCopy() {
+  const copy = COPY[effect];
+  heading.textContent = copy.heading;
+  copyOut.replaceChildren();
+  for (const text of copy.paragraphs) {
+    const p = document.createElement('p');
+    // The strings carry <code>, <em> and <strong>, and they are ours, not input.
+    p.innerHTML = text;
+    copyOut.append(p);
+  }
+}
+
+function buildRampPicker() {
+  rampPick.replaceChildren();
+  for (const r of RAMPS) {
+    const option = document.createElement('option');
+    option.value = r.id;
+    option.textContent = r.name;
+    rampPick.append(option);
+  }
+  rampPick.value = rampId;
+  rampName.textContent = RAMPS.find((r) => r.id === rampId)?.name ?? 'greyscale';
+
+  rampPick.addEventListener('change', () => {
+    rampId = rampPick.value;
+    rampName.textContent = RAMPS.find((r) => r.id === rampId)?.name ?? 'greyscale';
+    handle?.refresh();
+  });
+}
+
 function buildDials() {
   const list =
     effect === 'smoke'
@@ -507,6 +657,7 @@ for (const button of panel.querySelectorAll<HTMLButtonElement>('[data-effect]'))
   button.addEventListener('click', () => {
     effect = button.dataset.effect as Effect;
     for (const other of panel.querySelectorAll('[data-effect]')) other.classList.toggle('active', other === button);
+    renderCopy();
     buildDials();
     mount();
   });
@@ -522,6 +673,8 @@ themeButton.addEventListener('click', () => {
 
 document.getElementById('reseed')?.addEventListener('click', mount);
 
+renderCopy();
+buildRampPicker();
 buildDials();
 mount();
 requestAnimationFrame(meter);

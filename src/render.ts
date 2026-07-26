@@ -57,6 +57,65 @@ export interface Shading {
    * Check a long paragraph over it before shipping one.
    */
   tint?: readonly [number, number, number];
+  /**
+   * Colours to map the palette onto, as `[r, g, b]` triples in 0-255.
+   *
+   * Sampled evenly across the stops, so the ramp's length is independent of
+   * `levels`: three stops across a nine-level palette interpolates, and nine
+   * stops across a three-level palette takes the ends and the middle. `levels`
+   * still decides how many distinct colours reach the screen; this decides which.
+   *
+   * Supersedes `base`, `amplitude` and `tint`, which is why the first stop has
+   * to be your page colour - for exactly the reason `base` does, since the
+   * canvas is opaque and paints the page colour itself.
+   *
+   * A ramp buys the one thing a greyscale palette cannot give: a steep
+   * perceptual gradient. It is what lets the fire read as fire rather than as
+   * embers. It also costs readability more than a tint does, so read a long
+   * paragraph over it.
+   */
+  ramp?: ReadonlyArray<readonly [number, number, number]>;
+}
+
+/**
+ * Expands a shading into one RGB triple per palette level.
+ *
+ * Built once per frame rather than evaluated per pixel, which is what keeps the
+ * inner loop to three array reads however the shading is specified - the tint
+ * multiplies and any ramp interpolation happen `levels` times, not a hundred
+ * thousand times.
+ */
+export function buildPalette(shading: Shading, levels: number): Uint8ClampedArray {
+  const count = Math.max(1, levels);
+  const out = new Uint8ClampedArray(count * 3);
+  const last = count > 1 ? count - 1 : 1;
+
+  if (shading.ramp && shading.ramp.length > 0) {
+    const stops = shading.ramp;
+    const span = stops.length - 1;
+
+    for (let i = 0; i < count; i++) {
+      const t = count > 1 ? i / last : 0;
+      const at = t * span;
+      const lo = Math.min(Math.floor(at), span);
+      const hi = Math.min(lo + 1, span);
+      const f = at - lo;
+
+      for (let c = 0; c < 3; c++) {
+        out[i * 3 + c] = stops[lo][c] + (stops[hi][c] - stops[lo][c]) * f;
+      }
+    }
+    return out;
+  }
+
+  const { base, amplitude, tint } = shading;
+  const scale = tint ?? [1, 1, 1];
+
+  for (let i = 0; i < count; i++) {
+    const level = count > 1 ? i / last : 0;
+    for (let c = 0; c < 3; c++) out[i * 3 + c] = base + level * amplitude * scale[c];
+  }
+  return out;
 }
 
 /**
@@ -232,15 +291,13 @@ export function createSurface(
   function shade(field: Float32Array, shading: Shading, gamma: number): void {
     if (!image) return;
     const data = image.data;
-    const { base, amplitude, tint } = shading;
     const { levels } = options;
 
-    // Folded into the amplitude once, out here, rather than multiplied per
-    // pixel. Untinted shading leaves all three equal, which is the greyscale
-    // the other effects expect.
-    const ampR = tint ? amplitude * tint[0] : amplitude;
-    const ampG = tint ? amplitude * tint[1] : amplitude;
-    const ampB = tint ? amplitude * tint[2] : amplitude;
+    // One triple per level, resolved out here. Greyscale, tinted and ramped
+    // shadings all collapse to the same table, so the inner loop does not care
+    // which was asked for.
+    const palette = buildPalette(shading, levels);
+    const steps = levels > 1 ? levels - 1 : 1;
 
     const x0s = mapX.i0;
     const x1s = mapX.i1;
@@ -261,11 +318,13 @@ export function createSurface(
         const bottom = field[rowB + x0] + (field[rowB + x1] - field[rowB + x0]) * tx;
         const value = darken(top + (bottom - top) * ty, gamma);
 
-        const level = orderedDither(value, x, y, levels);
+        // `orderedDither` returns a value already snapped to the palette, so
+        // this index is exact rather than a re-quantisation.
+        const index = Math.round(orderedDither(value, x, y, levels) * steps) * 3;
         const offset = rowOffset + x * 4;
-        data[offset] = base + level * ampR;
-        data[offset + 1] = base + level * ampG;
-        data[offset + 2] = base + level * ampB;
+        data[offset] = palette[index];
+        data[offset + 1] = palette[index + 1];
+        data[offset + 2] = palette[index + 2];
       }
     }
 

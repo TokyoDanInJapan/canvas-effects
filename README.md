@@ -439,7 +439,48 @@ createSmokeBackground(canvas, {
 
 - **`base`** — the page colour being modulated, 0–255. Must match what is behind the canvas.
 - **`amplitude`** — how far the effect moves that colour, in 0–255 steps. Negative moves it down, which is what a light
-  theme wants.
+  theme wants. **The readability dial.**
+- **`tint`** — optional `[r, g, b]` multipliers on `amplitude`. Omit for greyscale, which is what these are designed
+  around. Only the _modulation_ is tinted, never `base`, so the effect reads as coloured light over the page rather
+  than as a coloured rectangle. `[0, 1, 0.25]` gives the obvious green.
+- **`ramp`** — optional colour ramp, below. Supersedes the three above.
+
+Tinting costs readability twice over: it adds chroma contrast on top of the luminance contrast text already competes
+with, and a multiplier below 1 means that channel moves less than `amplitude` suggests. Read a long paragraph over it
+before shipping one.
+
+#### Colour ramps
+
+A tint scales one hue. A **ramp** gives each palette level its own colour, which buys the one thing greyscale cannot: a
+steep perceptual gradient. It is what lets the fire read as flame rather than as embers.
+
+```js
+createFireBackground(canvas, {
+  levels: 5,
+  shading: {
+    base: 18,
+    amplitude: 0,
+    ramp: [
+      [18, 18, 18], // has to be your page colour — see below
+      [92, 16, 4],
+      [190, 66, 8],
+      [244, 158, 30],
+      [255, 240, 200],
+    ],
+  },
+});
+```
+
+Stops are sampled evenly, so **the ramp's length is independent of `levels`**: three stops across a nine-level palette
+interpolates, and nine stops across a three-level palette takes the ends and the middle. `levels` still decides how many
+distinct colours reach the screen; the ramp decides which ones.
+
+**The first stop has to be your page colour**, for exactly the reason `base` does — the canvas is opaque and paints the
+page colour itself, so a mismatch shows as a seam at the canvas edge.
+
+`buildPalette(shading, levels)` is exported if you want to see what a shading resolves to. It is also how `shade` works
+internally: the palette is expanded once per frame, so the inner loop is three array reads however the shading was
+specified, and a ramp costs nothing per pixel over a plain grey.
 
 By default the library watches both the `class` attribute on `<html>` (how most CSS frameworks flip dark mode) and the
 OS `prefers-color-scheme`. Turn either off with `watchThemeClass: false` / `watchColorScheme: false`, and call
