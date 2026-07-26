@@ -1,6 +1,6 @@
 # canvas-effects
 
-Four animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
+Five animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
 they modulate the page colour rather than becoming a picture, and they are quiet enough that a reader should not
 consciously notice them.
 
@@ -32,6 +32,12 @@ ridgeline plot made famous by the cover of Joy Division's _Unknown Pleasures_ �
 Harold Craft's 1970 thesis plotting radio pulses from the pulsar CP 1919. That is the visual reference; the plot type
 itself is an ordinary statistical graphic and nothing here derives from the cover or the data.
 
+![The fire background behind a page of text](docs/fire.png)
+
+**Fire** is the classic cellular fire: a heat field fuelled along the bottom edge and carried upward, cooling as it
+climbs. Greyscale by default, where it reads as embers or heat haze at the foot of the page. It is the one effect whose
+look is genuinely limited by the five-grey palette — see [What it looks like, honestly](#what-it-looks-like-honestly).
+
 ---
 
 ## Contents
@@ -44,6 +50,7 @@ itself is an ordinary statistical graphic and nothing here derives from the cove
   - [Plasma: a domain warp](#plasma-a-domain-warp)
   - [Rain: falling lanes](#rain-falling-lanes)
   - [Ridges: a landscape flown over](#ridges-a-landscape-flown-over)
+  - [Fire: heat climbing](#fire-heat-climbing)
 - [Using it](#using-it)
   - [Shading and themes](#shading-and-themes)
   - [The handle](#the-handle)
@@ -313,6 +320,58 @@ line art. And `pixelSize` defaults to **4** rather than 6: a line is one cell wi
 relative to the gaps between rows, so the stack reads as static rather than as a plot. Four still clears the pixel
 ceiling at 1080p (480 × 270 = 129,600 against a 160,000 cap).
 
+### Fire: heat climbing
+
+`src/fire.ts`. Every frame the bottom row is re-fuelled, then each cell takes the heat of the cell below it, minus a
+random amount, displaced sideways by a random amount. That is the whole algorithm.
+
+**Not the fluid solver.** `smoke.ts` could carry a buoyant temperature field and would be more physical. It would also
+be far slower, and it would look like the smoke with a warm palette — the two would share a silhouette. Cellular fire
+has a different character entirely: hard flickering tongues rather than smooth overturning plumes, because the noise is
+injected per cell per frame instead of emerging from a flow.
+
+**Heat climbs one row per pass.** The loop reads row `y` and writes row `y - 1`, walking downward and never reading a
+row it has already written — so a row takes the _previous_ frame's value of the row below it. Get that ordering
+backwards and heat teleports to the top of the screen in a single frame. `passes` buys climb speed without touching the
+timestep.
+
+**`reach` is a screen fraction, not a cooling rate.** The algorithm wants heat lost per row, but that is resolution
+dependent: it fixes the flame height in _cells_, so one value fills a short field and leaves a thin strip on a tall one.
+The per-row cooling is derived from `reach` and the field height instead, so the fire keeps its proportions on any
+window.
+
+Two parameters tear the field into tongues, and measuring them separately corrected an assumption. `coolingVariance`
+makes neighbouring columns reach different heights; `jitter` displaces heat sideways. With the other held off, each
+contributes about a tripling in roughness — they matter about equally, which is not what the first version of the source
+comment claimed.
+
+#### What it looks like, honestly
+
+Fire is the highest-contrast phenomenon in this library, and the palette is the tightest constraint on it. The other
+four work at five near-black greys because smoke, plasma haze, rain streaks and thin lines are all inherently
+low-contrast. Fire is not — flame legibility comes from a steep black → red → orange → yellow → white ramp, and five
+dark greys cannot provide one.
+
+So the greyscale default reads as **embers, or heat haze at the foot of the page**. That is a good background and it is
+what ships. If you want it to read as actual flame, it needs to be a louder background than its siblings:
+
+```js
+createFireBackground(canvas, {
+  levels: 8,
+  shading: { base: 18, amplitude: 110, tint: [1, 0.45, 0.12] },
+});
+```
+
+Two defaults came out of measuring rather than guessing:
+
+- **`gamma` is 0.6** — below 1, so it _brightens_. Uniquely here. Heat falls off linearly with height, so most of a
+  flame's area sits at low values; at `gamma: 1` the distribution measured `18:72% 33:12% 48:12% 63:4%` with the
+  brightest grey entirely unused. At 0.6 the flame body climbs into the upper levels and reads as a mass with an edge
+  rather than as mottling.
+- **`fieldScale` is 1** — not for crispness as with the rain and ridges, since the heat field is continuous and
+  interpolates perfectly well, but because interpolating it smooths away the fine tongue structure that separates fire
+  from a glow.
+
 ---
 
 ## Using it
@@ -447,8 +506,28 @@ And the `ridges` sub-options, all documented inline on `RidgeParams`:
 | `depthFade`                  | `0.45`          | Brightness of the farthest row. Below 1 it dithers into haze.                                                   |
 | `topMargin` / `bottomMargin` | `0.12` / `0.94` | Where the farthest and nearest rows sit.                                                                        |
 
+Fire only:
+
+| Option        | Default | Does                                                                       |
+| ------------- | ------- | -------------------------------------------------------------------------- |
+| `gamma`       | `0.6`   | **Below 1** - brightens rather than darkens. See above for why.            |
+| `fieldScale`  | `1`     | Full resolution, to keep the tongue structure.                             |
+| `settleSteps` | `60`    | Frames burned before the first paint, so it opens alight rather than cold. |
+| `fire`        | `{}`    | Fire parameters, merged over `FIRE_DEFAULTS`.                              |
+
+And the `fire` sub-options, documented inline on `FireParams`:
+
+| Parameter                             | Default              | Does                                                                      |
+| ------------------------------------- | -------------------- | ------------------------------------------------------------------------- |
+| `reach`                               | `0.5`                | How far up the screen flames climb, as a fraction of height.              |
+| `coolingVariance` / `jitter`          | `0.85` / `1`         | Tear the field into tongues, vertically and sideways. Equal contributors. |
+| `wind` / `windStrength` / `windChurn` | `0` / `0.5` / `0.09` | Steady lean, how far it wanders, and how fast.                            |
+| `sourceHeat` / `sourceVariance`       | `1` / `0.55`         | Fuel strength, and how uneven it is along the base.                       |
+| `sourceScale` / `sourceDrift`         | `5.5` / `0.06`       | Size of the hot and cool patches, and how fast they slide.                |
+| `passes`                              | `2`                  | Propagation steps per frame - the climb speed.                            |
+
 The full parameter sets are documented inline where they are declared - `SmokeParams` in `src/smoke.ts`,
-`PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts`, `RidgeParams` in `src/ridges.ts` - with a
+`PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts`, `RidgeParams` in `src/ridges.ts`, `FireParams` in `src/fire.ts` - with a
 note on each about what it does and
 where its default came from.
 
@@ -499,7 +578,7 @@ dozen or more times a frame — six passes plus every Jacobi iteration — where
 Left uncapped, a 1440p window would simulate five times the cells of a 1080p one and fall over on exactly the machines
 least able to take it. After that, `iterations` (the Jacobi count) is the next biggest lever.
 
-All four together are 6.8 kB minified and gzipped, with no dependencies. The package is `sideEffects: false`, so
+All five together are 7.2 kB minified and gzipped, with no dependencies. The package is `sideEffects: false`, so
 importing one of them tree-shakes the others away.
 
 ---
@@ -507,7 +586,7 @@ importing one of them tree-shakes the others away.
 ## Accessibility
 
 - The canvas is decoration. Mark it `aria-hidden="true"`.
-- With `prefers-reduced-motion: reduce` all four draw a single frame and stop. The smoke and the rain settle
+- With `prefers-reduced-motion: reduce` all five draw a single frame and stop. The smoke and the rain settle
   themselves with `settleSteps` first, so the still frame is smoke or mid-storm rain rather than an empty field. Cursor
   stirring is disabled too.
 - With JavaScript off nothing is painted at all and the page keeps its ordinary background — which is the other reason

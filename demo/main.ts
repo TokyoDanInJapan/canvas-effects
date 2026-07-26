@@ -4,12 +4,15 @@
 
 import {
   PLASMA_BACKGROUND_DEFAULTS,
+  FIRE_BACKGROUND_DEFAULTS,
+  FIRE_DEFAULTS,
   RAIN_BACKGROUND_DEFAULTS,
   RAIN_DEFAULTS,
   RIDGE_DEFAULTS,
   RIDGES_BACKGROUND_DEFAULTS,
   SMOKE_BACKGROUND_DEFAULTS,
   createPlasmaBackground,
+  createFireBackground,
   createRainBackground,
   createRidgesBackground,
   createSmokeBackground,
@@ -53,7 +56,7 @@ const panel = document.getElementById('panel') as HTMLElement;
 const themeButton = document.getElementById('theme') as HTMLButtonElement;
 const fpsOut = document.getElementById('fps') as HTMLSpanElement;
 
-type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges';
+type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'fire';
 
 interface Dial {
   key: string;
@@ -75,7 +78,9 @@ function shading(): Shading {
   // `tint` scales the amplitude per channel. At 0 the green dial is off and
   // all three match, which is the greyscale the other effects use.
   const g = values.green ?? 0;
-  const tint: [number, number, number] | undefined = g > 0 ? [1 - g, 1, 1 - g * 0.75] : undefined;
+  const warm = values.warm ?? 0;
+  const tint: [number, number, number] | undefined =
+    g > 0 ? [1 - g, 1, 1 - g * 0.75] : warm > 0 ? [1, 1 - warm * 0.55, 1 - warm * 0.88] : undefined;
   return dark
     ? { base: 18, amplitude: values.amplitude, tint }
     : { base: 255, amplitude: -Math.round(values.amplitude * 0.85), tint };
@@ -197,6 +202,41 @@ const RIDGE_DIALS: Dial[] = [
   { key: 'octaves', label: 'octaves', min: 1, max: 6, step: 1, value: RIDGE_DEFAULTS.octaves },
 ];
 
+const FIRE_DIALS: Dial[] = [
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 140, step: 1, value: 60, note: 'the readability dial' },
+  { key: 'warm', label: 'warm tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
+  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: FIRE_BACKGROUND_DEFAULTS.levels },
+  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: FIRE_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'fieldScale', label: 'fieldScale', min: 1, max: 5, step: 1, value: FIRE_BACKGROUND_DEFAULTS.fieldScale },
+  { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: FIRE_BACKGROUND_DEFAULTS.fps },
+  { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: FIRE_BACKGROUND_DEFAULTS.gamma },
+  {
+    key: 'reach',
+    label: 'reach',
+    min: 0.1,
+    max: 1,
+    step: 0.05,
+    value: FIRE_DEFAULTS.reach,
+    note: 'flame height, as a screen fraction',
+  },
+  {
+    key: 'coolingVariance',
+    label: 'coolingVariance',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    value: FIRE_DEFAULTS.coolingVariance,
+    note: 'tears it vertically',
+  },
+  { key: 'jitter', label: 'jitter', min: 0, max: 4, step: 0.5, value: FIRE_DEFAULTS.jitter, note: 'tears it sideways' },
+  { key: 'wind', label: 'wind', min: -3, max: 3, step: 0.25, value: FIRE_DEFAULTS.wind },
+  { key: 'windStrength', label: 'windStrength', min: 0, max: 3, step: 0.1, value: FIRE_DEFAULTS.windStrength },
+  { key: 'sourceHeat', label: 'sourceHeat', min: 0.1, max: 1, step: 0.05, value: FIRE_DEFAULTS.sourceHeat },
+  { key: 'sourceVariance', label: 'sourceVariance', min: 0, max: 1, step: 0.05, value: FIRE_DEFAULTS.sourceVariance },
+  { key: 'sourceScale', label: 'sourceScale', min: 1, max: 16, step: 0.5, value: FIRE_DEFAULTS.sourceScale },
+  { key: 'passes', label: 'passes', min: 1, max: 5, step: 1, value: FIRE_DEFAULTS.passes, note: 'climb speed' },
+];
+
 let effect: Effect = 'smoke';
 let values: Record<string, number> = {};
 let handle: BackgroundHandle | null = null;
@@ -220,6 +260,26 @@ function mount() {
     fps: Math.round(values.fps),
     random,
   };
+
+  if (effect === 'fire') {
+    handle = createFireBackground(canvas, {
+      ...common,
+      fieldScale: Math.round(values.fieldScale),
+      fire: {
+        reach: values.reach,
+        coolingVariance: values.coolingVariance,
+        jitter: values.jitter,
+        wind: values.wind,
+        windStrength: values.windStrength,
+        sourceHeat: values.sourceHeat,
+        sourceVariance: values.sourceVariance,
+        sourceScale: values.sourceScale,
+        passes: Math.round(values.passes),
+      },
+    });
+    if (!handle) fpsOut.textContent = 'no 2D context';
+    return;
+  }
 
   if (effect === 'ridges') {
     handle = createRidgesBackground(canvas, {
@@ -301,7 +361,9 @@ function buildDials() {
         ? PLASMA_DIALS
         : effect === 'rain'
           ? RAIN_DIALS
-          : RIDGE_DIALS;
+          : effect === 'fire'
+            ? FIRE_DIALS
+            : RIDGE_DIALS;
   values = Object.fromEntries(list.map((d) => [d.key, d.value]));
   dials.replaceChildren();
 

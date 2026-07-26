@@ -18,6 +18,8 @@ export { createRainBackground, RAIN_BACKGROUND_DEFAULTS, type RainBackgroundOpti
 
 export { createRidgesBackground, RIDGES_BACKGROUND_DEFAULTS, type RidgesBackgroundOptions } from './ridges-background';
 
+export { createFireBackground, FIRE_BACKGROUND_DEFAULTS, type FireBackgroundOptions } from './fire-background';
+
 export {
   createSurface,
   planSurface,
@@ -57,6 +59,21 @@ export {
   type RidgeState,
   type Ridges,
 } from './ridges';
+
+// The heat field.
+export {
+  FIRE_DEFAULTS,
+  createFire,
+  randomizeFire,
+  seedFire,
+  propagateFire,
+  stepFire,
+  windAt,
+  flameHeight,
+  type Fire,
+  type FireParams,
+  type FireState,
+} from './fire';
 
 export { withDefaults } from './options';
 
