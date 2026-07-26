@@ -5,6 +5,7 @@ import { orderedDither } from './dither';
 import {
   RIDGE_DEFAULTS,
   createRidges,
+  fillShadeFor,
   randomizeRidges,
   renderRidges,
   ridgeHeight,
@@ -393,6 +394,104 @@ describe('fill', () => {
     const r = seeded(9);
     renderRidges(r, { ...RIDGE_DEFAULTS, fill: true });
 
+    for (let x = 0; x < W; x++) {
+      const col = column(r, x);
+      const lowest = col.reduce((acc, v, y) => (v > 0 ? y : acc), -1);
+      if (lowest < 0) continue;
+      for (let y = lowest + 1; y < H; y++) expect(col[y]).toBe(0);
+    }
+  });
+});
+
+describe('fillRandom', () => {
+  const state = randomizeRidges(makeRandom(4));
+
+  it('gives a row the same colour every time it is asked', () => {
+    // The whole trick. A value rolled per frame would make the stack strobe as
+    // it moved; keyed on worldZ, a row keeps its colour for its whole life.
+    for (const z of [0, 1, 7, 42, -3]) {
+      expect(fillShadeFor(z, state)).toBe(fillShadeFor(z, state));
+    }
+  });
+
+  it('gives different rows different colours', () => {
+    const seen = new Set<number>();
+    for (let z = 0; z < 40; z++) seen.add(fillShadeFor(z, state));
+    expect(seen.size).toBeGreaterThan(30);
+  });
+
+  it('stays clear of invisible, so no silhouette vanishes into the page', () => {
+    for (let z = -50; z < 50; z++) {
+      const v = fillShadeFor(z, state);
+      expect(v).toBeGreaterThanOrEqual(0.2);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('is independent of the terrain, so the colours do not track the shapes', () => {
+    const other = { ...state, offsetX: state.offsetX + 13, offsetZ: state.offsetZ + 29 };
+    expect(fillShadeFor(5, other)).toBe(fillShadeFor(5, state));
+  });
+
+  it('keeps a profile its own colour as it slides down the screen', () => {
+    // Rendered at successive travels, the value present for a given row must not
+    // change - which is what "stable for its life" means in practice.
+    const params = { ...RIDGE_DEFAULTS, fill: true, fillRandom: true, rows: 6, overscan: 0, speed: 1 };
+    const r = seeded(3);
+
+    // Track the row with worldZ 8 across a whole row of travel.
+    const shades = new Set<number>();
+    for (let i = 0; i <= 8; i++) {
+      r.travel = 4 + i / 8;
+      renderRidges(r, params);
+      const expected = fillShadeFor(8, r.state);
+      // It is on screen for this whole span, so its shade must be present.
+      if (Array.from(r.field).some((v) => Math.abs(v - expected) < 1e-6)) shades.add(expected);
+    }
+    expect(shades.size).toBe(1);
+  });
+
+  it('ignores fillLevel, which it supersedes', () => {
+    const render = (fillLevel: number) => {
+      const r = seeded(3);
+      renderRidges(r, { ...RIDGE_DEFAULTS, fill: true, fillRandom: true, fillLevel });
+      return Array.from(r.field);
+    };
+    expect(render(0.1)).toEqual(render(0.9));
+  });
+
+  it('ignores depth, so far silhouettes stay as distinct as near ones', () => {
+    // Everything else here fades with distance. This deliberately does not, or
+    // the colours would all be pulled back towards each other.
+    //
+    // One row, so the field holds exactly two non-zero values - the line and the
+    // fill - and there is no ambiguity about which is which.
+    const base = { ...RIDGE_DEFAULTS, fill: true, fillRandom: true, rows: 1, overscan: 0 };
+
+    const read = (depthFade: number) => {
+      const r = seeded(3);
+      r.travel = 4.5;
+      renderRidges(r, { ...base, depthFade });
+      const values = [...new Set(Array.from(r.field).filter((v) => v > 0))].sort((a, b) => a - b);
+      return { values, expectedFill: fillShadeFor(Math.ceil(r.travel), r.state) };
+    };
+
+    const strong = read(0.9);
+    const faded = read(0.05);
+
+    // The fill is present and unchanged by depthFade.
+    for (const { values, expectedFill } of [strong, faded]) {
+      expect(values.some((v) => Math.abs(v - expectedFill) < 1e-6)).toBe(true);
+    }
+    // The line, meanwhile, did move.
+    const lineOf = (r: { values: number[]; expectedFill: number }) =>
+      r.values.filter((v) => Math.abs(v - r.expectedFill) >= 1e-6);
+    expect(lineOf(strong)).not.toEqual(lineOf(faded));
+  });
+
+  it('still respects the occlusion', () => {
+    const r = seeded(9);
+    renderRidges(r, { ...RIDGE_DEFAULTS, fill: true, fillRandom: true });
     for (let x = 0; x < W; x++) {
       const col = column(r, x);
       const lowest = col.reduce((acc, v, y) => (v > 0 ? y : acc), -1);

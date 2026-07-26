@@ -320,6 +320,24 @@ tall and throw a silhouette across the whole field. Worse, that growth outruns t
 qualify as fully below the screen and would never leave. Freezing the size lets it simply slide out of frame. Rows that
 are entirely below the edge are skipped, so `overscan` is a bound rather than a workload.
 
+**Filling and trails**, both off by default. `fill` turns the stack from a pile of lines into a pile of solid
+silhouettes, and it costs nothing to work out where: the floating horizon already knows the topmost point covered by
+nearer rows, so the fill runs from a row's own curve down to that — exactly the region belonging to it. `fillLevel`
+keeps it dimmer than the line so the crest still reads against its own body. Measured: filling takes the lit fraction of
+the screen from 24% to 85%.
+
+`fillRandom` gives every profile its own fill value instead, so each silhouette takes a different colour from the
+palette — pair it with a ramp. The value comes from hashing the row's `worldZ` rather than being rolled per frame, which
+is the whole trick: a row keeps its colour for its entire life as it descends, where a per-frame roll would make the
+stack strobe. It ignores depth on purpose, since fading the fills by distance would pull the colours back towards each
+other. With dithering on each fill is a mix of two neighbouring palette colours; `dither: false` gives flat single ones.
+
+`trail` keeps a fraction of the previous frame, so a descending crest smears behind itself. It is faded and maxed rather
+than blended, like the rain's trails — a lerp towards the new frame would dim the lines, and full brightness has to stay
+exactly 1 or one-cell line art stops surviving the dither. Note that this makes the field **stateful**, which the rest of
+this effect otherwise is not. It needs no special handling against the occlusion: the profiles descend, so the ghost sits
+above the line, on the side the horizon does not clip.
+
 **Rows are indexed by travel, not by screen position.** A profile is tied to a whole number of `travel`, so it keeps
 its own shape for its whole life and simply slides down as you fly past it; a new one enters at the top each time
 `travel` crosses an integer. Tying profiles to screen slots instead makes the terrain churn in place without ever
@@ -601,6 +619,10 @@ And the `ridges` sub-options, all documented inline on `RidgeParams`:
 | `depthFade`                  | `0.45`          | Brightness of the farthest row. Below 1 it dithers into haze.                                                   |
 | `topMargin` / `bottomMargin` | `0.12` / `0.94` | Where the farthest and nearest rows sit.                                                                        |
 | `overscan`                   | `8`             | Rows kept alive past the near edge, so profiles roll off the bottom instead of being deleted there.             |
+| `fill`                       | `false`         | Fill each profile into a solid silhouette instead of a line.                                                    |
+| `fillLevel`                  | `0.34`          | Brightness of that fill, as a fraction of the line's. Below 1 so the crest still reads.                         |
+| `fillRandom`                 | `false`         | Give every profile its own fill value, so each silhouette takes a different palette colour.                     |
+| `trail`                      | `0`             | Fraction of the previous frame kept - a ghost trailing each profile. Makes the field stateful.                  |
 
 Fire only:
 

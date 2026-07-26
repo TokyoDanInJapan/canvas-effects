@@ -367,6 +367,7 @@ const RIDGE_DIALS: Dial[] = [
     value: RIDGE_DEFAULTS.fillLevel,
     note: 'how bright the fill is',
   },
+  { key: 'fillRandom', label: 'fillRandom', min: 0, max: 1, step: 1, value: 0, note: 'a colour per ridge' },
   {
     key: 'trail',
     label: 'trail',
@@ -540,6 +541,7 @@ function mount() {
         octaves: Math.round(values.octaves),
         fill: values.fill >= 0.5,
         fillLevel: values.fillLevel,
+        fillRandom: values.fillRandom >= 0.5,
         trail: values.trail,
       },
     });

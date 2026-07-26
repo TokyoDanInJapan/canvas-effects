@@ -31,7 +31,7 @@
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // ridges-background.ts.
 
-import { fbm } from './noise';
+import { fbm, hash2 } from './noise';
 
 export interface RidgeParams {
   /** How many profiles are on screen at once. */
@@ -103,8 +103,29 @@ export interface RidgeParams {
    *
    * Below 1 so the crest still reads as a line against its own body. At 1 the
    * silhouettes are flat and the ridgelines vanish into them.
+   *
+   * Ignored when `fillRandom` is on.
    */
   fillLevel: number;
+  /**
+   * Give every profile its own fill value rather than a shade of its own line,
+   * so each silhouette takes a different colour from the palette.
+   *
+   * The value is derived from the row's `worldZ` through the hash rather than
+   * rolled per frame, which is the whole trick: a row keeps its colour for its
+   * entire life as it slides down the screen. Rolling it per frame would make
+   * the whole stack strobe.
+   *
+   * It deliberately ignores depth, unlike everything else here - the point is
+   * that the fills differ from each other, and fading them by distance would
+   * pull them all back towards each other.
+   *
+   * Note what the dither does to this. A random value lands between two palette
+   * entries, so each fill renders as a mix of two neighbouring colours. That
+   * suits the rest of the library, but `dither: false` gives flat single colours
+   * instead if that is what you are after.
+   */
+  fillRandom: boolean;
   /**
    * Fraction of the previous frame kept, 0 to 1 - a ghost trailing each profile.
    *
@@ -157,6 +178,7 @@ export const RIDGE_DEFAULTS: RidgeParams = {
   // Both off, so the default is the line stack this started as.
   fill: false,
   fillLevel: 0.34,
+  fillRandom: false,
   trail: 0,
 };
 
@@ -224,6 +246,19 @@ export function rowY(depth: number, h: number, params: RidgeParams): number {
 export function rowAmplitude(depth: number, h: number, params: RidgeParams): number {
   const clamped = depth < 0 ? 0 : depth;
   return params.amplitude * h * Math.pow(1 - clamped, params.ampFalloff);
+}
+
+/**
+ * The fill value for one profile, 0.2 to 1.
+ *
+ * Keyed on `worldZ`, so it is stable for the life of the row - a row identified
+ * the same way on every frame gets the same answer, which is what stops the
+ * stack strobing as it moves. Floored well above zero so no silhouette comes out
+ * invisible against the page.
+ */
+export function fillShadeFor(worldZ: number, state: RidgeState): number {
+  // Offset seed, so the colours are independent of the terrain they sit on.
+  return 0.2 + hash2(worldZ, 0, state.seed + 104729) * 0.8;
 }
 
 /**
@@ -307,6 +342,8 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
     if (base - amp >= h) continue;
 
     const brightness = rowBrightness(depth, params);
+    // Resolved once per row rather than per column.
+    const fillShade = params.fillRandom ? fillShadeFor(worldZ, state) : brightness * params.fillLevel;
 
     for (let x = 0; x < w; x++) {
       const u = w > 1 ? x / (w - 1) : 0.5;
@@ -334,7 +371,7 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
       // Everything from under this curve down to the nearer silhouette belongs
       // to this row, and is exactly what a filled stack shows.
       if (params.fill) {
-        const shade = brightness * params.fillLevel;
+        const shade = fillShade;
         for (let iy = Math.max(0, hi + 1); iy < h && iy < limit; iy++) {
           const index = iy * w + x;
           if (shade > field[index]) field[index] = shade;
