@@ -41,6 +41,22 @@ export interface Shading {
    * should modulate the page rather than become a picture.
    */
   amplitude: number;
+  /**
+   * Per-channel multipliers on `amplitude`, as `[r, g, b]`. Omit for greyscale,
+   * which is what every effect here is designed around.
+   *
+   * Note what this does and does not colour. `base` stays untinted, because it
+   * is the page's own colour and the canvas is opaque - it has to keep painting
+   * that faithfully or the canvas edge shows a seam. Only the *modulation* is
+   * tinted, so the effect reads as coloured light over the page rather than as
+   * a coloured rectangle. `[0, 1, 0.25]` gives the obvious green.
+   *
+   * Tinting costs readability twice over: it adds chroma contrast on top of the
+   * luminance contrast text already has to compete with, and a channel
+   * multiplier below 1 means that channel moves less than `amplitude` suggests.
+   * Check a long paragraph over it before shipping one.
+   */
+  tint?: readonly [number, number, number];
 }
 
 /**
@@ -216,8 +232,15 @@ export function createSurface(
   function shade(field: Float32Array, shading: Shading, gamma: number): void {
     if (!image) return;
     const data = image.data;
-    const { base, amplitude } = shading;
+    const { base, amplitude, tint } = shading;
     const { levels } = options;
+
+    // Folded into the amplitude once, out here, rather than multiplied per
+    // pixel. Untinted shading leaves all three equal, which is the greyscale
+    // the other effects expect.
+    const ampR = tint ? amplitude * tint[0] : amplitude;
+    const ampG = tint ? amplitude * tint[1] : amplitude;
+    const ampB = tint ? amplitude * tint[2] : amplitude;
 
     const x0s = mapX.i0;
     const x1s = mapX.i1;
@@ -238,11 +261,11 @@ export function createSurface(
         const bottom = field[rowB + x0] + (field[rowB + x1] - field[rowB + x0]) * tx;
         const value = darken(top + (bottom - top) * ty, gamma);
 
-        const grey = base + orderedDither(value, x, y, levels) * amplitude;
+        const level = orderedDither(value, x, y, levels);
         const offset = rowOffset + x * 4;
-        data[offset] = grey;
-        data[offset + 1] = grey;
-        data[offset + 2] = grey;
+        data[offset] = base + level * ampR;
+        data[offset + 1] = base + level * ampG;
+        data[offset + 2] = base + level * ampB;
       }
     }
 

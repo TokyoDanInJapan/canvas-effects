@@ -14,6 +14,8 @@ export { createSmokeBackground, SMOKE_BACKGROUND_DEFAULTS, type SmokeBackgroundO
 
 export { createPlasmaBackground, PLASMA_BACKGROUND_DEFAULTS, type PlasmaBackgroundOptions } from './plasma-background';
 
+export { createRainBackground, RAIN_BACKGROUND_DEFAULTS, type RainBackgroundOptions } from './rain-background';
+
 export {
   createSurface,
   planSurface,
@@ -25,6 +27,18 @@ export {
 } from './render';
 
 export { createDriver, prefersReducedMotion, type Driver, type DriverOptions } from './driver';
+
+// The falling-streak field.
+export {
+  RAIN_DEFAULTS,
+  createRain,
+  rollLane,
+  stepRain,
+  meanBrightness,
+  type Rain,
+  type RainLane,
+  type RainParams,
+} from './rain';
 
 export { BAYER_4X4, darken, orderedDither, quantise } from './dither';
 

@@ -4,8 +4,11 @@
 
 import {
   PLASMA_BACKGROUND_DEFAULTS,
+  RAIN_BACKGROUND_DEFAULTS,
+  RAIN_DEFAULTS,
   SMOKE_BACKGROUND_DEFAULTS,
   createPlasmaBackground,
+  createRainBackground,
   createSmokeBackground,
   type BackgroundHandle,
   type Shading,
@@ -47,7 +50,7 @@ const panel = document.getElementById('panel') as HTMLElement;
 const themeButton = document.getElementById('theme') as HTMLButtonElement;
 const fpsOut = document.getElementById('fps') as HTMLSpanElement;
 
-type Effect = 'smoke' | 'plasma';
+type Effect = 'smoke' | 'plasma' | 'rain';
 
 interface Dial {
   key: string;
@@ -66,9 +69,13 @@ interface Dial {
  */
 function shading(): Shading {
   const dark = document.documentElement.classList.contains('dark');
+  // `tint` scales the amplitude per channel. At 0 the green dial is off and
+  // all three match, which is the greyscale the other effects use.
+  const g = values.green ?? 0;
+  const tint: [number, number, number] | undefined = g > 0 ? [1 - g, 1, 1 - g * 0.75] : undefined;
   return dark
-    ? { base: 18, amplitude: values.amplitude }
-    : { base: 255, amplitude: -Math.round(values.amplitude * 0.85) };
+    ? { base: 18, amplitude: values.amplitude, tint }
+    : { base: 255, amplitude: -Math.round(values.amplitude * 0.85), tint };
 }
 
 const SMOKE_DIALS: Dial[] = [
@@ -102,6 +109,39 @@ const PLASMA_DIALS: Dial[] = [
   { key: 'octaves', label: 'octaves', min: 1, max: 6, step: 1, value: 3 },
 ];
 
+const RAIN_DIALS: Dial[] = [
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 52, note: 'the readability dial' },
+  { key: 'green', label: 'green tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
+  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: RAIN_BACKGROUND_DEFAULTS.levels },
+  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: RAIN_BACKGROUND_DEFAULTS.pixelSize },
+  {
+    key: 'fieldScale',
+    label: 'fieldScale',
+    min: 1,
+    max: 6,
+    step: 1,
+    value: RAIN_BACKGROUND_DEFAULTS.fieldScale,
+    note: '1 keeps streaks crisp',
+  },
+  { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: RAIN_BACKGROUND_DEFAULTS.fps },
+  { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: RAIN_BACKGROUND_DEFAULTS.gamma },
+  { key: 'speed', label: 'speed', min: 4, max: 120, step: 1, value: RAIN_DEFAULTS.speed },
+  { key: 'fade', label: 'fade', min: 0.2, max: 8, step: 0.1, value: RAIN_DEFAULTS.fade, note: 'sets trail length' },
+  {
+    key: 'respawn',
+    label: 'respawn',
+    min: 0.3,
+    max: 12,
+    step: 0.1,
+    value: RAIN_DEFAULTS.respawn,
+    note: 'the density dial',
+  },
+  { key: 'speedVariance', label: 'speedVariance', min: 0, max: 0.9, step: 0.05, value: RAIN_DEFAULTS.speedVariance },
+  { key: 'flicker', label: 'flicker', min: 0, max: 0.8, step: 0.02, value: RAIN_DEFAULTS.flicker },
+  { key: 'boldChance', label: 'boldChance', min: 0, max: 0.6, step: 0.02, value: RAIN_DEFAULTS.boldChance },
+  { key: 'minBrightness', label: 'minBrightness', min: 0.1, max: 1, step: 0.05, value: RAIN_DEFAULTS.minBrightness },
+];
+
 let effect: Effect = 'smoke';
 let values: Record<string, number> = {};
 let handle: BackgroundHandle | null = null;
@@ -125,6 +165,24 @@ function mount() {
     fps: Math.round(values.fps),
     random,
   };
+
+  if (effect === 'rain') {
+    handle = createRainBackground(canvas, {
+      ...common,
+      fieldScale: Math.round(values.fieldScale),
+      rain: {
+        speed: values.speed,
+        fade: values.fade,
+        respawn: values.respawn,
+        speedVariance: values.speedVariance,
+        flicker: values.flicker,
+        boldChance: values.boldChance,
+        minBrightness: values.minBrightness,
+      },
+    });
+    if (!handle) fpsOut.textContent = 'no 2D context';
+    return;
+  }
 
   handle =
     effect === 'smoke'
@@ -160,7 +218,7 @@ function mount() {
 }
 
 function buildDials() {
-  const list = effect === 'smoke' ? SMOKE_DIALS : PLASMA_DIALS;
+  const list = effect === 'smoke' ? SMOKE_DIALS : effect === 'plasma' ? PLASMA_DIALS : RAIN_DIALS;
   values = Object.fromEntries(list.map((d) => [d.key, d.value]));
   dials.replaceChildren();
 

@@ -1,6 +1,6 @@
 # canvas-effects
 
-Two animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
+Three animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
 they modulate the page colour rather than becoming a picture, and they are quiet enough that a reader should not
 consciously notice them.
 
@@ -19,6 +19,12 @@ stirs it.
 seamless plasma tile. Cheaper than the smoke and stateless in time, so it can be drawn at any moment without having
 drawn the moments before it.
 
+![The rain background behind a page of text](docs/rain.png)
+
+**Rain** is Matrix-style digital rain: one falling lane per column, each head lighting the cells it passes and the
+whole field decaying behind it. Greyscale by default like its siblings, with an optional tint if you want the green.
+Note what it is not — these are streaks of falling light, **not glyphs**. See [Why no characters](#why-no-characters).
+
 ---
 
 ## Contents
@@ -29,6 +35,7 @@ drawn the moments before it.
   - [The shared half: two resolutions and a dither](#the-shared-half-two-resolutions-and-a-dither)
   - [Smoke: a fluid solver](#smoke-a-fluid-solver)
   - [Plasma: a domain warp](#plasma-a-domain-warp)
+  - [Rain: falling lanes](#rain-falling-lanes)
 - [Using it](#using-it)
   - [Shading and themes](#shading-and-themes)
   - [The handle](#the-handle)
@@ -98,11 +105,11 @@ colour itself rather than letting CSS show through — so if the two disagree yo
 
 ### The shared half: two resolutions and a dither
 
-Both effects render at two scales at once, and this is what makes them cheap enough to leave running:
+All three render at two scales at once, and this is what makes them cheap enough to leave running:
 
 - The **field** — the expensive part, whatever generates it — is computed at `pixelSize × fieldScale` CSS pixels per
-  cell. Both fields here are soft and low-frequency and gain nothing from more samples. This is where all the real work
-  happens, and it stays at a few thousand cells whatever the window is doing.
+  cell. The smoke and plasma fields are soft and low-frequency and gain nothing from more samples, so they run at half
+  the output resolution; the rain runs at 1:1 for a reason of its own, below. This is where all the real work happens.
 - The **output** is `pixelSize` CSS pixels per pixel, bilinearly interpolated up from that field and then dithered. Per
   pixel that is a handful of multiply-adds and a table lookup.
 
@@ -227,6 +234,44 @@ The plasma also carries a motion blur — each frame mixes towards the last — 
 frames so cells drift between palette levels rather than flicking between them. Note that the gamma is applied
 _before_ the blur, so successive frames agree with each other.
 
+### Rain: falling lanes
+
+`src/rain.ts`. One lane per field column. Each frame the whole field is multiplied down by a decay factor, then every
+active head moves down its lane and writes brightness into the cells it crossed. That is the entire simulation.
+
+**The trail is a consequence, not a drawing.** The obvious implementation draws a gradient of length `L` behind each
+head — which needs `L` as a parameter, recomputes the gradient every frame, and breaks when a head moves more than one
+cell per frame, because the tail either detaches or has to be stitched back on. Decaying the whole field instead costs
+one multiply per cell, handles any speed without a special case, and gets two things right for free: a fast head leaves
+a **longer** streak than a slow one, because its brightness has had less time to fade over the same distance; and a
+head retiring at the bottom leaves its trail to fade in place rather than vanishing with it.
+
+Trail length is therefore not a parameter but a ratio. A streak reaches `speed × ln(1 / brightness) / fade` cells
+before decaying to that brightness — at the defaults, on a ~90-cell-tall field, still half-lit 15 cells back, a
+fifth-lit at 34, invisible around 64. Change `speed` and `fade` has to move with it or the look changes as much as the
+pace does.
+
+The decay is exponential rather than linear, so it is frame-rate independent: halving `dt` and stepping twice leaves
+the same brightness behind. There is a test pinning that to three decimal places.
+
+#### `fieldScale` is 1 here, and that matters
+
+The other two effects render the field at half the output resolution and let bilinear interpolation smooth it. For a
+continuous field that is free smoothing. For discrete lanes it is **blur** — neighbouring lanes bleed into each other
+and crisp streaks turn into soft vertical smudges.
+
+At `fieldScale: 1` every output pixel maps to exactly one field cell, the horizontal interpolation weight is zero
+everywhere, and the streaks stay sharp. `maxFieldCells` is matched to `maxPixels` for the same reason: capping the
+field would silently reintroduce the interpolation the scale of one exists to avoid. Raising `fieldScale` is the single
+biggest thing you can do to make this look wrong.
+
+#### Why no characters
+
+This is the falling-light half of the Matrix look, not the glyphs. The renderer takes a scalar field and posterises it
+to five greys through a 4×4 Bayer matrix on a 6px cell — at that size a character is about three cells tall and reads
+as noise. Streaks survive the palette; letterforms do not. Glyphs would need their own renderer and would not share the
+dither at all, which is a different library rather than a fourth effect in this one.
+
 ---
 
 ## Using it
@@ -316,8 +361,30 @@ Plasma only:
 | `tileSize` | `128`   | Edge of the plasma tile, in samples. Wrapped on both axes.           |
 | `warp`     | `{}`    | Warp parameters, merged over `PLASMA_WARP_DEFAULTS`.                 |
 
-The full solver and warp parameter sets are documented inline on `SmokeParams` in `src/smoke.ts` and `WarpParams` in
-`src/plasma-warp.ts`, with a note on each about what it does and where its default came from.
+Rain only:
+
+| Option          | Default  | Does                                                                                                |
+| --------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `fieldScale`    | `1`      | **Leave at 1.** Raising it blurs the streaks — see [above](#fieldscale-is-1-here-and-that-matters). |
+| `maxFieldCells` | `160000` | Matched to `maxPixels`, so the field is never capped into being interpolated.                       |
+| `gamma`         | `1`      | No dark bias, unlike the other two — rain is mostly empty already.                                  |
+| `settleSteps`   | `48`     | Steps before the first paint, so it opens mid-storm rather than dry.                                |
+| `rain`          | `{}`     | Rain parameters, merged over `RAIN_DEFAULTS`.                                                       |
+
+And the `rain` sub-options, all documented inline on `RainParams`:
+
+| Parameter                   | Default        | Does                                                                   |
+| --------------------------- | -------------- | ---------------------------------------------------------------------- |
+| `speed` / `fade`            | `34` / `1.6`   | A pair — together they set the trail length. Move one, move the other. |
+| `respawn`                   | `5.5`          | Mean seconds a lane waits before falling again. **The density dial.**  |
+| `speedVariance`             | `0.55`         | Spread on speed, so the screen has no single rhythm.                   |
+| `flicker`                   | `0.22`         | Per-cell brightness jitter — the granular quality.                     |
+| `boldChance` / `boldFactor` | `0.12` / `1.9` | Chance of a much faster, brighter drop, and how much faster.           |
+| `minBrightness`             | `0.45`         | Dimmest a head can be.                                                 |
+
+The full parameter sets are documented inline where they are declared - `SmokeParams` in `src/smoke.ts`,
+`PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts` - with a note on each about what it does and
+where its default came from.
 
 ### Tuning
 
@@ -357,25 +424,33 @@ The plasma is ~114,000 output pixels at 1080p over a ~7,000-cell field. `maxPixe
 value on large windows, so 2560×1440 renders 147,000 pixels rather than 409,000. Measured at 61fps for the page's own
 rAF loop at both sizes — i.e. the effect is not what limits the page.
 
+The rain is the cheapest of the three despite running its field at full output resolution: a cell costs one multiply
+for the fade, against the dozen or more the fluid solver spends. That is what makes `fieldScale: 1` affordable, and
+`maxFieldCells` is matched to `maxPixels` so the field is never capped into being interpolated.
+
 For the smoke, **`maxSimCells` is the number to reach for first**, not `maxPixels`. The solver touches every cell a
 dozen or more times a frame — six passes plus every Jacobi iteration — where the shading touches each output pixel once.
 Left uncapped, a 1440p window would simulate five times the cells of a 1080p one and fall over on exactly the machines
 least able to take it. After that, `iterations` (the Jacobi count) is the next biggest lever.
 
-Both effects together are 5.4 kB minified and gzipped, with no dependencies. The package is `sideEffects: false`, so
-importing only one of them tree-shakes the other away.
+All three together are 6.1 kB minified and gzipped, with no dependencies. The package is `sideEffects: false`, so
+importing one of them tree-shakes the others away.
 
 ---
 
 ## Accessibility
 
 - The canvas is decoration. Mark it `aria-hidden="true"`.
-- With `prefers-reduced-motion: reduce` both draw a single frame and stop. The smoke settles itself with `settleSteps`
-  first, so the still frame is smoke rather than undisturbed noise. Cursor stirring is disabled too.
+- With `prefers-reduced-motion: reduce` all three draw a single frame and stop. The smoke and the rain settle
+  themselves with `settleSteps` first, so the still frame is smoke or mid-storm rain rather than an empty field. Cursor
+  stirring is disabled too.
 - With JavaScript off nothing is painted at all and the page keeps its ordinary background — which is the other reason
   `base` has to match your page colour.
 - `amplitude` is the contrast dial. Keep it low enough that text over the background still clears whatever contrast
-  ratio you are targeting; the default range moves the page colour by about a tenth.
+  ratio you are targeting; the default range moves the page colour by about a tenth. Rain can take roughly double the
+  smoke's, around 50, because it is mostly empty screen — but check, do not assume.
+- A `tint` adds chroma contrast on top of the luminance contrast, and colour-blind readers do not all get the same
+  benefit from it. Greyscale is the safer default and is why it is the default.
 
 ---
 

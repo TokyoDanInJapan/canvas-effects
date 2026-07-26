@@ -1,0 +1,68 @@
+---
+/**
+ * Digital rain as an Astro component. A sibling of SmokeBackground and
+ * PlasmaBackground - mount one, not several: they are all opaque and
+ * full-bleed, so two would simply stack.
+ *
+ * See SmokeBackground.astro for why `transition:persist`, the `astro:page-load`
+ * listener and the `dataset` guard are all needed together.
+ */
+---
+
+<canvas id="rain" class="rain" aria-hidden="true" transition:persist></canvas>
+
+<script>
+  import { createRainBackground } from 'canvas-effects';
+
+  /**
+   * Rain takes about double the smoke's amplitude before it reads as rain
+   * rather than as a faint texture, because most of the screen is empty at any
+   * moment. It is still the readability dial - check a long paragraph.
+   */
+  const AMPLITUDE = { dark: 52, light: 44 };
+
+  /**
+   * Uncomment for the obvious green. `tint` multiplies the amplitude per
+   * channel; `base` stays untinted, since it is the page's own colour and the
+   * canvas is opaque. Costs readability - see the README.
+   */
+  // const TINT = [0.15, 1, 0.25] as const;
+
+  function init() {
+    const canvas = document.getElementById('rain') as HTMLCanvasElement | null;
+    if (!canvas) return;
+
+    if (canvas.dataset.mounted === '1') return;
+    canvas.dataset.mounted = '1';
+
+    const handle = createRainBackground(canvas, {
+      shading: () => {
+        const dark = document.documentElement.classList.contains('dark');
+        // These must match your page background.
+        return dark
+          ? { base: 18, amplitude: AMPLITUDE.dark /*, tint: TINT */ }
+          : { base: 255, amplitude: -AMPLITUDE.light /*, tint: TINT */ };
+      },
+    });
+
+    if (!handle) canvas.remove();
+  }
+
+  init();
+  document.addEventListener('astro:page-load', init);
+</script>
+
+<style>
+  .rain {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    /* Doubly load-bearing here: the streaks are one field cell wide, so
+       letting the browser smooth them undoes both the dither and the rain. */
+    image-rendering: pixelated;
+  }
+</style>
