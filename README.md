@@ -326,11 +326,17 @@ nearer rows, so the fill runs from a row's own curve down to that — exactly th
 keeps it dimmer than the line so the crest still reads against its own body. Measured: filling takes the lit fraction of
 the screen from 24% to 85%.
 
+`fillLevel` is a ceiling on fill brightness and scales both kinds. Without `fillRandom` it wants to stay below 1, or
+the silhouettes go flat and the ridgelines vanish into them. With `fillRandom` it darkens the whole set without
+flattening it: at the default 0.34 the fills still span every palette colour, they are simply dimmer — measured on an
+eight-level violet ramp, eight distinct colours at both 0.34 and 1.0, with mean channel value 58 against 106. That is
+what keeps it usable behind text.
+
 `fillRandom` gives every profile its own fill value instead, so each silhouette takes a different colour from the
 palette — pair it with a ramp. The value comes from hashing the row's `worldZ` rather than being rolled per frame, which
 is the whole trick: a row keeps its colour for its entire life as it descends, where a per-frame roll would make the
 stack strobe. It ignores depth on purpose, since fading the fills by distance would pull the colours back towards each
-other. With dithering on each fill is a mix of two neighbouring palette colours; `dither: false` gives flat single ones.
+other, though it does respect `fillLevel`. With dithering on each fill is a mix of two neighbouring palette colours; `dither: false` gives flat single ones.
 
 `trail` keeps a fraction of the previous frame, so a descending crest smears behind itself. It is faded and maxed rather
 than blended, like the rain's trails — a lerp towards the new frame would dim the lines, and full brightness has to stay
@@ -620,7 +626,7 @@ And the `ridges` sub-options, all documented inline on `RidgeParams`:
 | `topMargin` / `bottomMargin` | `0.12` / `0.94` | Where the farthest and nearest rows sit.                                                                        |
 | `overscan`                   | `8`             | Rows kept alive past the near edge, so profiles roll off the bottom instead of being deleted there.             |
 | `fill`                       | `false`         | Fill each profile into a solid silhouette instead of a line.                                                    |
-| `fillLevel`                  | `0.34`          | Brightness of that fill, as a fraction of the line's. Below 1 so the crest still reads.                         |
+| `fillLevel`                  | `0.34`          | Ceiling on fill brightness. Scales both kinds of fill.                                                          |
 | `fillRandom`                 | `false`         | Give every profile its own fill value, so each silhouette takes a different palette colour.                     |
 | `trail`                      | `0`             | Fraction of the previous frame kept - a ghost trailing each profile. Makes the field stateful.                  |
 
