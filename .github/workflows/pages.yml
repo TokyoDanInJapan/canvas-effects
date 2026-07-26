@@ -43,11 +43,16 @@ jobs:
 
       - run: npm ci
 
+      # No `enablement: true`. It reads well and cannot work: creating a Pages site
+      # needs administration rights on the repository, and `GITHUB_TOKEN` has none
+      # however `permissions` is written - it can deploy to a site that exists and
+      # not bring one into being. The first run failed on exactly that:
+      #
+      #   Create Pages site failed. Resource not accessible by integration
+      #
+      # So Pages is enabled once, by a person or an admin token, with the source
+      # set to GitHub Actions. It is enabled on this repository already.
       - uses: actions/configure-pages@v5
-        with:
-          # Turns Pages on the first time this runs, so enabling it is not a
-          # manual step someone has to know about.
-          enablement: true
 
       # `--base` rather than a change to vite.config.ts: a project Pages site is
       # served from a subpath, so the default `/assets/...` would 404 there - but

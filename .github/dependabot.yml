@@ -16,10 +16,18 @@ updates:
     groups:
       toolchain:
         patterns: ['*']
-    # A version bump to the library is a decision about what changed in it, and
-    # `npm run build` reads the manifest. Neither is Dependabot's business.
     ignore:
-      - dependency-name: canvas-effects
+      # TypeScript 7 is held back, and this is the whole reason the entry exists:
+      # no released typescript-eslint supports it. The latest is 8.65.0 and its
+      # peer range is `>=4.8.4 <6.1.0`, with no 9.x published, so a tree with
+      # TypeScript 7 in it cannot be installed at all - `npm ci` fails ERESOLVE
+      # before a single test runs. Dependabot proposed it in a group with five
+      # other bumps and took the whole pull request down with it.
+      #
+      # Remove this the moment typescript-eslint's peer range opens up. Nothing
+      # else here objects to 7; linting is the only thing standing in the way.
+      - dependency-name: typescript
+        versions: ['>=7']
     commit-message:
       prefix: 'Bump'
     open-pull-requests-limit: 3
