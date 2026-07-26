@@ -99,12 +99,17 @@ export interface RidgeParams {
    */
   fill: boolean;
   /**
-   * Brightness of that fill, as a fraction of the row's line brightness.
+   * Ceiling on fill brightness, as a fraction of what the fill would otherwise
+   * be. Scales both kinds.
    *
-   * Below 1 so the crest still reads as a line against its own body. At 1 the
-   * silhouettes are flat and the ridgelines vanish into them.
+   * Without `fillRandom`, the fill is a fraction of the row's own line
+   * brightness, and this wants to stay below 1: at 1 the silhouettes are flat
+   * and the ridgelines vanish into them.
    *
-   * Ignored when `fillRandom` is on.
+   * With `fillRandom`, it scales the whole random range, so lowering it darkens
+   * every silhouette while leaving them as distinct from each other as before.
+   * Near 1 is usually what you want there, since the point is for the fills to
+   * spread across the palette.
    */
   fillLevel: number;
   /**
@@ -118,7 +123,8 @@ export interface RidgeParams {
    *
    * It deliberately ignores depth, unlike everything else here - the point is
    * that the fills differ from each other, and fading them by distance would
-   * pull them all back towards each other.
+   * pull them all back towards each other. It does respect `fillLevel`, which
+   * scales the whole range and so darkens the set without flattening it.
    *
    * Note what the dither does to this. A random value lands between two palette
    * entries, so each fill renders as a mix of two neighbouring colours. That
@@ -342,8 +348,10 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
     if (base - amp >= h) continue;
 
     const brightness = rowBrightness(depth, params);
-    // Resolved once per row rather than per column.
-    const fillShade = params.fillRandom ? fillShadeFor(worldZ, state) : brightness * params.fillLevel;
+    // Resolved once per row rather than per column. `fillLevel` scales both
+    // kinds, so the dial does something whichever is in use.
+    const fillBase = params.fillRandom ? fillShadeFor(worldZ, state) : brightness;
+    const fillShade = fillBase * params.fillLevel;
 
     for (let x = 0; x < w; x++) {
       const u = w > 1 ? x / (w - 1) : 0.5;

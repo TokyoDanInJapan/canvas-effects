@@ -444,20 +444,44 @@ describe('fillRandom', () => {
     for (let i = 0; i <= 8; i++) {
       r.travel = 4 + i / 8;
       renderRidges(r, params);
-      const expected = fillShadeFor(8, r.state);
+      const expected = fillShadeFor(8, r.state) * params.fillLevel;
       // It is on screen for this whole span, so its shade must be present.
       if (Array.from(r.field).some((v) => Math.abs(v - expected) < 1e-6)) shades.add(expected);
     }
     expect(shades.size).toBe(1);
   });
 
-  it('ignores fillLevel, which it supersedes', () => {
-    const render = (fillLevel: number) => {
+  it('darkens with fillLevel while staying just as varied', () => {
+    // The reason fillLevel earns its place with fillRandom on: it scales the
+    // whole random range, so the silhouettes get darker together rather than
+    // converging on one another.
+    const fillsAt = (fillLevel: number) => {
       const r = seeded(3);
+      r.travel = 4.5;
       renderRidges(r, { ...RIDGE_DEFAULTS, fill: true, fillRandom: true, fillLevel });
-      return Array.from(r.field);
+      return [...new Set(Array.from(r.field).filter((v) => v > 0))].sort((a, b) => a - b);
     };
-    expect(render(0.1)).toEqual(render(0.9));
+
+    const bright = fillsAt(1);
+    const dim = fillsAt(0.4);
+
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(mean(dim)).toBeLessThan(mean(bright));
+
+    // Still spread out, not squashed into one shade.
+    expect(dim.length).toBeGreaterThan(3);
+  });
+
+  it('scales each fill exactly by fillLevel', () => {
+    const params = { ...RIDGE_DEFAULTS, fill: true, fillRandom: true, rows: 1, overscan: 0 };
+    const read = (fillLevel: number) => {
+      const r = seeded(3);
+      r.travel = 4.5;
+      renderRidges(r, { ...params, fillLevel });
+      const expected = fillShadeFor(Math.ceil(r.travel), r.state) * fillLevel;
+      return Array.from(r.field).some((v) => Math.abs(v - expected) < 1e-6);
+    };
+    for (const level of [1, 0.6, 0.25]) expect(read(level)).toBe(true);
   });
 
   it('ignores depth, so far silhouettes stay as distinct as near ones', () => {
@@ -473,7 +497,7 @@ describe('fillRandom', () => {
       r.travel = 4.5;
       renderRidges(r, { ...base, depthFade });
       const values = [...new Set(Array.from(r.field).filter((v) => v > 0))].sort((a, b) => a - b);
-      return { values, expectedFill: fillShadeFor(Math.ceil(r.travel), r.state) };
+      return { values, expectedFill: fillShadeFor(Math.ceil(r.travel), r.state) * base.fillLevel };
     };
 
     const strong = read(0.9);

@@ -365,7 +365,7 @@ const RIDGE_DIALS: Dial[] = [
     max: 1,
     step: 0.05,
     value: RIDGE_DEFAULTS.fillLevel,
-    note: 'how bright the fill is',
+    note: 'ceiling on fill brightness',
   },
   { key: 'fillRandom', label: 'fillRandom', min: 0, max: 1, step: 1, value: 0, note: 'a colour per ridge' },
   {
