@@ -41,6 +41,8 @@ export interface PlasmaBackgroundOptions {
   fps: number;
   /** Palette size. Small on purpose - the dither is what makes it look smooth. */
   levels: number;
+  /** Ordered-dither the output. Off posterises flat, showing the bands. */
+  dither: boolean;
   /** Weights the field towards its dark end. See `darken` in dither.ts. */
   gamma: number;
   /** A multiplier on animation time. Slow, by default: this is meant to go unnoticed. */
@@ -71,6 +73,7 @@ export const PLASMA_BACKGROUND_DEFAULTS: PlasmaBackgroundOptions = {
   maxPixels: 160_000,
   fps: 24,
   levels: 5,
+  dither: true,
   // Measured, not guessed: with no bias 19.9% of the background sits in the
   // lower half of the palette, and 1.18 raises that to 30.1% - half as much
   // again. Both ends of the range are fixed points, so this shifts the balance
@@ -123,6 +126,7 @@ export function createPlasmaBackground(
     maxPixels: config.maxPixels,
     maxFieldCells: Infinity,
     levels: config.levels,
+    dither: config.dither,
   });
 
   // The low-resolution field, and the previous frame of it for the blur.

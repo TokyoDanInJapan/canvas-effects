@@ -31,6 +31,8 @@ export interface RidgesBackgroundOptions {
   fps: number;
   /** Palette size. Lines are drawn at full brightness; this shades the haze. */
   levels: number;
+  /** Ordered-dither the output. Off posterises flat, showing the bands. */
+  dither: boolean;
   /**
    * Weights the field towards its dark end. One by default: the field is
    * already mostly empty, and biasing it would only dim the distant rows the
@@ -64,6 +66,7 @@ export const RIDGES_BACKGROUND_DEFAULTS: RidgesBackgroundOptions = {
   maxFieldCells: 160_000,
   fps: 24,
   levels: 5,
+  dither: true,
   gamma: 1,
   shading: defaultShading,
   ridges: {},
@@ -101,6 +104,7 @@ export function createRidgesBackground(
     maxPixels: config.maxPixels,
     maxFieldCells: config.maxFieldCells,
     levels: config.levels,
+    dither: config.dither,
   });
 
   let ridges: Ridges | null = null;

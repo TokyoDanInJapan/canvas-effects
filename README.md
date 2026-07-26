@@ -142,6 +142,12 @@ each pixel by its 4×4 Bayer threshold before rounding means a value halfway bet
 for half the pixels in the cell and the higher one for the other half. The region reads as the intermediate shade, and a
 gradient crossing it breaks into texture rather than a band.
 
+**Seeing it for yourself.** `dither: false` posterises flat instead. The palette is identical either way — only the
+distribution changes — so it is the cleanest demonstration of what the Bayer threshold is doing. Measured on the demo,
+switching it off takes the proportion of horizontally adjacent pixels that differ from 47.5% to 10.4% on the smoke and
+from 53.1% to 4.7% on the plasma: texture becomes plateaus. It is not a performance dial; both paths quantise once per
+pixel and the dither adds an array lookup and an add.
+
 The Bayer matrix is normalised to `(m + 0.5) / 16`, which averages to **exactly 0.5**. That is the property the whole
 effect rests on: the offset it adds averages to nothing, so dithering changes _which_ level a pixel lands on without
 changing the average brightness of a region. There is a unit test pinning it.
@@ -520,6 +526,7 @@ Shared by both:
 | `fieldScale`           | `2`           | How much coarser the field is than the output, per axis.                        |
 | `maxPixels`            | `160000`      | Ceiling on rendered pixels; raises `pixelSize` on large windows.                |
 | `levels`               | `5`           | Palette size. Small on purpose — the dither is what makes it look smooth.       |
+| `dither`               | `true`        | Ordered-dither the output. Off posterises flat — same palette, visible bands.   |
 | `gamma`                | see below     | Weights the field towards its dark end without changing the palette.            |
 | `fps`                  | `24`          | Redraw rate.                                                                    |
 | `shading`              | auto          | The greys. See above.                                                           |

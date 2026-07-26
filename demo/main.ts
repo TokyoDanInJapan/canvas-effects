@@ -63,6 +63,7 @@ const heading = document.getElementById('heading') as HTMLHeadingElement;
 const copyOut = document.getElementById('copy') as HTMLDivElement;
 const rampPick = document.getElementById('ramp') as HTMLSelectElement;
 const rampName = document.getElementById('ramp-name') as HTMLElement;
+const ditherButton = document.getElementById('dither') as HTMLButtonElement;
 
 type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'fire' | 'metaballs';
 
@@ -168,6 +169,7 @@ const RAMPS: Array<{ id: string; name: string; dark: Stops | null; light: Stops 
 ];
 
 let rampId = 'grey';
+let dithering = true;
 
 interface Dial {
   key: string;
@@ -456,6 +458,7 @@ function mount() {
 
   const common = {
     shading,
+    dither: dithering,
     gamma: values.gamma,
     levels: Math.round(values.levels),
     pixelSize: Math.round(values.pixelSize),
@@ -672,6 +675,15 @@ themeButton.addEventListener('click', () => {
 });
 
 document.getElementById('reseed')?.addEventListener('click', mount);
+
+ditherButton.addEventListener('click', () => {
+  dithering = !dithering;
+  ditherButton.textContent = `Dither: ${dithering ? 'on' : 'off'}`;
+  ditherButton.classList.toggle('active', dithering);
+  // Baked in at construction, so this remounts - a demo concern, not the
+  // library's; `dither` is a plain option there.
+  mount();
+});
 
 renderCopy();
 buildRampPicker();

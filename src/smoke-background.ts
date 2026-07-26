@@ -59,6 +59,8 @@ export interface SmokeBackgroundOptions {
   fps: number;
   /** Palette size. Small on purpose - the dither is what makes it look smooth. */
   levels: number;
+  /** Ordered-dither the output. Off posterises flat, showing the bands. */
+  dither: boolean;
   /** Weights the field towards its dark end. See `darken` in dither.ts. */
   gamma: number;
   /** Steps run before the first paint, so it opens as smoke rather than fog. */
@@ -88,6 +90,7 @@ export const SMOKE_BACKGROUND_DEFAULTS: SmokeBackgroundOptions = {
   maxSimCells: 8_000,
   fps: 24,
   levels: 5,
+  dither: true,
   // Solved offline across four seeds rather than in the browser. Each page load
   // rolls a fresh field and fires jets at random times, so a single run's mean
   // shade swings by three or four levels - measuring this live gave results
@@ -136,6 +139,7 @@ export function createSmokeBackground(
     maxPixels: config.maxPixels,
     maxFieldCells: config.maxSimCells,
     levels: config.levels,
+    dither: config.dither,
   });
 
   let fluid: Fluid | null = null;

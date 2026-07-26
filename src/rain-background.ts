@@ -40,6 +40,8 @@ export interface RainBackgroundOptions {
   fps: number;
   /** Palette size. Small on purpose - the dither is what makes it look smooth. */
   levels: number;
+  /** Ordered-dither the output. Off posterises flat, showing the bands. */
+  dither: boolean;
   /**
    * Weights the field towards its dark end. See `darken` in dither.ts.
    *
@@ -79,6 +81,7 @@ export const RAIN_BACKGROUND_DEFAULTS: RainBackgroundOptions = {
   maxFieldCells: 160_000,
   fps: 24,
   levels: 5,
+  dither: true,
   gamma: 1,
   // Long enough for the staggered opening lanes to have laid down trails.
   settleSteps: 48,
@@ -118,6 +121,7 @@ export function createRainBackground(
     maxPixels: config.maxPixels,
     maxFieldCells: config.maxFieldCells,
     levels: config.levels,
+    dither: config.dither,
   });
 
   let rain: Rain | null = null;

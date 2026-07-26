@@ -137,3 +137,68 @@ describe('orderedDither', () => {
     expect(orderedDither(0.5, 1, 2, 0)).toBe(0);
   });
 });
+
+describe('dithering versus posterising - what the toggle switches', () => {
+  const LEVELS = 5;
+
+  it('lands one input value on different levels depending on position', () => {
+    // The property the whole effect rests on. A value between two palette steps
+    // resolves differently across a 4x4 cell, so a flat region reads as the
+    // shade in between rather than snapping to one side.
+    const value = 0.4;
+    const dithered = new Set<number>();
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) dithered.add(orderedDither(value, x, y, LEVELS));
+    expect(dithered.size).toBeGreaterThan(1);
+  });
+
+  it('while posterising gives that value one level everywhere', () => {
+    const value = 0.4;
+    const flat = new Set<number>();
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) flat.add(quantise(value, LEVELS));
+    expect(flat.size).toBe(1);
+  });
+
+  it('uses the same palette either way - the toggle changes distribution, not colours', () => {
+    // Switching dithering off must not introduce a shade the palette does not
+    // have, or the option would be changing two things at once.
+    const palette = new Set<number>();
+    for (let i = 0; i < LEVELS; i++) palette.add(i / (LEVELS - 1));
+
+    for (let v = 0; v <= 1; v += 0.017) {
+      expect(palette.has(quantise(v, LEVELS))).toBe(true);
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 4; x++) expect(palette.has(orderedDither(v, x, y, LEVELS))).toBe(true);
+      }
+    }
+  });
+
+  it('agrees with posterising on values that sit exactly on a level', () => {
+    // Where there is nothing to break up, the two are identical - which is why
+    // 0 and 1 survive the dither and one-cell line art is possible at all.
+    for (let i = 0; i < LEVELS; i++) {
+      const onLevel = i / (LEVELS - 1);
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 4; x++) {
+          expect(orderedDither(onLevel, x, y, LEVELS)).toBe(quantise(onLevel, LEVELS));
+        }
+      }
+    }
+  });
+
+  it('preserves regional mean brightness, which posterising does not', () => {
+    // Averaged over a cell, the dither tracks the input; posterising steps.
+    const mean = (value: number, fn: (v: number, x: number, y: number) => number) => {
+      let total = 0;
+      for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) total += fn(value, x, y);
+      return total / 16;
+    };
+
+    let ditherError = 0;
+    let flatError = 0;
+    for (let v = 0.05; v < 0.95; v += 0.05) {
+      ditherError += Math.abs(mean(v, (a, x, y) => orderedDither(a, x, y, LEVELS)) - v);
+      flatError += Math.abs(mean(v, (a) => quantise(a, LEVELS)) - v);
+    }
+    expect(ditherError).toBeLessThan(flatError);
+  });
+});

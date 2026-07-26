@@ -8,6 +8,7 @@ const options = (over: Partial<SurfaceOptions> = {}): SurfaceOptions => ({
   maxPixels: 160_000,
   maxFieldCells: Infinity,
   levels: 5,
+  dither: true,
   ...over,
 });
 

@@ -37,6 +37,8 @@ export interface FireBackgroundOptions {
   fps: number;
   /** Palette size. Small on purpose - the dither is what makes it look smooth. */
   levels: number;
+  /** Ordered-dither the output. Off posterises flat, showing the bands. */
+  dither: boolean;
   /**
    * Weights the field towards its dark end above 1, and towards its light end
    * below. Below 1 here, uniquely: see the default for the measurement.
@@ -68,6 +70,7 @@ export const FIRE_BACKGROUND_DEFAULTS: FireBackgroundOptions = {
   maxFieldCells: 160_000,
   fps: 24,
   levels: 5,
+  dither: true,
   // Below one, which *brightens* rather than darkens - the only effect here
   // that wants that. Heat falls off linearly with height, so most of a flame's
   // area sits at low values and the top palette level went entirely unused:
@@ -114,6 +117,7 @@ export function createFireBackground(
     maxPixels: config.maxPixels,
     maxFieldCells: config.maxFieldCells,
     levels: config.levels,
+    dither: config.dither,
   });
 
   let fire: Fire | null = null;

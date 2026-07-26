@@ -27,6 +27,8 @@ export interface MetaballsBackgroundOptions {
   fps: number;
   /** Palette size. Small on purpose - the dither is what makes it look smooth. */
   levels: number;
+  /** Ordered-dither the output. Off posterises flat, showing the bands. */
+  dither: boolean;
   /** Weights the field towards its dark end. See `darken` in dither.ts. */
   gamma: number;
   /** A multiplier on animation time. */
@@ -56,6 +58,7 @@ export const METABALLS_BACKGROUND_DEFAULTS: MetaballsBackgroundOptions = {
   maxFieldCells: 40_000,
   fps: 24,
   levels: 5,
+  dither: true,
   // One. The surface threshold already decides what is dark, and biasing it
   // further only eats the shaded rim the shoulder exists to produce.
   gamma: 1,
@@ -95,6 +98,7 @@ export function createMetaballsBackground(
     maxPixels: config.maxPixels,
     maxFieldCells: config.maxFieldCells,
     levels: config.levels,
+    dither: config.dither,
   });
 
   let metaballs: Metaballs | null = null;

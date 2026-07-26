@@ -23,7 +23,7 @@
 // amplitude`, so the effect modulates a page colour rather than replacing it -
 // which is what lets body text sit directly on top of one of these.
 
-import { darken, orderedDither } from './dither';
+import { darken, orderedDither, quantise } from './dither';
 
 /** How the field's 0..1 levels are mapped onto actual greys. */
 export interface Shading {
@@ -159,6 +159,18 @@ export interface SurfaceOptions {
   maxFieldCells: number;
   /** Palette size. Small on purpose - the dither is what makes it smooth. */
   levels: number;
+  /**
+   * Ordered-dither the output, rather than posterising it flat.
+   *
+   * True is the whole point of the library, and off is mostly useful for seeing
+   * why: the palette is unchanged either way, so switching it off shows the same
+   * handful of greys as hard bands with visible steps between them. That is what
+   * the Bayer threshold is preventing.
+   *
+   * It is not a performance dial. Both paths quantise once per pixel; the dither
+   * adds an array lookup and an add.
+   */
+  dither: boolean;
 }
 
 /** One axis of the output-to-field lookup. */
@@ -298,6 +310,7 @@ export function createSurface(
     // which was asked for.
     const palette = buildPalette(shading, levels);
     const steps = levels > 1 ? levels - 1 : 1;
+    const dithering = options.dither;
 
     const x0s = mapX.i0;
     const x1s = mapX.i1;
@@ -318,9 +331,12 @@ export function createSurface(
         const bottom = field[rowB + x0] + (field[rowB + x1] - field[rowB + x0]) * tx;
         const value = darken(top + (bottom - top) * ty, gamma);
 
-        // `orderedDither` returns a value already snapped to the palette, so
-        // this index is exact rather than a re-quantisation.
-        const index = Math.round(orderedDither(value, x, y, levels) * steps) * 3;
+        // Both branches return a value already snapped to the palette, so this
+        // index is exact rather than a re-quantisation. The condition is
+        // loop-invariant; splitting the loop in two to hoist it by hand would
+        // duplicate the body for no measurable gain.
+        const level = dithering ? orderedDither(value, x, y, levels) : quantise(value, levels);
+        const index = Math.round(level * steps) * 3;
         const offset = rowOffset + x * 4;
         data[offset] = palette[index];
         data[offset + 1] = palette[index + 1];
