@@ -593,6 +593,38 @@ OS `prefers-color-scheme`. Turn either off with `watchThemeClass: false` / `watc
 
 A theme change only re-shades — the field is untouched, because only the greys it maps onto have changed.
 
+### Interaction
+
+Five of the six respond to the pointer, and all of them take a press _or a drag_:
+
+| Effect    | Press or drag does                                                        |
+| --------- | ------------------------------------------------------------------------- |
+| Smoke     | Stirs the fluid along the drag. Idle movement is ignored.                 |
+| Plasma    | Sends ripples out; a drag leaves a wake.                                  |
+| Rain      | Sends lens-like distortions through; a drag leaves a line of them.        |
+| Ridges    | Sets wobbles running through the stack, one per profile the drag crosses. |
+| Fire      | Throws sparks of fuel in; a drag paints a trail of plumes, like a brush.  |
+| Metaballs | Nothing yet.                                                              |
+
+`interactive: false` turns any of them off. Each caps how many disturbances run at once and **drops** extras rather than
+queueing them, so a long drag does not leave the page working through a backlog after the reader has stopped.
+
+Drag emissions are gated on _distance_, not time — a slow careful drag emits as densely as a fast one, where a
+time-based throttle would bunch up when the pointer moves slowly and leave gaps when it is quick.
+
+#### Dragging, and text selection
+
+Worth knowing before you enable this on a page of prose: a drag meant for the background is also a drag meant for the
+browser's text selection, and both happen. Drag across a paragraph and you will interact with the effect _and_ highlight
+the copy.
+
+**The library does not touch `user-select`**, deliberately. Whether reading or interacting matters more is the page's
+decision, not a background's — a blog wants selectable prose, an interactive toy does not. If you want drags to belong to
+the background, set `user-select: none` on the container yourself; the demo does exactly that, and says why in its CSS.
+
+All the listeners live on `window`, not the canvas, because a background canvas is `pointer-events: none` and so never
+sees a pointer itself. They are all removed by `destroy()`.
+
 ### The handle
 
 ```js

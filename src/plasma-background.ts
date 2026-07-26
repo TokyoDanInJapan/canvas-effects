@@ -10,7 +10,7 @@
 // last. It smooths the underlying field between frames, so cells drift between
 // palette levels rather than flicking between them.
 
-import { createDriver, prefersReducedMotion } from './driver';
+import { createDragSource, createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
 import { darken } from './dither';
@@ -57,7 +57,11 @@ export interface PlasmaBackgroundOptions {
   /** Warp parameters. Anything omitted falls back to `PLASMA_WARP_DEFAULTS`. */
   warp: Partial<PlasmaWarpConfig>;
   /**
-   * Let a click send a ripple out from where it landed.
+   * Let a click or drag send ripples out from where the pointer is.
+   *
+   * Dragging leaves a wake of them. Spaced widely, because ripples are large and
+   * overlapping rings quickly cancel into noise rather than reading as several
+   * disturbances.
    *
    * Listened for on the window rather than the canvas, for the same reason the
    * smoke's stirring is: a background canvas is `pointer-events: none` so it
@@ -231,27 +235,20 @@ export function createPlasmaBackground(
     watchColorScheme: config.watchColorScheme,
   });
 
-  /** A click starts a ripple where it landed. */
-  function onPointerDown(event: PointerEvent) {
-    if (still) return;
-    // Full rather than queued: a burst of clicks should not produce a backlog
-    // that keeps rippling long after the reader has stopped.
-    if (ripples.length >= config.maxRipples) return;
-
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    ripples.push({
-      x: (event.clientX - rect.left) / rect.width,
-      y: (event.clientY - rect.top) / rect.height,
-      age: 0,
-      strength: 1,
-    });
-  }
-
-  if (config.interactive && !still) {
-    window.addEventListener('pointerdown', onPointerDown, { passive: true });
-  }
+  const stopDragging =
+    config.interactive && !still
+      ? createDragSource(canvas, {
+          // Wide: a ripple's ring is a fifth of the screen across by the time it
+          // is obvious, and rings on top of each other read as noise.
+          spacing: 0.12,
+          onEmit(u, v) {
+            // Dropped rather than queued, so a long drag does not leave the page
+            // rippling for seconds after the reader has stopped.
+            if (ripples.length >= config.maxRipples) return;
+            ripples.push({ x: u, y: v, age: 0, strength: 1 });
+          },
+        })
+      : null;
 
   readShading();
   surface.resize();
@@ -279,7 +276,7 @@ export function createPlasmaBackground(
     },
     destroy() {
       driver.destroy();
-      window.removeEventListener('pointerdown', onPointerDown);
+      stopDragging?.();
       ripples.length = 0;
     },
   };

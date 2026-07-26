@@ -12,7 +12,7 @@
 // the fine tongue structure that distinguishes fire from a glow, and a cell here
 // is cheap enough (two passes of a few operations) to afford the finer grid.
 
-import { createDriver, prefersReducedMotion } from './driver';
+import { createDragSource, createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
 import { FIRE_DEFAULTS, applySpark, createFire, stepFire, type Fire, type FireParams, type Spark } from './fire';
@@ -51,7 +51,11 @@ export interface FireBackgroundOptions {
   /** Fire parameters. Anything omitted falls back to `FIRE_DEFAULTS`. */
   fire: Partial<FireParams>;
   /**
-   * Let a click throw a spark of new fuel in where it landed.
+   * Let a click or drag throw sparks of new fuel in.
+   *
+   * Dragging paints a trail of them, which turns the effect into a brush: each
+   * spark is carried up and torn apart independently, so a stroke becomes a row
+   * of plumes rather than one smear.
    *
    * Listened for on the window rather than the canvas, like every other
    * interaction here: a background canvas is `pointer-events: none`, so it never
@@ -179,25 +183,20 @@ export function createFireBackground(
     watchColorScheme: config.watchColorScheme,
   });
 
-  /** A click throws a spark of new fuel in. */
-  function onPointerDown(event: PointerEvent) {
-    if (still || !fire) return;
-    // A burst of clicks should not queue into a backlog of plumes.
-    if (pending.length > 4) return;
-
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    pending.push({
-      x: ((event.clientX - rect.left) / rect.width) * fire.w,
-      y: ((event.clientY - rect.top) / rect.height) * fire.h,
-      strength: 1,
-    });
-  }
-
-  if (config.interactive && !still) {
-    window.addEventListener('pointerdown', onPointerDown, { passive: true });
-  }
+  // Spaced at about two thirds of a spark's own radius, so a drag lays down an
+  // overlapping trail rather than a dotted line of separate blobs.
+  const stopDragging =
+    config.interactive && !still
+      ? createDragSource(canvas, {
+          spacing: params.sparkRadius * 0.66,
+          onEmit(u, v) {
+            if (!fire) return;
+            // A fast drag should not queue a backlog of plumes.
+            if (pending.length > 6) return;
+            pending.push({ x: u * fire.w, y: v * fire.h, strength: 1 });
+          },
+        })
+      : null;
 
   readShading();
   surface.resize();
@@ -217,7 +216,7 @@ export function createFireBackground(
     },
     destroy() {
       driver.destroy();
-      window.removeEventListener('pointerdown', onPointerDown);
+      stopDragging?.();
       pending.length = 0;
       fire = null;
     },

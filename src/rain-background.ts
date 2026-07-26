@@ -8,7 +8,7 @@
 // resumes rather than lurching, and reduced motion is served by settling it
 // once up front and then leaving it alone.
 
-import { createDriver, prefersReducedMotion } from './driver';
+import { createDragSource, createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
 import { RAIN_DEFAULTS, createRain, distortField, stepRain, type Distortion, type Rain, type RainParams } from './rain';
@@ -57,8 +57,11 @@ export interface RainBackgroundOptions {
   /** Rain parameters. Anything omitted falls back to `RAIN_DEFAULTS`. */
   rain: Partial<RainParams>;
   /**
-   * Let a click send a distortion through the rain - a ring that bends the
-   * streaks as it passes, like a droplet on glass acting as a lens.
+   * Let a click or drag send distortions through the rain - rings that bend the
+   * streaks as they pass, like droplets on glass acting as lenses.
+   *
+   * Dragging leaves a line of them, which is more visible than a single one: the
+   * rain is sparse, so more rings mean more chance of catching a streak.
    *
    * Listened for on the window rather than the canvas, like the smoke's stirring
    * and the plasma's ripples: a background canvas is `pointer-events: none`, so
@@ -187,25 +190,17 @@ export function createRainBackground(
     watchColorScheme: config.watchColorScheme,
   });
 
-  /** A click sends a distortion out from where it landed. */
-  function onPointerDown(event: PointerEvent) {
-    if (still || !rain) return;
-    if (distortions.length >= config.maxDistortions) return;
-
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    distortions.push({
-      x: ((event.clientX - rect.left) / rect.width) * rain.w,
-      y: ((event.clientY - rect.top) / rect.height) * rain.h,
-      age: 0,
-      strength: 1,
-    });
-  }
-
-  if (config.interactive && !still) {
-    window.addEventListener('pointerdown', onPointerDown, { passive: true });
-  }
+  const stopDragging =
+    config.interactive && !still
+      ? createDragSource(canvas, {
+          spacing: 0.09,
+          onEmit(u, v) {
+            if (!rain) return;
+            if (distortions.length >= config.maxDistortions) return;
+            distortions.push({ x: u * rain.w, y: v * rain.h, age: 0, strength: 1 });
+          },
+        })
+      : null;
 
   readShading();
   surface.resize();
@@ -225,7 +220,7 @@ export function createRainBackground(
     },
     destroy() {
       driver.destroy();
-      window.removeEventListener('pointerdown', onPointerDown);
+      stopDragging?.();
       distortions.length = 0;
       rain = null;
     },

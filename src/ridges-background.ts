@@ -12,7 +12,7 @@
 // Both are absent under reduced motion, where a single still frame is drawn -
 // correct for a still in either case.
 
-import { createDriver, prefersReducedMotion } from './driver';
+import { createDragSource, createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
 import {
@@ -59,7 +59,10 @@ export interface RidgesBackgroundOptions {
   /** Landscape parameters. Anything omitted falls back to `RIDGE_DEFAULTS`. */
   ridges: Partial<RidgeParams>;
   /**
-   * Let a click set a wobble running through the stack from the profile it hit.
+   * Let a click or drag set wobbles running through the stack.
+   *
+   * Dragging strikes each profile it crosses in turn, so a stroke down the screen
+   * reads as running a finger across a stack of strings.
    *
    * Listened for on the window rather than the canvas, like every other
    * interaction here: a background canvas is `pointer-events: none`, so it never
@@ -195,28 +198,24 @@ export function createRidgesBackground(
    * screen point, so it travels with the terrain as it approaches instead of
    * sitting still while rows pass through it.
    */
-  function onPointerDown(event: PointerEvent) {
-    if (still || !ridges) return;
-    if (wobbles.length >= config.maxWobbles) return;
+  const stopDragging =
+    config.interactive && !still
+      ? createDragSource(canvas, {
+          spacing: 0.06,
+          onEmit(u, v) {
+            if (!ridges) return;
+            if (wobbles.length >= config.maxWobbles) return;
 
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    const u = (event.clientX - rect.left) / rect.width;
-    const cellY = ((event.clientY - rect.top) / rect.height) * ridges.h;
-    const depth = depthAtY(cellY, ridges.h, params);
-
-    wobbles.push({
-      z: Math.round(ridges.travel + depth * params.rows),
-      x: u,
-      age: 0,
-      strength: 1,
-    });
-  }
-
-  if (config.interactive && !still) {
-    window.addEventListener('pointerdown', onPointerDown, { passive: true });
-  }
+            const depth = depthAtY(v * ridges.h, ridges.h, params);
+            wobbles.push({
+              z: Math.round(ridges.travel + depth * params.rows),
+              x: u,
+              age: 0,
+              strength: 1,
+            });
+          },
+        })
+      : null;
 
   readShading();
   surface.resize();
@@ -236,7 +235,7 @@ export function createRidgesBackground(
     },
     destroy() {
       driver.destroy();
-      window.removeEventListener('pointerdown', onPointerDown);
+      stopDragging?.();
       wobbles.length = 0;
       ridges = null;
     },

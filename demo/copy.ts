@@ -40,7 +40,7 @@ export const COPY: Record<string, Copy> = {
         'something with filaments in it.',
       'Time enters twice and needs to. One term slides the whole domain, which alone would look like a photograph ' +
         'being panned; the other moves the inner fields against each other, which is what makes it evolve in place.',
-      '<strong>Click anywhere to send a ripple out from where it lands.</strong> It is a ring of radial displacement ' +
+      '<strong>Click or drag to send ripples out from the pointer.</strong> It is a ring of radial displacement ' +
         'added to the finished warp coordinate, anchored in screen space — so it stays where you clicked while the ' +
         'field drifts underneath it, and it ages on a real-time clock rather than on animation time, so changing ' +
         '<code>speed</code> does not stretch it out.',
@@ -58,7 +58,7 @@ export const COPY: Record<string, Copy> = {
       'That turns out to matter. A fast drop leaves a <em>longer</em> streak than a slow one, because its brightness ' +
         'has had less time to fade over the same distance, and a drop that retires at the bottom leaves its trail to ' +
         'fade in place instead of taking it along.',
-      '<strong>Click anywhere to send a distortion through it.</strong> It displaces what is already there rather ' +
+      '<strong>Click or drag to send distortions through it.</strong> It displaces what is already there rather ' +
         'than adding light of its own — an expanding ring that bends the streaks as it passes, like a droplet on ' +
         'glass acting as a lens. Bending the highest-contrast thing on screen reads far better than drawing a faint ' +
         'new shape among it.',
@@ -77,7 +77,7 @@ export const COPY: Record<string, Copy> = {
       'Hidden lines are the effect. Without occlusion this is a tangle; with it you get depth, and the notch where a ' +
         'near crest bites into the rows above. It is done with a floating horizon — draw nearest to farthest, keep ' +
         'the highest point covered so far per column — which is one pass and no z-buffer.',
-      '<strong>Click a line to set a wobble running through the stack.</strong> It is a wave packet — an envelope ' +
+      '<strong>Click or drag across the lines to set wobbles running through the stack.</strong> It is a wave packet — an envelope ' +
         'around a travelling front times an oscillation — so the struck profile ripples through a few crests rather ' +
         'than heaving once, and the disturbance spreads outward to its neighbours as it goes. It is keyed to the row ' +
         'it hit rather than to the point on screen, so it travels with the terrain instead of sitting still while ' +
@@ -96,7 +96,7 @@ export const COPY: Record<string, Copy> = {
       'Not the fluid solver, deliberately. That would be more physical and far slower, and it would look like the ' +
         'smoke with a warm palette. Cellular fire flickers in hard tongues instead of overturning in plumes, because ' +
         'the noise is injected per cell per frame rather than emerging from a flow.',
-      '<strong>Click anywhere to throw a spark in.</strong> Nothing here says "rise" — the propagation already ' +
+      '<strong>Click or drag to throw sparks in \u2014 dragging paints a trail of plumes.</strong> Nothing here says "rise" — the propagation already ' +
         "carries every cell's heat upward, cools it randomly and jitters it sideways, so a dropped blob climbs, " +
         'thins, tears into tongues and dies out entirely on its own. It is the only interaction in this library that ' +
         'evolves rather than simply fading where it was put.',

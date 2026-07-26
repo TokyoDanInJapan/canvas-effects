@@ -115,6 +115,98 @@ export function createDriver(canvas: HTMLCanvasElement, options: DriverOptions):
   };
 }
 
+export interface DragOptions {
+  /**
+   * Least the pointer must travel between emissions, as a fraction of the
+   * canvas's shorter side.
+   *
+   * Gating on distance rather than on time is what makes a slow, careful drag
+   * emit as densely as a fast one - a time-based throttle bunches everything up
+   * when the pointer is moving slowly and leaves gaps when it is quick.
+   */
+  spacing: number;
+  /** Called on press, and again each time the pointer has moved `spacing`. */
+  onEmit: (u: number, v: number) => void;
+}
+
+/**
+ * Turns presses and drags on the page into a stream of positions.
+ *
+ * Listened for on `window` rather than the canvas, which every interaction here
+ * has to do: a background canvas is `pointer-events: none` so it never
+ * intercepts anything meant for the page, and therefore never sees a pointer
+ * itself.
+ *
+ * Positions are normalised to the canvas box, 0..1 on each axis, so each effect
+ * converts into whatever units it thinks in - cells, screen widths, rows.
+ *
+ * Returns a teardown that removes every listener it added.
+ */
+export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions): () => void {
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+
+  /** Normalised position, or null if the canvas has no box to measure against. */
+  function locate(event: PointerEvent): [number, number] | null {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return [(event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height];
+  }
+
+  function onDown(event: PointerEvent) {
+    const at = locate(event);
+    if (!at) return;
+    dragging = true;
+    lastX = at[0];
+    lastY = at[1];
+    options.onEmit(at[0], at[1]);
+  }
+
+  function onMove(event: PointerEvent) {
+    // `buttons` as well as our own flag: a pointerup that lands outside the
+    // window never reaches us, and without this the drag would stay stuck on.
+    if (!dragging || event.buttons === 0) {
+      dragging = false;
+      return;
+    }
+
+    const at = locate(event);
+    if (!at) return;
+
+    // Measured against the shorter side, so `spacing` means the same thing
+    // whichever way round the window is.
+    const rect = canvas.getBoundingClientRect();
+    const shorter = Math.min(rect.width, rect.height);
+    const dx = (at[0] - lastX) * rect.width;
+    const dy = (at[1] - lastY) * rect.height;
+    if (Math.hypot(dx, dy) < options.spacing * shorter) return;
+
+    lastX = at[0];
+    lastY = at[1];
+    options.onEmit(at[0], at[1]);
+  }
+
+  function onUp() {
+    dragging = false;
+  }
+
+  window.addEventListener('pointerdown', onDown, { passive: true });
+  window.addEventListener('pointermove', onMove, { passive: true });
+  window.addEventListener('pointerup', onUp, { passive: true });
+  window.addEventListener('pointercancel', onUp, { passive: true });
+  // A drag interrupted by the tab losing focus should not resume on return.
+  window.addEventListener('blur', onUp);
+
+  return () => {
+    window.removeEventListener('pointerdown', onDown);
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    window.removeEventListener('blur', onUp);
+  };
+}
+
 /** True if the visitor has asked for less motion. */
 export function prefersReducedMotion(): boolean {
   if (typeof window.matchMedia !== 'function') return false;
