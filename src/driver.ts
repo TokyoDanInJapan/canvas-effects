@@ -1,11 +1,11 @@
-// The loop and the listeners, shared by both effects.
+// The loop and the listeners, shared by every effect.
 //
 // Nothing here knows what is being drawn. It owns four things that every
 // long-lived canvas background has to get right and that are easy to get wrong
 // one at a time:
 //
 //   • a frame loop throttled to a target rate rather than the refresh rate,
-//     because neither of these effects gains anything from 120fps
+//     because none of these effects gains anything from 120fps
 //   • stopping entirely when the tab is hidden, so a backgrounded page costs
 //     nothing
 //   • re-measuring when the canvas changes size
@@ -36,13 +36,23 @@ export interface DriverOptions {
 }
 
 export interface Driver {
-  /** Starts the loop if it is not already running. */
+  /**
+   * Starts the loop if it is not already running.
+   *
+   * While the tab is hidden and `pauseWhenHidden` is set this only records the
+   * intent, and the loop begins when the tab is shown again.
+   */
   start(): void;
-  /** Stops the loop. Safe to call when already stopped. */
+  /**
+   * Stops the loop. Safe to call when already stopped.
+   *
+   * It stays stopped: showing the tab again does not undo this, only a further
+   * `start` does.
+   */
   stop(): void;
   /** Stops the loop and removes every listener. */
   destroy(): void;
-  /** True while the loop is running. */
+  /** True while the loop is actually drawing - false while paused by a hidden tab. */
   readonly running: boolean;
 }
 
@@ -51,6 +61,17 @@ export function createDriver(canvas: HTMLCanvasElement, options: DriverOptions):
   let lastDrawn = 0;
   const teardown: Array<() => void> = [];
 
+  // Whether the *host* wants the loop running, as distinct from whether it
+  // currently is. Hiding the tab stops the loop without changing this, so
+  // showing it again resumes only what was running beforehand.
+  //
+  // Keeping the two apart is what stops `visibilitychange` from starting a loop
+  // nobody asked for. Without it, a background left deliberately stopped -
+  // either by the host calling `stop`, or by reduced motion meaning it was never
+  // started at all - would begin animating the first time the visitor switched
+  // tabs and came back.
+  let wanted = false;
+
   function tick(now: number) {
     frame = requestAnimationFrame(tick);
     if (now - lastDrawn < 1000 / options.fps) return;
@@ -58,13 +79,33 @@ export function createDriver(canvas: HTMLCanvasElement, options: DriverOptions):
     options.onFrame();
   }
 
+  /**
+   * Starts the loop unless the tab is hidden, in which case waiting is the point.
+   *
+   * The hidden check is conditional on `pauseWhenHidden`, because that is what
+   * decides whether anything will ever start it again: with no visibility
+   * listener registered, refusing to start here would leave a host that mounted
+   * in a background tab stopped forever.
+   */
+  function run() {
+    if (frame) return;
+    if (options.pauseWhenHidden && document.hidden) return;
+    frame = requestAnimationFrame(tick);
+  }
+
+  function pause() {
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+  }
+
   function start() {
-    if (!frame) frame = requestAnimationFrame(tick);
+    wanted = true;
+    run();
   }
 
   function stop() {
-    if (frame) cancelAnimationFrame(frame);
-    frame = 0;
+    wanted = false;
+    pause();
   }
 
   // ResizeObserver where it exists, because the canvas is not necessarily
@@ -80,9 +121,12 @@ export function createDriver(canvas: HTMLCanvasElement, options: DriverOptions):
   }
 
   if (options.pauseWhenHidden) {
+    // `pause`/`run` rather than `stop`/`start`: this is the tab's opinion about
+    // whether drawing is worth anything, not the host's about whether it wants
+    // to be drawing at all.
     const onVisibility = () => {
-      if (document.hidden) stop();
-      else start();
+      if (document.hidden) pause();
+      else if (wanted) run();
     };
     document.addEventListener('visibilitychange', onVisibility);
     teardown.push(() => document.removeEventListener('visibilitychange', onVisibility));
@@ -135,8 +179,30 @@ export interface DragOptions {
    * pointer re-entering the window, say - cannot flood a frame.
    */
   maxPerMove: number;
-  /** Called on press, and at every `spacing` along a drag. */
-  onEmit: (u: number, v: number) => void;
+  /**
+   * Called on press, and at every `spacing` along a drag.
+   *
+   * `u` and `v` are normalised to the canvas box, 0..1 on each axis. `du` and
+   * `dv` are the step taken since the previous emission, in the same units, and
+   * are zero on the initial press.
+   *
+   * The step is worth having where an effect wants a shove rather than a
+   * position, because it is *resampled*: every emission along a drag carries the
+   * same `spacing`-sized step, so the total handed over is proportional to the
+   * distance the pointer actually travelled and does not depend on how often the
+   * browser deigned to deliver an event. A raw `movementX` does depend on that,
+   * which is what makes it an unreliable way to measure a drag - and it is 0 or
+   * absent for touch pointers besides.
+   */
+  onEmit: (u: number, v: number, du: number, dv: number) => void;
+  /**
+   * Called when a drag ends - pointer up, pointer cancelled, or the tab losing
+   * focus mid-drag. Not called if no drag was in progress.
+   *
+   * Only effects that hold something need this. An effect that emits into the
+   * field and forgets - a ripple, a wobble - has nothing to let go of.
+   */
+  onRelease?: () => void;
 }
 
 /**
@@ -164,20 +230,28 @@ export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions
     return [(event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height];
   }
 
+  /** Ends a drag if one is in progress, telling the caller once and only once. */
+  function release() {
+    if (!dragging) return;
+    dragging = false;
+    options.onRelease?.();
+  }
+
   function onDown(event: PointerEvent) {
     const at = locate(event);
     if (!at) return;
     dragging = true;
     lastX = at[0];
     lastY = at[1];
-    options.onEmit(at[0], at[1]);
+    // No step on a press: there is nothing to have moved from yet.
+    options.onEmit(at[0], at[1], 0, 0);
   }
 
   function onMove(event: PointerEvent) {
     // `buttons` as well as our own flag: a pointerup that lands outside the
     // window never reaches us, and without this the drag would stay stuck on.
     if (!dragging || event.buttons === 0) {
-      dragging = false;
+      release();
       return;
     }
 
@@ -202,9 +276,15 @@ export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions
     const spanU = at[0] - lastX;
     const spanV = at[1] - lastY;
 
+    // One step's worth of the segment, and the same for every emission along it -
+    // which is what makes the deltas add up to the distance travelled.
+    const fraction = step / travelled;
+    const du = spanU * fraction;
+    const dv = spanV * fraction;
+
     for (let i = 1; i <= steps; i++) {
-      const t = (i * step) / travelled;
-      options.onEmit(lastX + spanU * t, lastY + spanV * t);
+      const t = i * fraction;
+      options.onEmit(lastX + spanU * t, lastY + spanV * t, du, dv);
     }
 
     // Advance to the last point actually emitted, so the remainder carries into
@@ -214,23 +294,22 @@ export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions
     lastY += spanV * covered;
   }
 
-  function onUp() {
-    dragging = false;
-  }
-
   window.addEventListener('pointerdown', onDown, { passive: true });
   window.addEventListener('pointermove', onMove, { passive: true });
-  window.addEventListener('pointerup', onUp, { passive: true });
-  window.addEventListener('pointercancel', onUp, { passive: true });
+  window.addEventListener('pointerup', release, { passive: true });
+  window.addEventListener('pointercancel', release, { passive: true });
   // A drag interrupted by the tab losing focus should not resume on return.
-  window.addEventListener('blur', onUp);
+  window.addEventListener('blur', release);
 
   return () => {
+    // Anything being held is let go of, so an effect that unmounts mid-drag is
+    // not left believing the pointer still has hold of it.
+    release();
     window.removeEventListener('pointerdown', onDown);
     window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-    window.removeEventListener('pointercancel', onUp);
-    window.removeEventListener('blur', onUp);
+    window.removeEventListener('pointerup', release);
+    window.removeEventListener('pointercancel', release);
+    window.removeEventListener('blur', release);
   };
 }
 
