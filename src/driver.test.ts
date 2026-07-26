@@ -23,6 +23,10 @@ interface Stub {
   frames(): number;
   /** Runs the queued frame callback with a timestamp, as rAF would. */
   advance(now: number): void;
+  /** Invokes the callback the driver handed to its ResizeObserver. */
+  observeResize(): void;
+  /** Invokes the callback the driver handed to its MutationObserver. */
+  observeMutation(): void;
   observed: { resize: number; mutation: number; disconnected: number };
 }
 
@@ -44,6 +48,11 @@ function stubDom({ resizeObserver = true, matchMedia = true } = {}): Stub {
   });
 
   const observed = { resize: 0, mutation: 0, disconnected: 0 };
+
+  // The callbacks the driver passes to its observers, kept so a test can fire them.
+  // Without this the observers look wired up and nothing proves what they call.
+  let onResizeObserved: (() => void) | null = null;
+  let onMutationObserved: (() => void) | null = null;
 
   let queued: ((now: number) => void) | null = null;
   let handle = 0;
@@ -81,6 +90,9 @@ function stubDom({ resizeObserver = true, matchMedia = true } = {}): Stub {
     'ResizeObserver',
     resizeObserver
       ? class {
+          constructor(fn: () => void) {
+            onResizeObserved = fn;
+          }
           observe() {
             observed.resize++;
           }
@@ -94,6 +106,9 @@ function stubDom({ resizeObserver = true, matchMedia = true } = {}): Stub {
   vi.stubGlobal(
     'MutationObserver',
     class {
+      constructor(fn: () => void) {
+        onMutationObserved = fn;
+      }
       observe() {
         observed.mutation++;
       }
@@ -120,6 +135,8 @@ function stubDom({ resizeObserver = true, matchMedia = true } = {}): Stub {
       queued = null;
       fn?.(now);
     },
+    observeResize: () => onResizeObserved?.(),
+    observeMutation: () => onMutationObserved?.(),
     observed,
   };
 }
@@ -284,6 +301,17 @@ describe('createDriver', () => {
       expect(resizes).toBe(0);
     });
 
+    it('reports an observation to onResize', () => {
+      // The observer being constructed is not the same as it being wired to the
+      // right handler, and only firing its callback tells them apart.
+      const dom = stubDom();
+      let resizes = 0;
+      createDriver(canvas, options({ onResize: () => resizes++ }));
+
+      dom.observeResize();
+      expect(resizes).toBe(1);
+    });
+
     it('falls back to the window event without one', () => {
       const dom = stubDom({ resizeObserver: false });
       let resizes = 0;
@@ -299,6 +327,15 @@ describe('createDriver', () => {
       const dom = stubDom();
       createDriver(canvas, options({ watchThemeClass: true }));
       expect(dom.observed.mutation).toBe(1);
+    });
+
+    it('reports a mutation to onThemeChange', () => {
+      const dom = stubDom();
+      let themes = 0;
+      createDriver(canvas, options({ watchThemeClass: true, onThemeChange: () => themes++ }));
+
+      dom.observeMutation();
+      expect(themes).toBe(1);
     });
 
     it('reports an OS colour scheme change when asked', () => {
@@ -429,6 +466,36 @@ describe('createDragSource', () => {
 
     dom.fire('window', 'pointermove', move(500, 250));
     expect(drag.emissions).toHaveLength(0);
+  });
+
+  it('stops mid-drag if the canvas loses its box', () => {
+    // A canvas hidden or detached while the pointer is down: there is nothing to
+    // measure a position against, so there is nothing to emit.
+    const dom = stubDom();
+    let width = 1000;
+    const shrinking = {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width, height: 500 }),
+    } as unknown as HTMLCanvasElement;
+    const drag = source(shrinking);
+
+    dom.fire('window', 'pointerdown', down(100, 250));
+    expect(drag.emissions).toHaveLength(1);
+
+    width = 0;
+    dom.fire('window', 'pointermove', move(400, 250));
+    expect(drag.emissions).toHaveLength(1);
+  });
+
+  it('emits nothing when the spacing works out to no distance at all', () => {
+    // `spacing` is a fraction of the shorter side, so zero - or a canvas one pixel
+    // tall - would divide by nothing. Emitting per pixel is not the fallback.
+    const dom = stubDom();
+    const drag = source(boxed(1000, 500), { spacing: 0 });
+
+    dom.fire('window', 'pointerdown', down(100, 250));
+    dom.fire('window', 'pointermove', move(400, 250));
+
+    expect(drag.emissions).toHaveLength(1);
   });
 
   describe('walking a drag', () => {

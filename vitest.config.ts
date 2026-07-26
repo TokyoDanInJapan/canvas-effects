@@ -38,7 +38,13 @@ export default defineConfig({
       // mount specs, which hold against a state that cannot arise while the
       // harness is calling them in order. Testing them would mean constructing
       // that impossible state, which tests the test rather than the library.
-      thresholds: { statements: 99, branches: 93, functions: 100, lines: 99 },
+      //
+      // Branches came down from 93 with vitest 4, and not because anything stopped
+      // being tested. Version 4 maps v8's output through the AST rather than
+      // approximating it, so a guard that only ever ran one way is now counted as
+      // one way rather than credited as covered. The numbers are less flattering
+      // and describe the suite more accurately, which is the better trade.
+      thresholds: { statements: 99, branches: 92, functions: 100, lines: 99 },
     },
   },
 });
