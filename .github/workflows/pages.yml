@@ -52,7 +52,7 @@ jobs:
       #
       # So Pages is enabled once, by a person or an admin token, with the source
       # set to GitHub Actions. It is enabled on this repository already.
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       # `--base` rather than a change to vite.config.ts: a project Pages site is
       # served from a subpath, so the default `/assets/...` would 404 there - but
@@ -61,7 +61,7 @@ jobs:
       - name: Build the demo
         run: npx vite build --base=/${{ github.event.repository.name }}/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: demo-dist
 
@@ -73,4 +73,4 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
