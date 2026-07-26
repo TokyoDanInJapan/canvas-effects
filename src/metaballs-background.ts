@@ -1,18 +1,28 @@
 // The metaballs background: canvas and loop. The implicit surface it draws lives
 // in metaballs.ts, and the shading it hands the result to lives in render.ts.
 //
-// Stateless in time like the plasma: the field is a pure function of elapsed
-// time, so a frame can be drawn at any moment without having drawn the ones
-// before it. That makes reduced motion a single draw, with no settling run and
+// Stateless in time like the plasma - with one exception. The field is a pure
+// function of elapsed time, so a frame can be drawn at any moment without having
+// drawn the ones before it. A held or just-released ball is the exception: its
+// blend weight is carried between frames, and is absent under reduced motion
+// where a single still frame is drawn. That makes reduced motion a single draw, with no settling run and
 // no fixed-timestep dance to keep a stalled tab from lurching.
 //
 // A smooth field, so it takes the renderer's interpolation and runs at half
 // output resolution like the smoke, the plasma and unlike the line-art effects.
 
-import { createDriver, prefersReducedMotion } from './driver';
+import { createDragSource, createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
-import { METABALL_DEFAULTS, createMetaballs, renderMetaballs, type MetaballParams, type Metaballs } from './metaballs';
+import {
+  METABALL_DEFAULTS,
+  createMetaballs,
+  nearestBall,
+  renderMetaballs,
+  type BallOverride,
+  type MetaballParams,
+  type Metaballs,
+} from './metaballs';
 
 export interface MetaballsBackgroundOptions {
   /** CSS pixels per rendered pixel - one dither cell. */
@@ -37,6 +47,15 @@ export interface MetaballsBackgroundOptions {
   shading: Shading | (() => Shading);
   /** Metaball parameters. Anything omitted falls back to `METABALL_DEFAULTS`. */
   metaballs: Partial<MetaballParams>;
+  /**
+   * Let a press take hold of the nearest blob and a drag carry it around, with
+   * it easing back onto its own path when let go.
+   *
+   * Listened for on the window rather than the canvas, like every other
+   * interaction here: a background canvas is `pointer-events: none`, so it never
+   * sees a pointer itself.
+   */
+  interactive: boolean;
   /** Draw one frame and stop when the visitor has asked for less motion. */
   respectReducedMotion: boolean;
   /** Stop the loop while the tab is hidden. */
@@ -65,6 +84,7 @@ export const METABALLS_BACKGROUND_DEFAULTS: MetaballsBackgroundOptions = {
   speed: 1,
   shading: defaultShading,
   metaballs: {},
+  interactive: true,
   respectReducedMotion: true,
   pauseWhenHidden: true,
   watchThemeClass: true,
@@ -105,6 +125,15 @@ export function createMetaballsBackground(
   let shading: Shading = { base: 0, amplitude: 0 };
   let elapsed = 0;
 
+  // Which ball the pointer has hold of, where it is being held, and how much of
+  // that hold is currently in force. `weight` eases in on grab and out on
+  // release; see `BallOverride` for why releasing has to be a blend.
+  let heldIndex = -1;
+  let holding = false;
+  let holdX = 0;
+  let holdY = 0;
+  let weight = 0;
+
   function readShading() {
     shading = typeof config.shading === 'function' ? config.shading() : config.shading;
   }
@@ -113,9 +142,19 @@ export function createMetaballsBackground(
     if (metaballs) surface.shade(metaballs.field, shading, config.gamma);
   }
 
+  /** The current hold, or null when there is nothing to apply. */
+  function override(): BallOverride | null {
+    if (heldIndex < 0 || weight <= 0) return null;
+    return { index: heldIndex, x: holdX, y: holdY, weight };
+  }
+
   function rebuild() {
     // The arrangement is rerolled on resize, but `elapsed` carries over so the
-    // motion does not jump back to the start on a window drag.
+    // motion does not jump back to the start on a window drag. A hold does not
+    // survive it: the ball it referred to no longer exists.
+    heldIndex = -1;
+    holding = false;
+    weight = 0;
     metaballs = createMetaballs(surface.fieldW, surface.fieldH, config.random, params);
     renderMetaballs(metaballs, params, elapsed);
   }
@@ -128,9 +167,25 @@ export function createMetaballsBackground(
       const now = performance.now();
       // Accumulated rather than read off the clock, so pausing resumes where it
       // stopped. Clamped, so a backgrounded tab does not lurch on return.
-      if (lastNow) elapsed += Math.min(now - lastNow, 100) * 0.001 * config.speed;
+      // Clamped, so a backgrounded tab does not lurch on return.
+      const dt = lastNow ? Math.min(now - lastNow, 100) * 0.001 : 0;
+      elapsed += dt * config.speed;
       lastNow = now;
-      if (metaballs) renderMetaballs(metaballs, params, elapsed);
+
+      // Real seconds, unscaled by `speed`: picking a blob up should not take
+      // four times as long because the arrangement happens to be drifting slowly.
+      if (heldIndex >= 0) {
+        const towards = holding ? 1 : 0;
+        const rate = holding ? params.grabEase : params.releaseEase;
+        weight += (towards - weight) * (rate > 0 ? Math.min(1, dt / rate) : 1);
+        // Settled back on its path: stop overriding it at all.
+        if (!holding && weight < 0.002) {
+          heldIndex = -1;
+          weight = 0;
+        }
+      }
+
+      if (metaballs) renderMetaballs(metaballs, params, elapsed, override());
       shade();
     },
     onResize() {
@@ -147,6 +202,43 @@ export function createMetaballsBackground(
     watchThemeClass: config.watchThemeClass,
     watchColorScheme: config.watchColorScheme,
   });
+
+  const stopDragging =
+    config.interactive && !still
+      ? createDragSource(canvas, {
+          // Fine, because the held ball simply *is* wherever the pointer last was
+          // - there is nothing being emitted, so this is only how often the hold
+          // position is refreshed.
+          spacing: 0.004,
+          maxPerMove: 4,
+          onEmit(u, v) {
+            if (!metaballs) return;
+            const aspect = metaballs.h > 0 ? metaballs.w / metaballs.h : 1;
+            holdX = u * aspect;
+            holdY = v;
+
+            // Only the first emission of a drag chooses a ball; the rest move
+            // whichever one was picked up, or nothing if the press missed.
+            if (!holding) {
+              holding = true;
+              heldIndex = nearestBall(metaballs.balls, holdX, holdY, params.grabReach);
+              weight = 0;
+            }
+          },
+        })
+      : null;
+
+  // `createDragSource` has no notion of release, since every other effect only
+  // cares where a pointer *was*. This one has to know when it stops.
+  function onRelease() {
+    holding = false;
+  }
+
+  if (config.interactive && !still) {
+    window.addEventListener('pointerup', onRelease, { passive: true });
+    window.addEventListener('pointercancel', onRelease, { passive: true });
+    window.addEventListener('blur', onRelease);
+  }
 
   readShading();
   surface.resize();
@@ -173,6 +265,10 @@ export function createMetaballsBackground(
     },
     destroy() {
       driver.destroy();
+      stopDragging?.();
+      window.removeEventListener('pointerup', onRelease);
+      window.removeEventListener('pointercancel', onRelease);
+      window.removeEventListener('blur', onRelease);
       metaballs = null;
     },
   };

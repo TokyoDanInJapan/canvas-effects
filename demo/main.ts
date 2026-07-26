@@ -494,6 +494,8 @@ const METABALL_DIALS: Dial[] = [
   },
   { key: 'ballSpeed', label: 'speed', min: 0.02, max: 1, step: 0.02, value: METABALL_DEFAULTS.speed },
   { key: 'wander', label: 'wander', min: 0, max: 1, step: 0.05, value: METABALL_DEFAULTS.wander },
+  { key: 'grabReach', label: 'grabReach', min: 0.05, max: 1, step: 0.05, value: 0.4, note: 'drag a blob about' },
+  { key: 'releaseEase', label: 'releaseEase', min: 0.05, max: 3, step: 0.05, value: 0.9, note: 'settling back' },
 ];
 
 let effect: Effect = 'smoke';
@@ -533,6 +535,8 @@ function mount() {
         shoulder: values.shoulder,
         speed: values.ballSpeed,
         wander: values.wander,
+        grabReach: values.grabReach,
+        releaseEase: values.releaseEase,
       },
     });
     if (!handle) fpsOut.textContent = 'no 2D context';

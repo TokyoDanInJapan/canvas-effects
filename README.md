@@ -520,6 +520,21 @@ one.
 round on any window. Working in `0..1` on both axes would stretch every blob into an ellipse on a wide screen; a test
 measures a lone blob's extent both ways and requires them equal.
 
+**Press and drag to carry a blob around.** A dragged ball is just another contribution to the sum, so it reaches for its
+neighbours exactly as the others do — run it into one and they fuse, pull away and the neck stretches and parts. It is the
+one interaction here that needs no emissions at all: the held ball simply _is_ wherever the pointer last was, so there is
+nothing to space out or interpolate, and it comes out smooth for free. Measured against the smoke, which is the yardstick
+for that: variability 0.16 against 0.11, with no stalled samples.
+
+**Releasing has to be a blend, not a handover.** A ball's position is a closed-form function of the clock, so it never
+stopped moving while you held it — hand control straight back and it jumps from your cursor to wherever its orbit had got
+to. `BallOverride.weight` eases from 1 to 0 instead, so the ball converges on a target that is itself still travelling.
+There is a test that walks the weight down and requires the gap to the free position to shrink monotonically to zero.
+
+`grabReach` bounds how near a press has to be; beyond it a press takes hold of nothing rather than yanking a blob in from
+across the screen. `grabEase` and `releaseEase` are both in real seconds, unscaled by `speed`, so picking a blob up does
+not take four times as long because the arrangement happens to be drifting slowly.
+
 `shoulder` is the look dial. Narrow gives hard-edged classic metaballs — which at five greys means flat silhouettes,
 because a hard threshold produces a two-value field and wastes the palette entirely. Wide, the default, gives shaded
 blobs whose rims cross several palette levels and dither into a gradient.
@@ -604,7 +619,7 @@ Five of the six respond to the pointer, and all of them take a press _or a drag_
 | Rain      | Sends lens-like distortions through; a drag leaves a line of them.        |
 | Ridges    | Sets wobbles running through the stack, one per profile the drag crosses. |
 | Fire      | Throws sparks of fuel in; a drag paints a trail of plumes, like a brush.  |
-| Metaballs | Nothing yet.                                                              |
+| Metaballs | Takes hold of the nearest blob and carries it; it eases back on release.  |
 
 `interactive: false` turns any of them off. Each caps how many disturbances run at once and **drops** extras rather than
 queueing them, so a long drag does not leave the page working through a backlog after the reader has stopped.
@@ -781,6 +796,8 @@ And the `metaballs` sub-options, documented inline on `MetaballParams`:
 | `shoulder`                  | `0.38`          | Width of the gradient across it. **0 gives a hard edge and wastes the palette.** |
 | `strength`                  | `1`             | Peak contribution of one ball at its centre.                                     |
 | `speed` / `wander`          | `0.16` / `0.72` | How fast they move, and how far from centre they stray.                          |
+| `grabReach`                 | `0.4`           | How near a press must be to take hold of a blob, in field-height units.          |
+| `grabEase` / `releaseEase`  | `0.16` / `0.9`  | Seconds to come to the pointer, and to settle back onto its path.                |
 
 The full parameter sets are documented inline where they are declared - `SmokeParams` in `src/smoke.ts`,
 `PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts`, `RidgeParams` in `src/ridges.ts`, `FireParams` in `src/fire.ts`, `MetaballParams` in `src/metaballs.ts` - with a

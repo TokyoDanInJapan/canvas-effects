@@ -4,6 +4,8 @@ import { makeRandom } from './noise';
 import {
   METABALL_DEFAULTS,
   ballsAt,
+  nearestBall,
+  type BallOverride,
   coverage,
   createMetaballs,
   falloff,
@@ -315,5 +317,161 @@ describe('renderMetaballs', () => {
     const solid = Array.from(m.field).filter((v) => v >= 0.98).length;
     // Plenty of the field is mid-tone, which is what the dither works on.
     expect(partial).toBeGreaterThan(solid * 0.2);
+  });
+});
+
+describe('nearestBall', () => {
+  const balls = [ball(0.2, 0.2), ball(1.0, 0.5), ball(0.3, 0.9)];
+
+  it('finds the closest one', () => {
+    expect(nearestBall(balls, 0.25, 0.22, 1)).toBe(0);
+    expect(nearestBall(balls, 0.95, 0.55, 1)).toBe(1);
+    expect(nearestBall(balls, 0.35, 0.85, 1)).toBe(2);
+  });
+
+  it('returns -1 when nothing is within reach', () => {
+    // A press in empty space should take hold of nothing rather than yanking a
+    // blob in from the far side of the screen.
+    expect(nearestBall(balls, 5, 5, 0.4)).toBe(-1);
+  });
+
+  it('measures isotropically, so a press does not favour the horizontal', () => {
+    // Balls live in height units - x spans 0..aspect - so this is a plain
+    // Euclidean distance and equal screen distances weigh the same.
+    const two = [ball(0.5, 0.5)];
+    const across = nearestBall(two, 0.5 + 0.3, 0.5, 0.35);
+    const down = nearestBall(two, 0.5, 0.5 + 0.3, 0.35);
+    expect(across).toBe(0);
+    expect(down).toBe(0);
+    expect(nearestBall(two, 0.5 + 0.4, 0.5, 0.35)).toBe(-1);
+    expect(nearestBall(two, 0.5, 0.5 + 0.4, 0.35)).toBe(-1);
+  });
+
+  it('copes with no balls at all', () => {
+    expect(nearestBall([], 0.5, 0.5, 1)).toBe(-1);
+  });
+});
+
+describe('grabbing a ball', () => {
+  const state = randomizeMetaballs(makeRandom(4));
+  const natural = (time: number) => {
+    const out: Ball[] = [];
+    ballsAt(time, 1.5, METABALL_DEFAULTS, state, out);
+    return out;
+  };
+  const held = (time: number, override: BallOverride) => {
+    const out: Ball[] = [];
+    ballsAt(time, 1.5, METABALL_DEFAULTS, state, out, override);
+    return out;
+  };
+
+  it('puts a fully held ball exactly at the pointer', () => {
+    const out = held(5, { index: 2, x: 0.7, y: 0.3, weight: 1 });
+    expect(out[2].x).toBeCloseTo(0.7, 6);
+    expect(out[2].y).toBeCloseTo(0.3, 6);
+  });
+
+  it('leaves a fully released ball on its own path', () => {
+    const out = held(5, { index: 2, x: 0.7, y: 0.3, weight: 0 });
+    expect(out[2].x).toBeCloseTo(natural(5)[2].x, 6);
+    expect(out[2].y).toBeCloseTo(natural(5)[2].y, 6);
+  });
+
+  it('blends part way through a release', () => {
+    const free = natural(5)[2];
+    const out = held(5, { index: 2, x: 0.7, y: 0.3, weight: 0.5 });
+    expect(out[2].x).toBeCloseTo(free.x + (0.7 - free.x) * 0.5, 6);
+    expect(out[2].y).toBeCloseTo(free.y + (0.3 - free.y) * 0.5, 6);
+  });
+
+  it('eases onto a moving target, which is the whole point of the blend', () => {
+    // A ball's natural position keeps moving while it is held, so a release has
+    // to converge on a target that is itself still travelling. Held at a fixed
+    // point and decaying the weight, the gap to the free position must shrink
+    // even though that free position is different at every step.
+    const grip = { index: 2, x: 0.7, y: 0.3 };
+    let previousGap = Infinity;
+
+    for (let i = 0; i <= 8; i++) {
+      const time = 5 + i * 0.4;
+      const weight = 1 - i / 8;
+      const free = natural(time)[2];
+      const now = held(time, { ...grip, weight })[2];
+      const gap = Math.hypot(now.x - free.x, now.y - free.y);
+      expect(gap).toBeLessThanOrEqual(previousGap + 1e-9);
+      previousGap = gap;
+    }
+    expect(previousGap).toBeCloseTo(0, 6);
+  });
+
+  it('leaves every other ball alone', () => {
+    const free = natural(5);
+    const out = held(5, { index: 2, x: 0.7, y: 0.3, weight: 1 });
+    for (let i = 0; i < out.length; i++) {
+      if (i === 2) continue;
+      expect(out[i].x).toBeCloseTo(free[i].x, 6);
+      expect(out[i].y).toBeCloseTo(free[i].y, 6);
+    }
+  });
+
+  it('ignores an index that is not a ball', () => {
+    for (const index of [-1, 99]) {
+      const out = held(5, { index, x: 0.7, y: 0.3, weight: 1 });
+      const free = natural(5);
+      for (let i = 0; i < out.length; i++) expect(out[i].x).toBeCloseTo(free[i].x, 6);
+    }
+  });
+
+  it('clamps a weight above 1 rather than overshooting past the pointer', () => {
+    const out = held(5, { index: 2, x: 0.7, y: 0.3, weight: 4 });
+    expect(out[2].x).toBeCloseTo(0.7, 6);
+  });
+
+  it('keeps its radius and strength while held', () => {
+    const out = held(5, { index: 2, x: 0.7, y: 0.3, weight: 1 });
+    expect(out[2].radius).toBe(natural(5)[2].radius);
+    expect(out[2].strength).toBe(natural(5)[2].strength);
+  });
+
+  describe('through the render', () => {
+    it('changes nothing when nothing is held', () => {
+      const a = seeded(11);
+      renderMetaballs(a, METABALL_DEFAULTS, 4);
+      const b = seeded(11);
+      renderMetaballs(b, METABALL_DEFAULTS, 4, null);
+      expect(Array.from(b.field)).toEqual(Array.from(a.field));
+    });
+
+    it('moves the blob when one is held', () => {
+      const plain = seeded(11);
+      renderMetaballs(plain, METABALL_DEFAULTS, 4);
+      const dragged = seeded(11);
+      renderMetaballs(dragged, METABALL_DEFAULTS, 4, { index: 1, x: 0.4, y: 0.5, weight: 1 });
+      expect(Array.from(dragged.field)).not.toEqual(Array.from(plain.field));
+    });
+
+    it('still merges while held - dragging one into another fuses them', () => {
+      // The reason this interaction suits metaballs at all: a dragged ball is
+      // just another contribution to the sum, so it reaches for its neighbours
+      // exactly as the others do.
+      const m = seeded(11);
+      renderMetaballs(m, METABALL_DEFAULTS, 4);
+      const target = m.balls[0];
+
+      // Drop ball 1 close beside ball 0 and check the midpoint crosses the iso.
+      const near = { index: 1, x: target.x + 0.2, y: target.y, weight: 1 };
+      renderMetaballs(m, METABALL_DEFAULTS, 4, near);
+      const midpoint = fieldAt(m.balls, target.x + 0.1, target.y);
+      expect(midpoint).toBeGreaterThan(METABALL_DEFAULTS.iso);
+    });
+
+    it('keeps the field inside 0..1 while held', () => {
+      const m = seeded(11);
+      renderMetaballs(m, METABALL_DEFAULTS, 4, { index: 0, x: 0.5, y: 0.5, weight: 1 });
+      for (const v of m.field) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+    });
   });
 });

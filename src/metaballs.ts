@@ -56,6 +56,21 @@ export interface MetaballParams {
   speed: number;
   /** How far they wander from centre, as a fraction of the half-extent. */
   wander: number;
+
+  /**
+   * How close a press has to be to a ball's centre to take hold of it, in
+   * field-height units. Beyond this, a press grabs nothing.
+   */
+  grabReach: number;
+  /**
+   * Seconds a grabbed ball takes to come to the pointer.
+   *
+   * Not zero: snapping it under the cursor the instant the button goes down
+   * reads as a glitch rather than as picking something up.
+   */
+  grabEase: number;
+  /** Seconds a released ball takes to settle back onto its path. */
+  releaseEase: number;
 }
 
 export const METABALL_DEFAULTS: MetaballParams = {
@@ -73,6 +88,12 @@ export const METABALL_DEFAULTS: MetaballParams = {
   // Not 1: balls stay clear of the edges, so the field has somewhere to fall to
   // and the blobs read as floating rather than as clipped.
   wander: 0.72,
+  // Generous - a bit more than the default radius - so a press near a blob takes
+  // hold of it rather than missing by a few pixels.
+  grabReach: 0.4,
+  grabEase: 0.16,
+  // Slower than the grab. Letting go should look like release, not retraction.
+  releaseEase: 0.9,
 };
 
 /** One ball, positioned in field-height units. */
@@ -138,20 +159,77 @@ export function falloff(distanceSquared: number, radius: number): number {
  * ball is round on any window. Working in plain 0..1 on both axes would stretch
  * every blob into an ellipse on a wide screen.
  */
-export function ballsAt(time: number, aspect: number, params: MetaballParams, state: MetaballState, out: Ball[]): void {
+export function ballsAt(
+  time: number,
+  aspect: number,
+  params: MetaballParams,
+  state: MetaballState,
+  out: Ball[],
+  override: BallOverride | null = null
+): void {
   const t = time * params.speed;
   const halfX = aspect / 2;
   const halfY = 0.5;
 
   out.length = 0;
   for (let i = 0; i < state.radii.length; i++) {
-    out.push({
-      x: halfX + Math.sin(t * state.fx[i] + state.px[i]) * state.ax[i] * halfX * params.wander,
-      y: halfY + Math.sin(t * state.fy[i] + state.py[i]) * state.ay[i] * halfY * params.wander,
-      radius: state.radii[i],
-      strength: params.strength,
-    });
+    let x = halfX + Math.sin(t * state.fx[i] + state.px[i]) * state.ax[i] * halfX * params.wander;
+    let y = halfY + Math.sin(t * state.fy[i] + state.py[i]) * state.ay[i] * halfY * params.wander;
+
+    // Blended towards the held position rather than replaced by it - see
+    // `BallOverride` for why the release depends on that.
+    if (override && override.index === i && override.weight > 0) {
+      const w = override.weight > 1 ? 1 : override.weight;
+      x += (override.x - x) * w;
+      y += (override.y - y) * w;
+    }
+
+    out.push({ x, y, radius: state.radii[i], strength: params.strength });
   }
+}
+
+/**
+ * A ball displaced from its path, because it is being dragged or has just been
+ * let go of.
+ *
+ * `weight` is what makes releasing work. A ball's natural position is a closed-
+ * form function of the clock, so it does not stop moving while you hold it -
+ * which means letting go cannot simply hand control back, or the ball would jump
+ * from your cursor to wherever its orbit had got to. Easing `weight` from 1 to 0
+ * instead blends from where you left it onto a target that is itself still
+ * moving, and it arrives without a seam.
+ */
+export interface BallOverride {
+  /** Which ball. Out-of-range indices are ignored. */
+  index: number;
+  /** Where it is held, in field-height units. */
+  x: number;
+  y: number;
+  /** 1 for fully held, 0 for fully back on its path. */
+  weight: number;
+}
+
+/**
+ * The ball nearest a point, or -1 if none is within `grabReach`.
+ *
+ * Distances are in field-height units, the same space the balls live in, so this
+ * is isotropic and a press does not favour the horizontal on a wide window.
+ */
+export function nearestBall(balls: readonly Ball[], x: number, y: number, reach: number): number {
+  let best = -1;
+  let bestDistance = reach * reach;
+
+  for (let i = 0; i < balls.length; i++) {
+    const dx = balls[i].x - x;
+    const dy = balls[i].y - y;
+    const squared = dx * dx + dy * dy;
+    if (squared <= bestDistance) {
+      bestDistance = squared;
+      best = i;
+    }
+  }
+
+  return best;
 }
 
 /** Raw field strength at a point, before the surface threshold. */
@@ -220,11 +298,16 @@ export function createMetaballs(
  * than cells times balls. The second thresholds, which is one smoothstep per
  * cell and unavoidable.
  */
-export function renderMetaballs(metaballs: Metaballs, params: MetaballParams, time: number): void {
+export function renderMetaballs(
+  metaballs: Metaballs,
+  params: MetaballParams,
+  time: number,
+  override: BallOverride | null = null
+): void {
   const { w, h, field, raw, balls, state } = metaballs;
   const aspect = h > 0 ? w / h : 1;
 
-  ballsAt(time, aspect, params, state, balls);
+  ballsAt(time, aspect, params, state, balls, override);
   raw.fill(0);
 
   const spanX = w > 1 ? aspect / (w - 1) : 0;

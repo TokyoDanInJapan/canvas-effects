@@ -116,6 +116,10 @@ export const COPY: Record<string, Copy> = {
       'The merging is not a drawing trick. Nothing in the code knows about blobs or necks: two balls whose ' +
         'contributions each fall short of the threshold cross it together, and the neck is only what a sum does when ' +
         'two falloffs overlap.',
+      '<strong>Press and drag to pick a blob up and carry it about.</strong> A dragged ball is just another ' +
+        'contribution to the sum, so it reaches for its neighbours exactly as the others do — run it into one and they ' +
+        'fuse, pull away and the neck stretches and parts. Let go and it eases back onto its own path, which has to be ' +
+        'a blend rather than a handover: its natural position never stopped moving while you held it.',
       'The falloff is a cubic with compact support rather than an exponential, which is exactly zero past its ' +
         'radius. That changes the algorithm rather than trimming it — each ball scatters over its own bounding box, ' +
         'so the cost is the sum of the ball areas instead of cells times balls.',

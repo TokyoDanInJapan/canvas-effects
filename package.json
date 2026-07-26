@@ -1,6 +1,6 @@
 {
   "name": "canvas-effects",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "Six animated, ordered-dithered greyscale backgrounds for a 2D canvas: a Stable Fluids smoke solver, a domain-warped plasma, digital rain, a ridgeline landscape, cellular fire, and metaballs.",
   "keywords": [
     "canvas",
