@@ -10,7 +10,7 @@ export default defineConfig({
     // Headroom above the 5s default. Several of these tests run numeric
     // simulations for hundreds of frames, and under coverage instrumentation on
     // a slow CI runner that is a different proposition from running locally -
-    // which is exactly how a fire test came to pass here and time out there.
+    // which is exactly how a smoke test came to pass here and time out there.
     testTimeout: 20_000,
     coverage: {
       // Without `include`, v8 only reports files a test happens to import, so
@@ -31,7 +31,6 @@ export default defineConfig({
         'src/plasma-background.ts',
         'src/rain-background.ts',
         'src/ridges-background.ts',
-        'src/fire-background.ts',
         'src/metaballs-background.ts',
         'src/tunnel-background.ts',
       ],

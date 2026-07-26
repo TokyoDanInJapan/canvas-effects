@@ -13,7 +13,7 @@ what it does and where its default came from.
 
 ## The shared half: two resolutions and a dither
 
-All seven render at two scales at once, and this is what makes them cheap enough to leave running:
+All six render at two scales at once, and this is what makes them cheap enough to leave running:
 
 - The **field** — the expensive part, whatever generates it — is computed at `pixelSize × fieldScale` CSS pixels per
   cell. The smoke and plasma fields are soft and low-frequency and gain nothing from more samples, so they run at half
@@ -310,76 +310,6 @@ occlusion follow the wobbled line rather than the flat one.
 
 Measured with the flight slowed right down, so the wobble is the only thing moving: pixels changing per 200ms goes from
 2774 idle to 10901 mid-flight, and back to 2430 once the lifetime elapses.
-
-## Fire: heat climbing
-
-`src/fire.ts`. Every frame the bottom row is re-fuelled, then each cell takes the heat of the cell below it, minus a
-random amount, displaced sideways by a random amount. That is the whole algorithm.
-
-**Not the fluid solver.** `smoke.ts` could carry a buoyant temperature field and would be more physical. It would also
-be far slower, and it would look like the smoke with a warm palette — the two would share a silhouette. Cellular fire
-has a different character entirely: hard flickering tongues rather than smooth overturning plumes, because the noise is
-injected per cell per frame instead of emerging from a flow.
-
-**Heat climbs one row per pass.** The loop reads row `y` and writes row `y - 1`, walking downward and never reading a
-row it has already written — so a row takes the _previous_ frame's value of the row below it. Get that ordering
-backwards and heat teleports to the top of the screen in a single frame. `passes` buys climb speed without touching the
-timestep.
-
-**`reach` is a screen fraction, not a cooling rate.** The algorithm wants heat lost per row, but that is resolution
-dependent: it fixes the flame height in _cells_, so one value fills a short field and leaves a thin strip on a tall one.
-The per-row cooling is derived from `reach` and the field height instead, so the fire keeps its proportions on any
-window.
-
-Two parameters tear the field into tongues, and measuring them separately corrected an assumption. `coolingVariance`
-makes neighbouring columns reach different heights; `jitter` displaces heat sideways. With the other held off, each
-contributes about a tripling in roughness — they matter about equally, which is not what the first version of the source
-comment claimed.
-
-### Click to throw a spark in
-
-A click drops a blob of new fuel wherever it lands. **Nothing in the spark code says "rise"** — the propagation already
-carries every cell's heat upward, cools it by a random amount and jitters it sideways, so the blob climbs, thins, tears
-into tongues and burns out on its own.
-
-That makes it the only interaction in this library that _evolves_ rather than fading where it was put. The rain's splash
-decayed, the plasma's ripple expands and dims, the ridges' wobble propagates and stops — each is a disturbance running
-down a clock. A spark is taken away from where you put it by machinery that was already there.
-
-One consequence worth understanding, because it looks like a bug and is not: `propagateFire` writes each row from the
-row below, so the cells a spark occupies are overwritten by the cooler air beneath them on the very next pass. That is
-exactly why the blob _moves_ instead of hovering — it loses its bottom edge one row at a time until it is gone. At the
-defaults that gives a plume about a second long, and it needs no state, no ages and nothing to prune.
-
-Measured with the warm ramp on: heat covering the upper 40% of the screen goes from 0% (cold air) to 7.1% on the click,
-3.1% half a second later as the plume climbs and thins, and back to 0% once it has burnt out.
-
-### What it looks like, honestly
-
-Fire is the highest-contrast phenomenon in this library, and the palette is the tightest constraint on it. The other
-four work at five near-black greys because smoke, plasma haze, rain streaks and thin lines are all inherently
-low-contrast. Fire is not — flame legibility comes from a steep black → red → orange → yellow → white ramp, and five
-dark greys cannot provide one.
-
-So the greyscale default reads as **embers, or heat haze at the foot of the page**. That is a good background and it is
-what ships. If you want it to read as actual flame, it needs to be a louder background than its siblings:
-
-```js
-createFireBackground(canvas, {
-  levels: 8,
-  shading: { base: 18, amplitude: 110, tint: [1, 0.45, 0.12] },
-});
-```
-
-Two defaults came out of measuring rather than guessing:
-
-- **`gamma` is 0.6** — below 1, so it _brightens_. Uniquely here. Heat falls off linearly with height, so most of a
-  flame's area sits at low values; at `gamma: 1` the distribution measured `18:72% 33:12% 48:12% 63:4%` with the
-  brightest grey entirely unused. At 0.6 the flame body climbs into the upper levels and reads as a mass with an edge
-  rather than as mottling.
-- **`fieldScale` is 1** — not for crispness as with the rain and ridges, since the heat field is continuous and
-  interpolates perfectly well, but because interpolating it smooths away the fine tongue structure that separates fire
-  from a glow.
 
 ## Metaballs: an implicit surface
 

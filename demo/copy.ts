@@ -112,25 +112,6 @@ export const COPY: Record<string, Copy> = {
     ],
   },
 
-  fire: {
-    heading: 'Fire',
-    paragraphs: [
-      'The classic cellular fire: the bottom row is re-fuelled every frame, then each cell takes the heat of the ' +
-        'cell below it, minus a random amount, displaced sideways by a random amount. That is the entire algorithm.',
-      'Not the fluid solver, deliberately. That would be more physical and far slower, and it would look like the ' +
-        'smoke with a warm palette. Cellular fire flickers in hard tongues instead of overturning in plumes, because ' +
-        'the noise is injected per cell per frame rather than emerging from a flow.',
-      '<strong>Click or drag to throw sparks in \u2014 dragging paints a trail of plumes.</strong> Nothing here says "rise" — the propagation already ' +
-        "carries every cell's heat upward, cools it randomly and jitters it sideways, so a dropped blob climbs, " +
-        'thins, tears into tongues and dies out entirely on its own. It is the only interaction in this library that ' +
-        'evolves rather than simply fading where it was put.',
-      'This is the one effect the five-grey palette genuinely limits. Flame legibility wants a steep black-to-white ' +
-        'ramp, so in greyscale it reads as embers at the foot of the page. <strong>Pick the fire ramp</strong> to see ' +
-        'it as flame.',
-      SHARED,
-    ],
-  },
-
   metaballs: {
     heading: 'Metaballs',
     paragraphs: [

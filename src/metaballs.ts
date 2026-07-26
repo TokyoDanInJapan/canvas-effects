@@ -20,7 +20,7 @@
 // -----------------
 // Positions are closed-form functions of the clock, so the field is a pure
 // function of elapsed time - no accumulation, like the plasma and unlike the
-// smoke, rain and fire. A frame can be drawn at any moment without having drawn
+// smoke and the rain. A frame can be drawn at any moment without having drawn
 // the ones before it, which is what makes the reduced-motion path a single draw.
 //
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in

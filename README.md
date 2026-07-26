@@ -1,10 +1,10 @@
 # canvas-effects
 
-Seven animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so they
+Six animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so they
 modulate the page colour rather than becoming a picture, and they are quiet enough that a reader should not consciously
 notice them.
 
-No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All seven together are 12.4 kB
+No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All six together are 12.1 kB
 minified and gzipped.
 
 ```bash
@@ -13,7 +13,7 @@ npm install canvas-effects
 
 ## The effects
 
-Each takes a canvas and returns a handle. All seven respond to the pointer.
+Each takes a canvas and returns a handle. All six respond to the pointer.
 
 ![Smoke](docs/screens/smoke.png)
 
@@ -38,12 +38,6 @@ glyphs. _Click or drag to send lens-like distortions through it._
 **Ridges** — `createRidgesBackground`. A landscape flown over as a stack of profiles, each hiding the ones behind it. The
 look is the ridgeline plot made famous by the cover of Joy Division's _Unknown Pleasures_. Optional `fill` makes them
 solid silhouettes, `fillRandom` gives each its own colour. _Click or drag to set wobbles running through the stack._
-
-![Fire](docs/screens/fire.png)
-
-**Fire** — `createFireBackground`. The classic cellular fire: the bottom row is re-fuelled each frame, then every cell
-takes the heat below it minus a random amount, displaced sideways. In greyscale it reads as embers; give it a warm
-[ramp](#colour) and it reads as flame. _Click or drag to throw sparks in._
 
 ![Metaballs](docs/screens/metaballs.png)
 
@@ -139,20 +133,21 @@ A theme change only re-shades; the field is untouched, because only the greys it
 ### Colour
 
 A tint scales one hue. A **ramp** gives each palette level its own colour, which buys the one thing greyscale cannot: a
-steep perceptual gradient. It is what lets the fire read as flame rather than as embers.
+steep perceptual gradient. Five greys separate a rain streak's head from its tail far less sharply than five colours
+climbing from black to white do.
 
 ```js
-createFireBackground(canvas, {
+createRainBackground(canvas, {
   levels: 5,
   shading: {
     base: 18,
     amplitude: 0,
     ramp: [
       [18, 18, 18], // has to be your page colour
-      [92, 16, 4],
-      [190, 66, 8],
-      [244, 158, 30],
-      [255, 240, 200],
+      [10, 54, 22],
+      [22, 122, 46],
+      [60, 200, 88],
+      [190, 255, 200],
     ],
   },
 });
@@ -164,15 +159,14 @@ screen; the ramp decides which. `buildPalette(shading, levels)` is exported if y
 
 ## Interaction
 
-| Effect    | Press or drag                                                            |
-| --------- | ------------------------------------------------------------------------ |
-| Smoke     | Stirs the fluid along the drag. Idle movement is ignored.                |
-| Plasma    | Sends ripples out; a drag leaves a wake.                                 |
-| Rain      | Sends lens-like distortions through it.                                  |
-| Ridges    | Sets wobbles running through the stack.                                  |
-| Fire      | Throws sparks of fuel in; a drag paints a trail of plumes, like a brush. |
-| Metaballs | Picks the nearest blob up, carries it, and throws it when you let go.    |
-| Tunnel    | Steers the vanishing point towards the pointer, easing back on release.  |
+| Effect    | Press or drag                                                           |
+| --------- | ----------------------------------------------------------------------- |
+| Smoke     | Stirs the fluid along the drag. Idle movement is ignored.               |
+| Plasma    | Sends ripples out; a drag leaves a wake.                                |
+| Rain      | Sends lens-like distortions through it.                                 |
+| Ridges    | Sets wobbles running through the stack.                                 |
+| Metaballs | Picks the nearest blob up, carries it, and throws it when you let go.   |
+| Tunnel    | Steers the vanishing point towards the pointer, easing back on release. |
 
 `interactive: false` turns any of them off. Emissions are spaced by _distance_ along the drag rather than throttled by
 time, so a slow careful drag lays down as densely as a fast one. Each effect caps how many disturbances run at once and
@@ -212,17 +206,17 @@ Three of those differ per effect, and the reasons are worth knowing:
 | Plasma    | 2            | 6           | 1.18    |
 | Metaballs | 2            | 6           | 1       |
 | Rain      | **1**        | 6           | 1       |
-| Fire      | **1**        | 6           | **0.6** |
 | Ridges    | **1**        | **4**       | 1       |
 | Tunnel    | **1**        | 6           | 1       |
 
 `fieldScale: 1` wherever interpolating between cells would blur line art or smooth away fine structure — for the
-tunnel that is the difference between visible rings and flat mottle. `gamma` below 1
-_brightens_ — only the fire wants that. [How it works](docs/how-it-works.md) has the measurements behind each.
+tunnel that is the difference between visible rings and flat mottle. `gamma` above 1 weights the field towards its
+dark end; below 1 brightens it, which nothing here currently wants but is there if your field sits too dark.
+[How it works](docs/how-it-works.md) has the measurements behind each.
 
-Each effect also has its own parameter group — `simulation`, `warp`, `rain`, `ridges`, `fire`, `metaballs`, `tunnel` —
-merged over that effect's defaults. Every parameter is documented where it is declared, with a note on what it does and where its
-default came from: `SmokeParams`, `PlasmaWarpConfig`, `RainParams`, `RidgeParams`, `FireParams`, `MetaballParams`, `TunnelParams`.
+Each effect also has its own parameter group — `simulation`, `warp`, `rain`, `ridges`, `metaballs`, `tunnel` — merged
+over that effect's defaults. Every parameter is documented where it is declared, with a note on what it does and where its
+default came from: `SmokeParams`, `PlasmaWarpConfig`, `RainParams`, `RidgeParams`, `MetaballParams`, `TunnelParams`.
 
 `undefined` is ignored rather than overriding a default, so forwarding your own optional config is safe:
 
@@ -232,7 +226,7 @@ createSmokeBackground(canvas, { gamma: config.gamma }); // fine when config.gamm
 
 ## Performance
 
-All seven draw at `fps` — 24 by default — rather than the refresh rate, and stop entirely when the tab is hidden.
+All six draw at `fps` — 24 by default — rather than the refresh rate, and stop entirely when the tab is hidden.
 
 What makes them cheap is that they render at **two resolutions**: the expensive field is computed coarsely and
 interpolated up, then ordered-dithered per output pixel, which is a few multiply-adds and a table lookup. `maxPixels`
@@ -244,7 +238,7 @@ more times a frame where the shading touches each output pixel once.
 ## Accessibility
 
 - The canvas is decoration. Mark it `aria-hidden="true"`.
-- With `prefers-reduced-motion: reduce` all seven draw a single frame and stop, and pointer interaction is disabled. The
+- With `prefers-reduced-motion: reduce` all six draw a single frame and stop, and pointer interaction is disabled. The
   stateful ones settle themselves first, so the still frame is smoke or mid-storm rain rather than an empty field.
 - With JavaScript off nothing is painted and the page keeps its ordinary background — the other reason `base` has to match
   your page colour.
@@ -260,7 +254,7 @@ more times a frame where the shading touches each output pixel once.
 - **[`demo/`](demo)** — the live tuning page, every dial as a slider. `npm run dev`.
 
 Everything is exported, and the maths is DOM-free so it can be used and tested outside a browser — the fluid solver, the
-warp, the falling lanes, the terrain, the heat field, the implicit surface and the tunnel projection are all usable on
+warp, the falling lanes, the terrain, the implicit surface and the tunnel projection are all usable on
 their own.
 
 ## Development
@@ -281,6 +275,6 @@ range. The canvas and loop code is exercised by the demo page.
 
 MIT — see [LICENSE](LICENSE).
 
-All seven implement published techniques: Jos Stam's _Stable Fluids_, domain-warped fbm, the classic cellular fire,
-Wyvill's falloff for the metaballs, the demoscene reciprocal tunnel, and ordered dithering on a Bayer matrix throughout. Where a well-known constant is used it is
+All six implement published techniques: Jos Stam's _Stable Fluids_, domain-warped fbm, Wyvill's falloff for the
+metaballs, the demoscene reciprocal tunnel, and ordered dithering on a Bayer matrix throughout. Where a well-known constant is used it is
 credited at the point of use — MurmurHash3's public-domain finalisers in `hash2`, and the classic 4×4 Bayer matrix.

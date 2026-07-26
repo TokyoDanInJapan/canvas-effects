@@ -70,9 +70,9 @@ export interface Shading {
    * canvas is opaque and paints the page colour itself.
    *
    * A ramp buys the one thing a greyscale palette cannot give: a steep
-   * perceptual gradient. It is what lets the fire read as fire rather than as
-   * embers. It also costs readability more than a tint does, so read a long
-   * paragraph over it.
+   * perceptual gradient - a black to red to orange to white ramp separates five
+   * levels far more sharply than five greys can. It also costs readability more
+   * than a tint does, so read a long paragraph over it.
    */
   ramp?: ReadonlyArray<readonly [number, number, number]>;
 }

@@ -4,10 +4,8 @@
 
 import {
   PLASMA_BACKGROUND_DEFAULTS,
-  FIRE_BACKGROUND_DEFAULTS,
   METABALLS_BACKGROUND_DEFAULTS,
   METABALL_DEFAULTS,
-  FIRE_DEFAULTS,
   RAIN_BACKGROUND_DEFAULTS,
   RAIN_DEFAULTS,
   RIDGE_DEFAULTS,
@@ -16,7 +14,6 @@ import {
   TUNNEL_BACKGROUND_DEFAULTS,
   TUNNEL_DEFAULTS,
   createPlasmaBackground,
-  createFireBackground,
   createMetaballsBackground,
   createRainBackground,
   createRidgesBackground,
@@ -67,8 +64,10 @@ const copyOut = document.getElementById('copy') as HTMLDivElement;
 const rampPick = document.getElementById('ramp') as HTMLSelectElement;
 const rampName = document.getElementById('ramp-name') as HTMLElement;
 const ditherButton = document.getElementById('dither') as HTMLButtonElement;
+const textButton = document.getElementById('text') as HTMLButtonElement;
+const prose = document.querySelector('main') as HTMLElement;
 
-type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'fire' | 'metaballs' | 'tunnel';
+type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'metaballs' | 'tunnel';
 
 type Stops = ReadonlyArray<readonly [number, number, number]>;
 
@@ -417,49 +416,6 @@ const RIDGE_DIALS: Dial[] = [
   { key: 'octaves', label: 'octaves', min: 1, max: 6, step: 1, value: RIDGE_DEFAULTS.octaves },
 ];
 
-const FIRE_DIALS: Dial[] = [
-  { key: 'amplitude', label: 'amplitude', min: 0, max: 140, step: 1, value: 60, note: 'the readability dial' },
-  {
-    key: 'levels',
-    label: 'levels',
-    min: 2,
-    max: 12,
-    step: 1,
-    value: FIRE_BACKGROUND_DEFAULTS.levels,
-    note: 'colours in the palette',
-  },
-  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: FIRE_BACKGROUND_DEFAULTS.pixelSize },
-  { key: 'fieldScale', label: 'fieldScale', min: 1, max: 5, step: 1, value: FIRE_BACKGROUND_DEFAULTS.fieldScale },
-  { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: FIRE_BACKGROUND_DEFAULTS.fps },
-  { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: FIRE_BACKGROUND_DEFAULTS.gamma },
-  {
-    key: 'reach',
-    label: 'reach',
-    min: 0.1,
-    max: 1,
-    step: 0.05,
-    value: FIRE_DEFAULTS.reach,
-    note: 'flame height, as a screen fraction',
-  },
-  {
-    key: 'coolingVariance',
-    label: 'coolingVariance',
-    min: 0,
-    max: 1,
-    step: 0.05,
-    value: FIRE_DEFAULTS.coolingVariance,
-    note: 'tears it vertically',
-  },
-  { key: 'jitter', label: 'jitter', min: 0, max: 4, step: 0.5, value: FIRE_DEFAULTS.jitter, note: 'tears it sideways' },
-  { key: 'wind', label: 'wind', min: -3, max: 3, step: 0.25, value: FIRE_DEFAULTS.wind },
-  { key: 'windStrength', label: 'windStrength', min: 0, max: 3, step: 0.1, value: FIRE_DEFAULTS.windStrength },
-  { key: 'sourceHeat', label: 'sourceHeat', min: 0.1, max: 1, step: 0.05, value: FIRE_DEFAULTS.sourceHeat },
-  { key: 'sourceVariance', label: 'sourceVariance', min: 0, max: 1, step: 0.05, value: FIRE_DEFAULTS.sourceVariance },
-  { key: 'sourceScale', label: 'sourceScale', min: 1, max: 16, step: 0.5, value: FIRE_DEFAULTS.sourceScale },
-  { key: 'sparkRadius', label: 'sparkRadius', min: 0.03, max: 0.4, step: 0.01, value: 0.14, note: 'click to spark' },
-  { key: 'passes', label: 'passes', min: 1, max: 5, step: 1, value: FIRE_DEFAULTS.passes, note: 'climb speed' },
-];
-
 const METABALL_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 34, note: 'the readability dial' },
   {
@@ -559,7 +515,6 @@ const DIALS: Record<Effect, Dial[]> = {
   plasma: PLASMA_DIALS,
   rain: RAIN_DIALS,
   ridges: RIDGE_DIALS,
-  fire: FIRE_DIALS,
   metaballs: METABALL_DIALS,
   tunnel: TUNNEL_DIALS,
 };
@@ -626,27 +581,6 @@ function mount() {
         wander: values.wander,
         grabReach: values.grabReach,
         releaseEase: values.releaseEase,
-      },
-    });
-    if (!handle) fpsOut.textContent = 'no 2D context';
-    return;
-  }
-
-  if (effect === 'fire') {
-    handle = createFireBackground(canvas, {
-      ...common,
-      fieldScale: Math.round(values.fieldScale),
-      fire: {
-        reach: values.reach,
-        coolingVariance: values.coolingVariance,
-        jitter: values.jitter,
-        wind: values.wind,
-        windStrength: values.windStrength,
-        sourceHeat: values.sourceHeat,
-        sourceVariance: values.sourceVariance,
-        sourceScale: values.sourceScale,
-        passes: Math.round(values.passes),
-        sparkRadius: values.sparkRadius,
       },
     });
     if (!handle) fpsOut.textContent = 'no 2D context';
@@ -830,6 +764,18 @@ themeButton.addEventListener('click', () => {
 });
 
 document.getElementById('reseed')?.addEventListener('click', mount);
+
+// Hides the copy so the effect can be looked at on its own - which is most of
+// what this page is for, and the panel is not in the way of the middle of the
+// screen the way a column of prose is. Nothing is remounted: the canvas is behind
+// the text rather than under it, so this only changes what is on top.
+let showText = true;
+textButton.addEventListener('click', () => {
+  showText = !showText;
+  prose.hidden = !showText;
+  textButton.textContent = `Text: ${showText ? 'on' : 'off'}`;
+  textButton.classList.toggle('active', showText);
+});
 
 ditherButton.addEventListener('click', () => {
   dithering = !dithering;
