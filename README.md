@@ -15,37 +15,37 @@ npm install canvas-effects
 
 Each takes a canvas and returns a handle. All six respond to the pointer.
 
-![Smoke](docs/smoke.png)
+![Smoke](docs/screens/smoke.png)
 
 **Smoke** — `createSmokeBackground`. A fluid simulation: semi-Lagrangian advection with a Jacobi pressure projection, the
 scheme from Jos Stam's _Stable Fluids_. It has momentum, so eddies get spun up by the flow and persist after whatever made
 them has gone. Every ten seconds or so a jet fires in from a random edge, about half of them dark. _Drag to stir it._
 
-![Plasma](docs/plasma.png)
+![Plasma](docs/screens/plasma.png)
 
 **Plasma** — `createPlasmaBackground`. A domain warp: fractal Brownian motion folded into itself,
 `fbm(p + fbm(p + fbm(p)))`, sampling a seamless tile. Stateless in time, so a frame can be drawn at any moment without
 having drawn the ones before it. _Click or drag to send ripples out._
 
-![Rain](docs/rain.png)
+![Rain](docs/screens/rain.png)
 
 **Rain** — `createRainBackground`. One falling lane per column. Each head lights the cells it passes and the whole field
 fades every frame, so a trail is not drawn at all — it is simply what has not decayed yet. Streaks of falling light, not
 glyphs. _Click or drag to send lens-like distortions through it._
 
-![Ridges](docs/ridges.png)
+![Ridges](docs/screens/ridges.png)
 
 **Ridges** — `createRidgesBackground`. A landscape flown over as a stack of profiles, each hiding the ones behind it. The
 look is the ridgeline plot made famous by the cover of Joy Division's _Unknown Pleasures_. Optional `fill` makes them
 solid silhouettes, `fillRandom` gives each its own colour. _Click or drag to set wobbles running through the stack._
 
-![Fire](docs/fire.png)
+![Fire](docs/screens/fire.png)
 
 **Fire** — `createFireBackground`. The classic cellular fire: the bottom row is re-fuelled each frame, then every cell
 takes the heat below it minus a random amount, displaced sideways. In greyscale it reads as embers; give it a warm
 [ramp](#colour) and it reads as flame. _Click or drag to throw sparks in._
 
-![Metaballs](docs/metaballs.png)
+![Metaballs](docs/screens/metaballs.png)
 
 **Metaballs** — `createMetaballsBackground`. An implicit surface. Point sources each add a falloff to a shared field,
 which is thresholded — so blobs bulge towards each other, fuse with a smooth neck, and part without a seam. Nothing in the
