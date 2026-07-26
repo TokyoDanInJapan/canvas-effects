@@ -1,0 +1,71 @@
+# Publishes the demo to GitHub Pages.
+#
+# `ci.yml` already builds the demo on every push, to prove it still compiles, and
+# then throws the output away. This keeps it: the same build, deployed, so the
+# repository's own link shows six effects moving rather than a description of them.
+#
+# The demo is the only honest way to look at these. They are tuned by eye - the
+# gamma values in the defaults were solved by measuring output, but whether the
+# result reads as smoke is not a number - and a still screenshot cannot show
+# something whose whole point is that it moves slowly enough not to be noticed.
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  # So a deploy can be re-run without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  # Required by `deploy-pages`, which mints an OIDC token to prove the artifact
+  # came from this workflow rather than from anywhere else.
+  id-token: write
+
+# One deploy at a time, and let a newer commit win: a queued deploy of an older
+# tree has nothing to offer once a newer one has been pushed.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/configure-pages@v5
+        with:
+          # Turns Pages on the first time this runs, so enabling it is not a
+          # manual step someone has to know about.
+          enablement: true
+
+      # `--base` rather than a change to vite.config.ts: a project Pages site is
+      # served from a subpath, so the default `/assets/...` would 404 there - but
+      # `npm run dev` is served from the root and wants the default. Setting it
+      # here keeps local development on the path it actually uses.
+      - name: Build the demo
+        run: npx vite build --base=/${{ github.event.repository.name }}/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: demo-dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

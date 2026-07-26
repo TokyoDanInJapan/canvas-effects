@@ -1,0 +1,38 @@
+# Keeps the toolchain and the actions current.
+#
+# Grouped into one pull request per ecosystem rather than one per dependency. Every
+# npm dependency here is a development one - the published package has none, since
+# it ships `dist` and `src` and nothing else - so a bump either passes `npm run ci`
+# or does not, and there is nothing to be gained from finding that out eight times
+# separately.
+
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      toolchain:
+        patterns: ['*']
+    # A version bump to the library is a decision about what changed in it, and
+    # `npm run build` reads the manifest. Neither is Dependabot's business.
+    ignore:
+      - dependency-name: canvas-effects
+    commit-message:
+      prefix: 'Bump'
+    open-pull-requests-limit: 3
+
+  # The reason this is here: the actions were on Node 20 until someone noticed.
+  # A monthly pull request notices for us.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: 'Bump'
+    open-pull-requests-limit: 3
