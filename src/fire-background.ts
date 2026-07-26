@@ -15,7 +15,7 @@
 import { createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
-import { FIRE_DEFAULTS, createFire, stepFire, type Fire, type FireParams } from './fire';
+import { FIRE_DEFAULTS, applySpark, createFire, stepFire, type Fire, type FireParams, type Spark } from './fire';
 
 export interface FireBackgroundOptions {
   /** CSS pixels per rendered pixel - one dither cell. */
@@ -50,6 +50,14 @@ export interface FireBackgroundOptions {
   shading: Shading | (() => Shading);
   /** Fire parameters. Anything omitted falls back to `FIRE_DEFAULTS`. */
   fire: Partial<FireParams>;
+  /**
+   * Let a click throw a spark of new fuel in where it landed.
+   *
+   * Listened for on the window rather than the canvas, like every other
+   * interaction here: a background canvas is `pointer-events: none`, so it never
+   * sees a pointer itself.
+   */
+  interactive: boolean;
   /** Draw one settled frame and stop when the visitor has asked for less motion. */
   respectReducedMotion: boolean;
   /** Stop the loop while the tab is hidden. */
@@ -83,6 +91,7 @@ export const FIRE_BACKGROUND_DEFAULTS: FireBackgroundOptions = {
   settleSteps: 60,
   shading: defaultShading,
   fire: {},
+  interactive: true,
   respectReducedMotion: true,
   pauseWhenHidden: true,
   watchThemeClass: true,
@@ -123,6 +132,11 @@ export function createFireBackground(
   let fire: Fire | null = null;
   let shading: Shading = { base: 0, amplitude: 0 };
 
+  // Clicks waiting to land. Applied inside the frame and after the step, so a
+  // spark shows at full heat on the frame it happens rather than being
+  // propagated away on the way in.
+  const pending: Spark[] = [];
+
   function readShading() {
     shading = typeof config.shading === 'function' ? config.shading() : config.shading;
   }
@@ -143,7 +157,11 @@ export function createFireBackground(
   const driver = createDriver(canvas, {
     fps: config.fps,
     onFrame() {
-      if (fire) stepFire(fire, params, config.random, dt);
+      if (fire) {
+        stepFire(fire, params, config.random, dt);
+        for (const spark of pending) applySpark(fire, spark, params);
+      }
+      pending.length = 0;
       shade();
     },
     onResize() {
@@ -160,6 +178,26 @@ export function createFireBackground(
     watchThemeClass: config.watchThemeClass,
     watchColorScheme: config.watchColorScheme,
   });
+
+  /** A click throws a spark of new fuel in. */
+  function onPointerDown(event: PointerEvent) {
+    if (still || !fire) return;
+    // A burst of clicks should not queue into a backlog of plumes.
+    if (pending.length > 4) return;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    pending.push({
+      x: ((event.clientX - rect.left) / rect.width) * fire.w,
+      y: ((event.clientY - rect.top) / rect.height) * fire.h,
+      strength: 1,
+    });
+  }
+
+  if (config.interactive && !still) {
+    window.addEventListener('pointerdown', onPointerDown, { passive: true });
+  }
 
   readShading();
   surface.resize();
@@ -179,6 +217,8 @@ export function createFireBackground(
     },
     destroy() {
       driver.destroy();
+      window.removeEventListener('pointerdown', onPointerDown);
+      pending.length = 0;
       fire = null;
     },
   };

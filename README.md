@@ -450,6 +450,24 @@ makes neighbouring columns reach different heights; `jitter` displaces heat side
 contributes about a tripling in roughness — they matter about equally, which is not what the first version of the source
 comment claimed.
 
+#### Click to throw a spark in
+
+A click drops a blob of new fuel wherever it lands. **Nothing in the spark code says "rise"** — the propagation already
+carries every cell's heat upward, cools it by a random amount and jitters it sideways, so the blob climbs, thins, tears
+into tongues and burns out on its own.
+
+That makes it the only interaction in this library that _evolves_ rather than fading where it was put. The rain's splash
+decayed, the plasma's ripple expands and dims, the ridges' wobble propagates and stops — each is a disturbance running
+down a clock. A spark is taken away from where you put it by machinery that was already there.
+
+One consequence worth understanding, because it looks like a bug and is not: `propagateFire` writes each row from the
+row below, so the cells a spark occupies are overwritten by the cooler air beneath them on the very next pass. That is
+exactly why the blob _moves_ instead of hovering — it loses its bottom edge one row at a time until it is gone. At the
+defaults that gives a plume about a second long, and it needs no state, no ages and nothing to prune.
+
+Measured with the warm ramp on: heat covering the upper 40% of the screen goes from 0% (cold air) to 7.1% on the click,
+3.1% half a second later as the plume climbs and thins, and back to 0% once it has burnt out.
+
 #### What it looks like, honestly
 
 Fire is the highest-contrast phenomenon in this library, and the palette is the tightest constraint on it. The other
@@ -712,6 +730,7 @@ And the `fire` sub-options, documented inline on `FireParams`:
 | `sourceHeat` / `sourceVariance`       | `1` / `0.55`         | Fuel strength, and how uneven it is along the base.                       |
 | `sourceScale` / `sourceDrift`         | `5.5` / `0.06`       | Size of the hot and cool patches, and how fast they slide.                |
 | `passes`                              | `2`                  | Propagation steps per frame - the climb speed.                            |
+| `sparkRadius` / `sparkHeat`           | `0.14` / `1`         | Size and peak heat of a click spark.                                      |
 
 Metaballs only:
 

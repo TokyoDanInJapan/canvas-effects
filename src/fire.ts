@@ -94,6 +94,11 @@ export interface FireParams {
   octaves: number;
   /** Propagation steps per frame. Raising it makes the flames climb faster. */
   passes: number;
+
+  /** Radius of a click spark, as a fraction of the shorter side of the grid. */
+  sparkRadius: number;
+  /** Heat at the centre of one, 0 to 1. */
+  sparkHeat: number;
 }
 
 export const FIRE_DEFAULTS: FireParams = {
@@ -113,6 +118,10 @@ export const FIRE_DEFAULTS: FireParams = {
   // Two, so the front climbs about 48 cells a second at 24fps. At one the
   // flames crawl and read as a lava lamp.
   passes: 2,
+  sparkRadius: 0.14,
+  // Full heat, so a spark reads as new fuel rather than a smudge - and so it
+  // survives the climb long enough to become a plume.
+  sparkHeat: 1,
 };
 
 /** Seeds and offsets that give one run its character. */
@@ -218,6 +227,66 @@ export function stepFire(fire: Fire, params: FireParams, rand: () => number, dt:
   fire.elapsed += dt;
   seedFire(fire, params);
   for (let i = 0; i < params.passes; i++) propagateFire(fire, params, rand);
+}
+
+/** Where a click landed, in grid cells. */
+export interface Spark {
+  x: number;
+  y: number;
+  /** Multiplier on `sparkHeat`. */
+  strength: number;
+}
+
+/**
+ * Drops a blob of heat in - new fuel, thrown wherever the click landed.
+ *
+ * A one-shot deposit with no state of its own, and unusually for that, it still
+ * *evolves*. Every other interaction in this library fades where it was put: a
+ * splash decays, a ripple expands and dims, a wobble propagates and stops. This
+ * one gets taken away from where it was put, because the propagation already
+ * carries every cell's heat upward, cools it by a random amount and jitters it
+ * sideways. So a spark rises, thins, tears into tongues and dies out - none of
+ * which is written here. It is the existing simulation doing it.
+ *
+ * Note what happens to the blob's own cells. `propagateFire` writes each row
+ * from the row below, so the cells a spark occupies are overwritten by the
+ * cooler air beneath them on the very next pass. That is not a defect: it is why
+ * the blob *moves* rather than sitting where it was dropped, losing its bottom
+ * edge one row at a time until it is gone. At the defaults that gives a plume
+ * about a second long.
+ *
+ * Wraps sideways, like the propagation does, so a click near an edge is not
+ * clipped into half a spark.
+ */
+export function applySpark(fire: Fire, spark: Spark, params: FireParams): void {
+  const { w, h, heat } = fire;
+  const radius = Math.max(1, params.sparkRadius * Math.min(w, h));
+  const radius2 = radius * radius;
+  const reach = Math.ceil(radius);
+  const centreX = Math.round(spark.x);
+  const centreY = Math.round(spark.y);
+
+  for (let dy = -reach; dy <= reach; dy++) {
+    const gy = centreY + dy;
+    if (gy < 0 || gy >= h) continue;
+    const row = gy * w;
+
+    for (let dx = -reach; dx <= reach; dx++) {
+      const squared = dx * dx + dy * dy;
+      if (squared > radius2) continue;
+
+      const gx = (((centreX + dx) % w) + w) % w;
+      // Smooth to nothing at the rim, so the spark has no hard edge for the
+      // propagation to carry upward as a disc.
+      const falloff = (1 - squared / radius2) ** 2;
+      const raw = spark.strength * params.sparkHeat * falloff;
+      const value = raw > 1 ? 1 : raw;
+
+      const index = row + gx;
+      // Hottest wins, so a spark never cools what is already burning.
+      if (value > heat[index]) heat[index] = value;
+    }
+  }
 }
 
 /**

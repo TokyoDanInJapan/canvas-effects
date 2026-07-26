@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { makeRandom } from './noise';
 import {
   FIRE_DEFAULTS,
+  applySpark,
   createFire,
   flameHeight,
   propagateFire,
@@ -288,5 +289,156 @@ describe('stepFire', () => {
   it('climbs faster with more passes', () => {
     const reach = (passes: number) => flameHeight(burn(seeded(7), 12, { ...FIRE_DEFAULTS, passes }));
     expect(reach(4)).toBeGreaterThan(reach(1));
+  });
+});
+
+describe('applySpark', () => {
+  /** A cold field, so only the spark and what becomes of it are present. */
+  const cold = () => {
+    const fire = createFire(W, H, makeRandom(2));
+    fire.heat.fill(0);
+    return fire;
+  };
+
+  const spark = (fire: Fire, x = 24, y = 40, strength = 1, params = FIRE_DEFAULTS) => {
+    applySpark(fire, { x, y, strength }, params);
+    return fire;
+  };
+
+  const at = (f: Fire, x: number, y: number) => f.heat[y * f.w + x];
+  const total = (f: Fire) => {
+    let t = 0;
+    for (const v of f.heat) t += v;
+    return t;
+  };
+  /** Height of the heat's centre of mass, in rows from the top. */
+  const centreOfMass = (f: Fire) => {
+    let weighted = 0;
+    let mass = 0;
+    for (let y = 0; y < f.h; y++) {
+      for (let x = 0; x < f.w; x++) {
+        const v = f.heat[y * f.w + x];
+        weighted += v * y;
+        mass += v;
+      }
+    }
+    return mass > 0 ? weighted / mass : -1;
+  };
+
+  it('drops heat where it landed', () => {
+    const f = spark(cold());
+    expect(at(f, 24, 40)).toBeCloseTo(1, 6);
+  });
+
+  it('falls off smoothly to nothing at its rim', () => {
+    const f = spark(cold());
+    const radius = Math.round(FIRE_DEFAULTS.sparkRadius * Math.min(W, H));
+    expect(at(f, 24 + Math.floor(radius / 2), 40)).toBeGreaterThan(0);
+    expect(at(f, 24 + radius + 2, 40)).toBe(0);
+  });
+
+  it('stays inside 0..1 even with an over-hot parameter', () => {
+    const f = spark(cold(), 24, 40, 4, { ...FIRE_DEFAULTS, sparkHeat: 3 });
+    for (const v of f.heat) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('never cools what is already burning', () => {
+    const f = cold();
+    f.heat.fill(1);
+    spark(f, 24, 40, 0.4);
+    for (const v of f.heat) expect(v).toBe(1);
+  });
+
+  it('wraps sideways, so a click near an edge is not half a spark', () => {
+    const f = spark(cold(), 1, 40);
+    let farSide = 0;
+    for (let y = 0; y < H; y++) for (let x = W - 4; x < W; x++) farSide += at(f, x, y);
+    expect(farSide).toBeGreaterThan(0);
+  });
+
+  it('scales with strength', () => {
+    expect(total(spark(cold(), 24, 40, 1))).toBeGreaterThan(total(spark(cold(), 24, 40, 0.25)));
+  });
+
+  it('is clipped by the top and bottom edges without erroring', () => {
+    for (const y of [-10, 0, H - 1, H + 10]) {
+      const f = cold();
+      expect(() => spark(f, 24, y)).not.toThrow();
+      for (const v of f.heat) expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+
+  describe('what the simulation then does with it', () => {
+    it('carries it upward - the whole reason this shape of effect fits', () => {
+      // Nothing here says "rise". The propagation reads each row from the row
+      // below, so a parcel of heat climbs on its own.
+      const f = spark(cold(), 24, 40, 1, { ...FIRE_DEFAULTS, sourceHeat: 0 });
+      const before = centreOfMass(f);
+
+      const rand = makeRandom(5);
+      for (let i = 0; i < 8; i++) stepFire(f, { ...FIRE_DEFAULTS, sourceHeat: 0 }, rand, DT);
+
+      // Smaller row index is higher up the field.
+      expect(centreOfMass(f)).toBeLessThan(before);
+    });
+
+    it('loses its bottom edge as it climbs, rather than sitting where it was put', () => {
+      // `propagateFire` overwrites each row from the row below, so the cells a
+      // spark occupied are replaced by the cooler air beneath them. That is what
+      // makes the blob move instead of hovering.
+      const params = { ...FIRE_DEFAULTS, sourceHeat: 0 };
+      const f = spark(cold(), 24, 40, 1, params);
+      const bottomBefore = at(f, 24, 40 + 3);
+
+      const rand = makeRandom(5);
+      for (let i = 0; i < 6; i++) stepFire(f, params, rand, DT);
+      expect(at(f, 24, 40 + 3)).toBeLessThan(bottomBefore);
+    });
+
+    it('dies out on its own, with no fuel and nothing to prune', () => {
+      const params = { ...FIRE_DEFAULTS, sourceHeat: 0 };
+      const f = spark(cold(), 24, 40, 1, params);
+      expect(total(f)).toBeGreaterThan(0);
+
+      const rand = makeRandom(5);
+      for (let i = 0; i < 200; i++) stepFire(f, params, rand, DT);
+      expect(total(f) / f.heat.length).toBeLessThan(0.005);
+    });
+
+    it('breaks up as it goes rather than rising as a clean disc', () => {
+      // The cooling variance and the sideways jitter tear it, which is what makes
+      // a spark read as flame rather than as a moving blob.
+      const params = { ...FIRE_DEFAULTS, sourceHeat: 0 };
+      const roughness = (over: Partial<typeof FIRE_DEFAULTS>) => {
+        const f = spark(cold(), 24, 40, 1, { ...params, ...over });
+        const rand = makeRandom(5);
+        for (let i = 0; i < 10; i++) stepFire(f, { ...params, ...over }, rand, DT);
+        // Mean step between horizontal neighbours across the plume's rows.
+        let sum = 0;
+        let n = 0;
+        for (let y = 20; y < 45; y++) {
+          for (let x = 1; x < W; x++) {
+            sum += Math.abs(at(f, x, y) - at(f, x - 1, y));
+            n++;
+          }
+        }
+        return sum / n;
+      };
+
+      expect(roughness({})).toBeGreaterThan(roughness({ coolingVariance: 0, jitter: 0 }));
+    });
+
+    it('adds to a burning fire rather than replacing it', () => {
+      const lit = createFire(W, H, makeRandom(2));
+      const rand = makeRandom(5);
+      for (let i = 0; i < 60; i++) stepFire(lit, FIRE_DEFAULTS, rand, DT);
+      const before = total(lit);
+
+      spark(lit, 24, 20);
+      expect(total(lit)).toBeGreaterThan(before);
+    });
   });
 });

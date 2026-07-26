@@ -453,6 +453,7 @@ const FIRE_DIALS: Dial[] = [
   { key: 'sourceHeat', label: 'sourceHeat', min: 0.1, max: 1, step: 0.05, value: FIRE_DEFAULTS.sourceHeat },
   { key: 'sourceVariance', label: 'sourceVariance', min: 0, max: 1, step: 0.05, value: FIRE_DEFAULTS.sourceVariance },
   { key: 'sourceScale', label: 'sourceScale', min: 1, max: 16, step: 0.5, value: FIRE_DEFAULTS.sourceScale },
+  { key: 'sparkRadius', label: 'sparkRadius', min: 0.03, max: 0.4, step: 0.01, value: 0.14, note: 'click to spark' },
   { key: 'passes', label: 'passes', min: 1, max: 5, step: 1, value: FIRE_DEFAULTS.passes, note: 'climb speed' },
 ];
 
@@ -552,6 +553,7 @@ function mount() {
         sourceVariance: values.sourceVariance,
         sourceScale: values.sourceScale,
         passes: Math.round(values.passes),
+        sparkRadius: values.sparkRadius,
       },
     });
     if (!handle) fpsOut.textContent = 'no 2D context';
