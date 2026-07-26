@@ -1,9 +1,9 @@
-// Turning a continuous field into a handful of greys, shared by the backgrounds.
+// Turning a continuous field into a handful of greys, shared by every background.
 //
 // Ordered dithering with a 4x4 Bayer matrix, plus the quantisation it is built
-// on and the tonal bias that goes with it. Both backgrounds render a smooth
-// field and then posterise it hard; this is the half that makes the result read
-// as smooth rather than as bands.
+// on and the tonal bias that goes with it. Every background here renders a field
+// and then posterises it hard; this is the half that makes the result read as
+// smooth rather than as bands.
 
 /**
  * Weights the field towards its dark end.

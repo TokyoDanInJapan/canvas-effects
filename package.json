@@ -51,6 +51,7 @@
   "files": [
     "dist",
     "src",
+    "!src/**/*.test.ts",
     "docs/*.md",
     "README.md",
     "LICENSE"
