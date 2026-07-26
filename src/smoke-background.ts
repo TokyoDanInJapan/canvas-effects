@@ -1,23 +1,22 @@
-// The smoke background: canvas, loop and input. The fluid solver it drives
-// lives in smoke.ts, and the shading it hands the result to lives in render.ts.
+// The smoke background. The fluid solver it drives lives in smoke.ts, the
+// shading it hands the result to lives in render.ts, and the canvas, loop and
+// listeners it shares with every other effect live in background.ts.
 //
-// The shape of this is the same as the plasma background - a coarse field, an
-// interpolated and dithered output, the same palette - with one important
-// difference: this one is *stateful*. The density field is carried forward from
-// frame to frame and folded by the flow, which is what produces filaments. Two
-// things follow from that:
+// The one effect here that is properly *stateful*: the density field is carried
+// forward from frame to frame and folded by the flow, which is what produces
+// filaments. Two things follow from that:
 //
 //   • It cannot be drawn at an arbitrary time. Frame N depends on frame N-1, so
-//     there is no equivalent of the plasma's `draw(elapsed)`. Under reduced
-//     motion it is settled by running a fixed number of steps up front, then
-//     left alone.
+//     there is no drawing it at some elapsed time without having drawn the
+//     moments before. Under reduced motion it is settled by running a fixed
+//     number of steps up front, then left alone.
 //   • A stalled tab must not resume with one enormous step, or the smoke would
-//     lurch. The timestep is fixed per drawn frame rather than taken from the
-//     clock; a slow frame makes the smoke drift slower, never further.
+//     lurch. Hence the fixed timestep: a slow frame makes the smoke drift
+//     slower, never further.
 
-import { createDriver, prefersReducedMotion } from './driver';
+import { COMMON_BACKGROUND_DEFAULTS, mountBackground, type CommonBackgroundOptions } from './background';
 import { withDefaults } from './options';
-import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
+import { type BackgroundHandle } from './render';
 import {
   SMOKE_DEFAULTS,
   applyJet,
@@ -34,9 +33,7 @@ import {
   type Stroke,
 } from './smoke';
 
-export interface SmokeBackgroundOptions {
-  /** CSS pixels per rendered pixel - one dither cell. Bigger is coarser and cheaper. */
-  pixelSize: number;
+export interface SmokeBackgroundOptions extends CommonBackgroundOptions {
   /**
    * How much coarser the simulation grid is than the output, per axis.
    *
@@ -46,8 +43,6 @@ export interface SmokeBackgroundOptions {
    * The dither hides the difference.
    */
   fieldScale: number;
-  /** Ceiling on rendered pixels, so a 4K window is not four times a 1080p one. */
-  maxPixels: number;
   /**
    * Ceiling on simulation cells, which is a much harder limit than the pixel
    * one. Left uncapped, a 1440p window would simulate five times the cells of a
@@ -57,40 +52,17 @@ export interface SmokeBackgroundOptions {
   maxSimCells: number;
   /** Redraw rate. The timestep is `1 / fps`, fixed - see the note above. */
   fps: number;
-  /** Palette size. Small on purpose - the dither is what makes it look smooth. */
-  levels: number;
-  /** Ordered-dither the output. Off posterises flat, showing the bands. */
-  dither: boolean;
-  /** Weights the field towards its dark end. See `darken` in dither.ts. */
-  gamma: number;
   /** Steps run before the first paint, so it opens as smoke rather than fog. */
   settleSteps: number;
-  /** The greys the field is mapped onto. A function is re-read on theme changes. */
-  shading: Shading | (() => Shading);
   /** Solver parameters. Anything omitted falls back to `SMOKE_DEFAULTS`. */
   simulation: Partial<SmokeParams>;
   /** Let a cursor drag stir the fluid. */
   interactive: boolean;
-  /** Draw one settled frame and stop when the visitor has asked for less motion. */
-  respectReducedMotion: boolean;
-  /** Stop the loop while the tab is hidden. */
-  pauseWhenHidden: boolean;
-  /** Re-read `shading` when the `class` on `<html>` changes. */
-  watchThemeClass: boolean;
-  /** Re-read `shading` when the OS colour scheme changes. */
-  watchColorScheme: boolean;
-  /** Source of randomness. Pass a seeded generator for a repeatable background. */
-  random: () => number;
 }
 
 export const SMOKE_BACKGROUND_DEFAULTS: SmokeBackgroundOptions = {
-  pixelSize: 6,
-  fieldScale: 2,
-  maxPixels: 160_000,
+  ...COMMON_BACKGROUND_DEFAULTS,
   maxSimCells: 8_000,
-  fps: 24,
-  levels: 5,
-  dither: true,
   // Solved offline across four seeds rather than in the browser. Each page load
   // rolls a fresh field and fires jets at random times, so a single run's mean
   // shade swings by three or four levels - measuring this live gave results
@@ -101,14 +73,7 @@ export const SMOKE_BACKGROUND_DEFAULTS: SmokeBackgroundOptions = {
   // smoke survive. Further, if wanted: 2.0 gives 30%, 2.5 gives 38%.
   gamma: 1.6,
   settleSteps: 90,
-  shading: defaultShading,
   simulation: {},
-  interactive: true,
-  respectReducedMotion: true,
-  pauseWhenHidden: true,
-  watchThemeClass: true,
-  watchColorScheme: true,
-  random: Math.random,
 };
 
 /**
@@ -126,24 +91,10 @@ export function createSmokeBackground(
   const config: SmokeBackgroundOptions = withDefaults(SMOKE_BACKGROUND_DEFAULTS, options);
   const params: SmokeParams = withDefaults(SMOKE_DEFAULTS, config.simulation);
 
-  const ctx = canvas.getContext('2d', { alpha: false });
-  if (!ctx) return null;
-
-  const still = config.respectReducedMotion && prefersReducedMotion();
   const state = randomizeSmoke(config.random);
   const dt = 1 / config.fps;
 
-  const surface = createSurface(canvas, ctx, {
-    pixelSize: config.pixelSize,
-    fieldScale: config.fieldScale,
-    maxPixels: config.maxPixels,
-    maxFieldCells: config.maxSimCells,
-    levels: config.levels,
-    dither: config.dither,
-  });
-
   let fluid: Fluid | null = null;
-  let shading: Shading = { base: 0, amplitude: 0 };
   let elapsed = 0;
 
   // Jets fire on their own schedule rather than every N frames, so they do not
@@ -156,10 +107,6 @@ export function createSmokeBackground(
   // steps, so they are collected and spent on the next frame rather than each
   // one poking the fluid on its own.
   const pending: Stroke[] = [];
-
-  function readShading() {
-    shading = typeof config.shading === 'function' ? config.shading() : config.shading;
-  }
 
   /** Runs the simulation forward one step. */
   function step() {
@@ -186,95 +133,60 @@ export function createSmokeBackground(
     stepFluid(fluid, params, state, elapsed, dt);
   }
 
-  function shade() {
-    if (fluid) surface.shade(fluid.density, shading, config.gamma);
-  }
+  return mountBackground(canvas, config, {
+    maxFieldCells: config.maxSimCells,
+    gamma: config.gamma,
+    timestep: 'fixed',
 
-  function rebuild() {
-    fluid = createFluid(surface.fieldW, surface.fieldH);
+    rebuild(fieldW, fieldH) {
+      fluid = createFluid(fieldW, fieldH);
 
-    // Resizing throws the simulation away, so run a fresh one up to speed
-    // rather than opening on still, unmoved source noise.
-    computeSource(elapsed, params, state, fluid.source, fluid.w, fluid.h);
-    fluid.density.set(fluid.source);
-    for (let i = 0; i < config.settleSteps; i++) step();
-  }
-
-  const driver = createDriver(canvas, {
-    fps: config.fps,
-    onFrame() {
-      step();
-      shade();
+      // Resizing throws the simulation away, so run a fresh one up to speed
+      // rather than opening on still, unmoved source noise.
+      computeSource(elapsed, params, state, fluid.source, fluid.w, fluid.h);
+      fluid.density.set(fluid.source);
+      for (let i = 0; i < config.settleSteps; i++) step();
     },
-    onResize() {
-      if (surface.resize()) rebuild();
-      shade();
+
+    field: () => fluid?.density ?? null,
+
+    // The timestep is fixed, so `step` takes its own `dt` and ignores the one it
+    // is handed - they are the same number.
+    step,
+
+    /**
+     * Dragging stirs the smoke.
+     *
+     * Only while a button is held, which is what `createDragSource` gives:
+     * reacting to every idle mouse movement would mean permanently disturbing the
+     * background for a reader who is only moving the cursor out of the way of the
+     * text.
+     *
+     * The shove comes from the resampled step rather than from `movementX`. Two
+     * things follow, and both are improvements: it works for a touch pointer,
+     * where `movementX` is 0 or absent, and the impulse is proportional to the
+     * distance dragged rather than to how often the browser delivered an event.
+     */
+    drag: {
+      spacing: 0.01,
+      maxPerMove: 8,
+      onEmit(u, v, du, dv) {
+        if (!fluid) return;
+        // A long stall between events would otherwise arrive as one huge drag.
+        if (pending.length > 16) return;
+
+        pending.push({
+          x: u * fluid.w,
+          y: v * fluid.h,
+          dx: du * fluid.w,
+          dy: dv * fluid.h,
+        });
+      },
     },
-    onThemeChange() {
-      const previous = shading;
-      readShading();
-      // The field has not changed, only what greys it maps onto.
-      if (shading.base !== previous.base || shading.amplitude !== previous.amplitude) shade();
-    },
-    pauseWhenHidden: config.pauseWhenHidden,
-    watchThemeClass: config.watchThemeClass,
-    watchColorScheme: config.watchColorScheme,
-  });
 
-  /**
-   * Dragging stirs the smoke.
-   *
-   * Listened for on the window rather than the canvas: a background canvas is
-   * usually `pointer-events: none` so that it never intercepts anything meant
-   * for the page, which also means it never sees a pointer itself.
-   *
-   * Only while a button is held. Reacting to every idle mouse movement would
-   * mean the background is permanently being disturbed by a reader who is only
-   * moving the cursor out of the way of the text.
-   */
-  function onPointerMove(event: PointerEvent) {
-    if (still || !fluid || event.buttons === 0) return;
-    // A long stall between events would otherwise arrive as one huge drag.
-    if (pending.length > 16) return;
-
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    const toCellsX = fluid.w / rect.width;
-    const toCellsY = fluid.h / rect.height;
-
-    pending.push({
-      x: (event.clientX - rect.left) * toCellsX,
-      y: (event.clientY - rect.top) * toCellsY,
-      dx: event.movementX * toCellsX,
-      dy: event.movementY * toCellsY,
-    });
-  }
-
-  if (config.interactive && !still) {
-    window.addEventListener('pointermove', onPointerMove, { passive: true });
-  }
-
-  readShading();
-  surface.resize();
-  rebuild();
-  shade();
-  if (!still) driver.start();
-
-  return {
-    canvas,
-    start() {
-      if (!still) driver.start();
-    },
-    stop: driver.stop,
-    refresh() {
-      readShading();
-      shade();
-    },
     destroy() {
-      driver.destroy();
-      window.removeEventListener('pointermove', onPointerMove);
+      pending.length = 0;
       fluid = null;
     },
-  };
+  });
 }
