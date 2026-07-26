@@ -92,7 +92,15 @@ function shading(): Shading {
 const SMOKE_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 90, step: 1, value: 26, note: 'the readability dial' },
   { key: 'gamma', label: 'gamma', min: 0.6, max: 3, step: 0.05, value: SMOKE_BACKGROUND_DEFAULTS.gamma },
-  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: SMOKE_BACKGROUND_DEFAULTS.levels },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 12,
+    step: 1,
+    value: SMOKE_BACKGROUND_DEFAULTS.levels,
+    note: 'greys in the palette',
+  },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: SMOKE_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: SMOKE_BACKGROUND_DEFAULTS.fps },
   { key: 'drag', label: 'drag', min: 0.1, max: 3, step: 0.05, value: 0.9, note: 'sets how fast it mixes to fog' },
@@ -108,7 +116,15 @@ const SMOKE_DIALS: Dial[] = [
 const PLASMA_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 90, step: 1, value: 24, note: 'the readability dial' },
   { key: 'gamma', label: 'gamma', min: 0.6, max: 3, step: 0.05, value: PLASMA_BACKGROUND_DEFAULTS.gamma },
-  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: PLASMA_BACKGROUND_DEFAULTS.levels },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 12,
+    step: 1,
+    value: PLASMA_BACKGROUND_DEFAULTS.levels,
+    note: 'greys in the palette',
+  },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: PLASMA_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: PLASMA_BACKGROUND_DEFAULTS.fps },
   { key: 'speed', label: 'speed', min: 0.05, max: 3, step: 0.05, value: PLASMA_BACKGROUND_DEFAULTS.speed },
@@ -123,7 +139,15 @@ const PLASMA_DIALS: Dial[] = [
 const RAIN_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 52, note: 'the readability dial' },
   { key: 'green', label: 'green tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
-  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: RAIN_BACKGROUND_DEFAULTS.levels },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 12,
+    step: 1,
+    value: RAIN_BACKGROUND_DEFAULTS.levels,
+    note: 'greys in the palette',
+  },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: RAIN_BACKGROUND_DEFAULTS.pixelSize },
   {
     key: 'fieldScale',
@@ -156,7 +180,15 @@ const RAIN_DIALS: Dial[] = [
 const RIDGE_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 46, note: 'the readability dial' },
   { key: 'green', label: 'green tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
-  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.levels },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 12,
+    step: 1,
+    value: RIDGES_BACKGROUND_DEFAULTS.levels,
+    note: 'greys in the palette',
+  },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 12, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.fps },
   { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: RIDGES_BACKGROUND_DEFAULTS.gamma },
@@ -208,7 +240,15 @@ const RIDGE_DIALS: Dial[] = [
 const FIRE_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 140, step: 1, value: 60, note: 'the readability dial' },
   { key: 'warm', label: 'warm tint', min: 0, max: 1, step: 0.05, value: 0, note: '0 = greyscale' },
-  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: FIRE_BACKGROUND_DEFAULTS.levels },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 12,
+    step: 1,
+    value: FIRE_BACKGROUND_DEFAULTS.levels,
+    note: 'greys in the palette',
+  },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: FIRE_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fieldScale', label: 'fieldScale', min: 1, max: 5, step: 1, value: FIRE_BACKGROUND_DEFAULTS.fieldScale },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: FIRE_BACKGROUND_DEFAULTS.fps },
@@ -242,7 +282,15 @@ const FIRE_DIALS: Dial[] = [
 
 const METABALL_DIALS: Dial[] = [
   { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 34, note: 'the readability dial' },
-  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.levels },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 12,
+    step: 1,
+    value: METABALLS_BACKGROUND_DEFAULTS.levels,
+    note: 'greys in the palette',
+  },
   { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fieldScale', label: 'fieldScale', min: 1, max: 4, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.fieldScale },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.fps },
