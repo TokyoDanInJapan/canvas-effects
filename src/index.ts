@@ -21,6 +21,12 @@ export { createRidgesBackground, RIDGES_BACKGROUND_DEFAULTS, type RidgesBackgrou
 export { createFireBackground, FIRE_BACKGROUND_DEFAULTS, type FireBackgroundOptions } from './fire-background';
 
 export {
+  createMetaballsBackground,
+  METABALLS_BACKGROUND_DEFAULTS,
+  type MetaballsBackgroundOptions,
+} from './metaballs-background';
+
+export {
   createSurface,
   planSurface,
   defaultShading,
@@ -59,6 +65,23 @@ export {
   type RidgeState,
   type Ridges,
 } from './ridges';
+
+// The implicit surface.
+export {
+  METABALL_DEFAULTS,
+  createMetaballs,
+  randomizeMetaballs,
+  renderMetaballs,
+  ballsAt,
+  fieldAt,
+  falloff,
+  surface as metaballSurface,
+  coverage,
+  type Ball,
+  type MetaballParams,
+  type MetaballState,
+  type Metaballs,
+} from './metaballs';
 
 // The heat field.
 export {

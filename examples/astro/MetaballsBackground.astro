@@ -1,0 +1,55 @@
+---
+/**
+ * Metaballs as an Astro component. A sibling of the other backgrounds - mount
+ * one, not several: they are all opaque and full-bleed, so two would stack.
+ *
+ * See SmokeBackground.astro for why `transition:persist`, the `astro:page-load`
+ * listener and the `dataset` guard are all needed together.
+ */
+---
+
+<canvas id="metaballs" class="metaballs" aria-hidden="true" transition:persist></canvas>
+
+<script>
+  import { createMetaballsBackground } from 'canvas-effects';
+
+  /**
+   * Low, like the smoke and plasma. Metaballs are large soft shapes, so a high
+   * amplitude puts big bright masses directly behind paragraphs.
+   */
+  const AMPLITUDE = { dark: 34, light: 28 };
+
+  function init() {
+    const canvas = document.getElementById('metaballs') as HTMLCanvasElement | null;
+    if (!canvas) return;
+
+    if (canvas.dataset.mounted === '1') return;
+    canvas.dataset.mounted = '1';
+
+    const handle = createMetaballsBackground(canvas, {
+      shading: () => {
+        const dark = document.documentElement.classList.contains('dark');
+        // These must match your page background.
+        return dark ? { base: 18, amplitude: AMPLITUDE.dark } : { base: 255, amplitude: -AMPLITUDE.light };
+      },
+    });
+
+    if (!handle) canvas.remove();
+  }
+
+  init();
+  document.addEventListener('astro:page-load', init);
+</script>
+
+<style>
+  .metaballs {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    image-rendering: pixelated;
+  }
+</style>

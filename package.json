@@ -1,7 +1,7 @@
 {
   "name": "canvas-effects",
-  "version": "1.4.0",
-  "description": "Five animated, ordered-dithered greyscale backgrounds for a 2D canvas: a Stable Fluids smoke solver, a domain-warped plasma, digital rain, a ridgeline landscape, and cellular fire.",
+  "version": "1.5.0",
+  "description": "Six animated, ordered-dithered greyscale backgrounds for a 2D canvas: a Stable Fluids smoke solver, a domain-warped plasma, digital rain, a ridgeline landscape, cellular fire, and metaballs.",
   "keywords": [
     "canvas",
     "background",
@@ -23,7 +23,9 @@
     "hidden-line-removal",
     "fire",
     "doom-fire",
-    "demoscene"
+    "demoscene",
+    "metaballs",
+    "implicit-surface"
   ],
   "license": "MIT",
   "author": "Daniel Hebberd",

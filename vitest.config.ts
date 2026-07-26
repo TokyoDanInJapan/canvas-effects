@@ -27,6 +27,7 @@ export default defineConfig({
         'src/rain-background.ts',
         'src/ridges-background.ts',
         'src/fire-background.ts',
+        'src/metaballs-background.ts',
       ],
       thresholds: { statements: 95, branches: 85, functions: 95, lines: 95 },
     },

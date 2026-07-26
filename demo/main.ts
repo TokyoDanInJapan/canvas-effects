@@ -5,6 +5,8 @@
 import {
   PLASMA_BACKGROUND_DEFAULTS,
   FIRE_BACKGROUND_DEFAULTS,
+  METABALLS_BACKGROUND_DEFAULTS,
+  METABALL_DEFAULTS,
   FIRE_DEFAULTS,
   RAIN_BACKGROUND_DEFAULTS,
   RAIN_DEFAULTS,
@@ -13,6 +15,7 @@ import {
   SMOKE_BACKGROUND_DEFAULTS,
   createPlasmaBackground,
   createFireBackground,
+  createMetaballsBackground,
   createRainBackground,
   createRidgesBackground,
   createSmokeBackground,
@@ -56,7 +59,7 @@ const panel = document.getElementById('panel') as HTMLElement;
 const themeButton = document.getElementById('theme') as HTMLButtonElement;
 const fpsOut = document.getElementById('fps') as HTMLSpanElement;
 
-type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'fire';
+type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'fire' | 'metaballs';
 
 interface Dial {
   key: string;
@@ -237,6 +240,37 @@ const FIRE_DIALS: Dial[] = [
   { key: 'passes', label: 'passes', min: 1, max: 5, step: 1, value: FIRE_DEFAULTS.passes, note: 'climb speed' },
 ];
 
+const METABALL_DIALS: Dial[] = [
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 34, note: 'the readability dial' },
+  { key: 'levels', label: 'levels', min: 2, max: 12, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.levels },
+  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'fieldScale', label: 'fieldScale', min: 1, max: 4, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.fieldScale },
+  { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.fps },
+  { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: METABALLS_BACKGROUND_DEFAULTS.gamma },
+  { key: 'count', label: 'count', min: 1, max: 20, step: 1, value: METABALL_DEFAULTS.count },
+  { key: 'ballRadius', label: 'radius', min: 0.06, max: 0.5, step: 0.01, value: METABALL_DEFAULTS.radius },
+  {
+    key: 'radiusVariance',
+    label: 'radiusVariance',
+    min: 0,
+    max: 0.9,
+    step: 0.05,
+    value: METABALL_DEFAULTS.radiusVariance,
+  },
+  { key: 'iso', label: 'iso', min: 0.1, max: 2, step: 0.05, value: METABALL_DEFAULTS.iso, note: 'the surface level' },
+  {
+    key: 'shoulder',
+    label: 'shoulder',
+    min: 0,
+    max: 1,
+    step: 0.02,
+    value: METABALL_DEFAULTS.shoulder,
+    note: '0 = hard edge',
+  },
+  { key: 'ballSpeed', label: 'speed', min: 0.02, max: 1, step: 0.02, value: METABALL_DEFAULTS.speed },
+  { key: 'wander', label: 'wander', min: 0, max: 1, step: 0.05, value: METABALL_DEFAULTS.wander },
+];
+
 let effect: Effect = 'smoke';
 let values: Record<string, number> = {};
 let handle: BackgroundHandle | null = null;
@@ -260,6 +294,24 @@ function mount() {
     fps: Math.round(values.fps),
     random,
   };
+
+  if (effect === 'metaballs') {
+    handle = createMetaballsBackground(canvas, {
+      ...common,
+      fieldScale: Math.round(values.fieldScale),
+      metaballs: {
+        count: Math.round(values.count),
+        radius: values.ballRadius,
+        radiusVariance: values.radiusVariance,
+        iso: values.iso,
+        shoulder: values.shoulder,
+        speed: values.ballSpeed,
+        wander: values.wander,
+      },
+    });
+    if (!handle) fpsOut.textContent = 'no 2D context';
+    return;
+  }
 
   if (effect === 'fire') {
     handle = createFireBackground(canvas, {
@@ -363,7 +415,9 @@ function buildDials() {
           ? RAIN_DIALS
           : effect === 'fire'
             ? FIRE_DIALS
-            : RIDGE_DIALS;
+            : effect === 'metaballs'
+              ? METABALL_DIALS
+              : RIDGE_DIALS;
   values = Object.fromEntries(list.map((d) => [d.key, d.value]));
   dials.replaceChildren();
 

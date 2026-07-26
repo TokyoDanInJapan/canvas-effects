@@ -1,6 +1,6 @@
 # canvas-effects
 
-Five animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
+Six animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
 they modulate the page colour rather than becoming a picture, and they are quiet enough that a reader should not
 consciously notice them.
 
@@ -38,6 +38,12 @@ itself is an ordinary statistical graphic and nothing here derives from the cove
 climbs. Greyscale by default, where it reads as embers or heat haze at the foot of the page. It is the one effect whose
 look is genuinely limited by the five-grey palette — see [What it looks like, honestly](#what-it-looks-like-honestly).
 
+![The metaballs background behind a page of text](docs/metaballs.png)
+
+**Metaballs** are an implicit surface: point sources each contribute a falloff to a shared field, which is thresholded
+to a surface. Blobs bulge towards each other as they approach, fuse with a smooth neck, and part again without a seam.
+Nothing in the code knows about necks — there is only a sum and a threshold.
+
 ---
 
 ## Contents
@@ -51,6 +57,7 @@ look is genuinely limited by the five-grey palette — see [What it looks like, 
   - [Rain: falling lanes](#rain-falling-lanes)
   - [Ridges: a landscape flown over](#ridges-a-landscape-flown-over)
   - [Fire: heat climbing](#fire-heat-climbing)
+  - [Metaballs: an implicit surface](#metaballs-an-implicit-surface)
 - [Using it](#using-it)
   - [Shading and themes](#shading-and-themes)
   - [The handle](#the-handle)
@@ -383,6 +390,35 @@ Two defaults came out of measuring rather than guessing:
   interpolates perfectly well, but because interpolating it smooths away the fine tongue structure that separates fire
   from a glow.
 
+### Metaballs: an implicit surface
+
+`src/metaballs.ts`. Each ball adds a falloff to a shared scalar field; the field is then thresholded to a surface.
+
+**The merging is not a drawing trick.** Two balls whose individual contributions both fall short of `iso` can cross it
+together, so a bridge appears between them before their outlines touch, thickens as they close, and thins away as they
+part. There is no special case for it anywhere — it is only what a sum does when two falloffs overlap. `metaballs.test.ts`
+pins exactly that: each ball alone below the threshold at the midpoint, the pair above it.
+
+**Wyvill's falloff, not Blinn's exponential.** `exp(-b · r²)` never reaches zero, so every ball influences every cell
+and the cost is cells × balls. `(1 - r²/R²)³` is smooth to the second derivative, needs no transcendental, and is
+_exactly_ zero past R. That last property changes the algorithm rather than just trimming it: each ball scatters itself
+over its own bounding box, so the work is the sum of the ball areas. There is a test asserting the optimised scatter
+matches a naive per-cell gather to six decimal places.
+
+**Stateless in time**, like the plasma. Positions are closed-form functions of the clock — Lissajous figures with
+deliberately incommensurable frequencies, so the set never falls back into its starting arrangement on a visible cycle.
+A frame can be drawn at any moment without having drawn the ones before it, which is what makes the reduced-motion path
+a single draw with no settling run. A test checks that stepping to `t` in forty small renders equals jumping there in
+one.
+
+**Positions live in height units.** `x` spans `0..aspect` and `y` spans `0..1`, so distance is isotropic and a ball is
+round on any window. Working in `0..1` on both axes would stretch every blob into an ellipse on a wide screen; a test
+measures a lone blob's extent both ways and requires them equal.
+
+`shoulder` is the look dial. Narrow gives hard-edged classic metaballs — which at five greys means flat silhouettes,
+because a hard threshold produces a two-value field and wastes the palette entirely. Wide, the default, gives shaded
+blobs whose rims cross several palette levels and dither into a gradient.
+
 ---
 
 ## Using it
@@ -538,8 +574,26 @@ And the `fire` sub-options, documented inline on `FireParams`:
 | `sourceScale` / `sourceDrift`         | `5.5` / `0.06`       | Size of the hot and cool patches, and how fast they slide.                |
 | `passes`                              | `2`                  | Propagation steps per frame - the climb speed.                            |
 
+Metaballs only:
+
+| Option      | Default | Does                                                  |
+| ----------- | ------- | ----------------------------------------------------- |
+| `speed`     | `1`     | A multiplier on animation time.                       |
+| `metaballs` | `{}`    | Metaball parameters, merged over `METABALL_DEFAULTS`. |
+
+And the `metaballs` sub-options, documented inline on `MetaballParams`:
+
+| Parameter                   | Default         | Does                                                                             |
+| --------------------------- | --------------- | -------------------------------------------------------------------------------- |
+| `count`                     | `7`             | How many balls. Few and large merge; many and small just mill about.             |
+| `radius` / `radiusVariance` | `0.26` / `0.4`  | Mean ball radius in field-height units, and the spread on it.                    |
+| `iso`                       | `0.55`          | The field value taken as the surface.                                            |
+| `shoulder`                  | `0.38`          | Width of the gradient across it. **0 gives a hard edge and wastes the palette.** |
+| `strength`                  | `1`             | Peak contribution of one ball at its centre.                                     |
+| `speed` / `wander`          | `0.16` / `0.72` | How fast they move, and how far from centre they stray.                          |
+
 The full parameter sets are documented inline where they are declared - `SmokeParams` in `src/smoke.ts`,
-`PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts`, `RidgeParams` in `src/ridges.ts`, `FireParams` in `src/fire.ts` - with a
+`PlasmaWarpConfig` in `src/plasma-warp.ts`, `RainParams` in `src/rain.ts`, `RidgeParams` in `src/ridges.ts`, `FireParams` in `src/fire.ts`, `MetaballParams` in `src/metaballs.ts` - with a
 note on each about what it does and
 where its default came from.
 
@@ -590,7 +644,7 @@ dozen or more times a frame — six passes plus every Jacobi iteration — where
 Left uncapped, a 1440p window would simulate five times the cells of a 1080p one and fall over on exactly the machines
 least able to take it. After that, `iterations` (the Jacobi count) is the next biggest lever.
 
-All five together are 7.2 kB minified and gzipped, with no dependencies. The package is `sideEffects: false`, so
+All six together are 8.0 kB minified and gzipped, with no dependencies. The package is `sideEffects: false`, so
 importing one of them tree-shakes the others away.
 
 ---
@@ -598,7 +652,7 @@ importing one of them tree-shakes the others away.
 ## Accessibility
 
 - The canvas is decoration. Mark it `aria-hidden="true"`.
-- With `prefers-reduced-motion: reduce` all five draw a single frame and stop. The smoke and the rain settle
+- With `prefers-reduced-motion: reduce` all six draw a single frame and stop. The smoke and the rain settle
   themselves with `settleSteps` first, so the still frame is smoke or mid-storm rain rather than an empty field. Cursor
   stirring is disabled too.
 - With JavaScript off nothing is painted at all and the page keeps its ordinary background — which is the other reason
