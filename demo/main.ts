@@ -357,6 +357,25 @@ const RIDGE_DIALS: Dial[] = [
     value: RIDGE_DEFAULTS.depthFade,
     note: 'distance haze',
   },
+  { key: 'fill', label: 'fill', min: 0, max: 1, step: 1, value: 0, note: 'solid silhouettes, not lines' },
+  {
+    key: 'fillLevel',
+    label: 'fillLevel',
+    min: 0.05,
+    max: 1,
+    step: 0.05,
+    value: RIDGE_DEFAULTS.fillLevel,
+    note: 'how bright the fill is',
+  },
+  {
+    key: 'trail',
+    label: 'trail',
+    min: 0,
+    max: 0.95,
+    step: 0.05,
+    value: RIDGE_DEFAULTS.trail,
+    note: 'ghost behind each ridge',
+  },
   { key: 'octaves', label: 'octaves', min: 1, max: 6, step: 1, value: RIDGE_DEFAULTS.octaves },
 ];
 
@@ -519,6 +538,9 @@ function mount() {
         ampFalloff: values.ampFalloff,
         depthFade: values.depthFade,
         octaves: Math.round(values.octaves),
+        fill: values.fill >= 0.5,
+        fillLevel: values.fillLevel,
+        trail: values.trail,
       },
     });
     if (!handle) fpsOut.textContent = 'no 2D context';

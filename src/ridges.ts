@@ -89,6 +89,38 @@ export interface RidgeParams {
    * bound rather than a cost - most of the extra rows do no work.
    */
   overscan: number;
+  /**
+   * Fill the space each profile hides, turning the stack from a pile of lines
+   * into a pile of solid silhouettes.
+   *
+   * Costs nothing to work out where: the floating horizon already knows the
+   * topmost point covered by nearer rows, so the fill runs from a row's own
+   * curve down to that, which is exactly the region belonging to it.
+   */
+  fill: boolean;
+  /**
+   * Brightness of that fill, as a fraction of the row's line brightness.
+   *
+   * Below 1 so the crest still reads as a line against its own body. At 1 the
+   * silhouettes are flat and the ridgelines vanish into them.
+   */
+  fillLevel: number;
+  /**
+   * Fraction of the previous frame kept, 0 to 1 - a ghost trailing each profile.
+   *
+   * Zero leaves the field a pure function of `travel`, which is the default and
+   * what everything else here assumes. Above zero it becomes stateful: each
+   * frame starts from the last one faded, so a moving crest smears behind
+   * itself.
+   *
+   * Faded and maxed rather than blended, like the rain's trails: a lerp towards
+   * the new frame would dim the lines themselves, and full brightness has to
+   * stay exactly 1 or one-cell line art stops surviving the dither.
+   *
+   * The profiles descend, so the ghost sits above the line - which is the side
+   * the occlusion does not clip, so trails need no special handling against it.
+   */
+  trail: number;
 }
 
 export const RIDGE_DEFAULTS: RidgeParams = {
@@ -122,6 +154,10 @@ export const RIDGE_DEFAULTS: RidgeParams = {
   // default perspective and amplitude. Baselines grow faster than peaks as
   // rows pass the edge, so this does not need to be large.
   overscan: 8,
+  // Both off, so the default is the line stack this started as.
+  fill: false,
+  fillLevel: 0.34,
+  trail: 0,
 };
 
 /** Seeds and offsets that give one run its landscape. */
@@ -211,6 +247,8 @@ export interface Ridges {
   horizon: Float32Array;
   /** This row's curve, per column. Scratch. */
   ys: Float32Array;
+  /** Last frame's field, for `trail`. Unused while it is zero. */
+  previous: Float32Array;
   state: RidgeState;
   /** How far we have flown, in rows. */
   travel: number;
@@ -223,6 +261,7 @@ export function createRidges(w: number, h: number, rand: () => number = Math.ran
     field: new Float32Array(w * h),
     horizon: new Float32Array(w),
     ys: new Float32Array(w),
+    previous: new Float32Array(w * h),
     state: randomizeRidges(rand),
     travel: 0,
   };
@@ -238,10 +277,16 @@ export function createRidges(w: number, h: number, rand: () => number = Math.ran
  * slots instead would make the terrain morph in place rather than approach.
  */
 export function renderRidges(ridges: Ridges, params: RidgeParams): void {
-  const { w, h, field, horizon, ys, state, travel } = ridges;
-  const { rows } = params;
+  const { w, h, field, horizon, ys, previous, state, travel } = ridges;
+  const { rows, trail } = params;
 
-  field.fill(0);
+  if (trail > 0) {
+    // Start from the last frame, faded. Everything below draws with a max, so
+    // this frame's lines overwrite their own ghosts at full strength.
+    for (let k = 0; k < field.length; k++) field[k] = previous[k] * trail;
+  } else {
+    field.fill(0);
+  }
   // Nothing drawn yet, so the horizon starts below the bottom of the screen.
   horizon.fill(h);
 
@@ -268,14 +313,14 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
       ys[x] = base - ridgeHeight(u, worldZ, params, state) * amp;
     }
 
-    let previous = ys[0];
+    let previousY = ys[0];
     for (let x = 0; x < w; x++) {
       const y = ys[x];
 
       // Fill between this sample and the last, so a steep flank is a
       // continuous line rather than a column of dots.
-      const lo = Math.floor(Math.min(previous, y));
-      const hi = Math.floor(Math.max(previous, y));
+      const lo = Math.floor(Math.min(previousY, y));
+      const hi = Math.floor(Math.max(previousY, y));
       const limit = horizon[x];
 
       for (let iy = lo; iy <= hi; iy++) {
@@ -286,7 +331,17 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
         if (brightness > field[index]) field[index] = brightness;
       }
 
-      previous = y;
+      // Everything from under this curve down to the nearer silhouette belongs
+      // to this row, and is exactly what a filled stack shows.
+      if (params.fill) {
+        const shade = brightness * params.fillLevel;
+        for (let iy = Math.max(0, hi + 1); iy < h && iy < limit; iy++) {
+          const index = iy * w + x;
+          if (shade > field[index]) field[index] = shade;
+        }
+      }
+
+      previousY = y;
     }
 
     // Only now, so the row could draw at its own height rather than clipping
@@ -295,6 +350,8 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
       if (ys[x] < horizon[x]) horizon[x] = ys[x];
     }
   }
+
+  if (trail > 0) previous.set(field);
 }
 
 /** Flies forward and redraws. */

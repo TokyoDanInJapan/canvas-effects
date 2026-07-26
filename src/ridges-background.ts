@@ -1,10 +1,14 @@
 // The ridgeline background: canvas and loop. The landscape it draws lives in
 // ridges.ts, and the shading it hands the result to lives in render.ts.
 //
-// Unlike the smoke and the rain this carries no history: the field is a pure
-// function of how far we have flown, so it can be drawn at any moment. The only
-// state is `travel`, which is a number rather than a simulation. That makes the
-// reduced-motion path a single draw at travel zero.
+// Unlike the smoke and the rain this normally carries no history: the field is a
+// pure function of how far we have flown, so it can be drawn at any moment. The
+// only state is `travel`, which is a number rather than a simulation. That makes
+// the reduced-motion path a single draw.
+//
+// The exception is `ridges.trail`. Above zero, each frame starts from the last
+// one faded and the field does depend on history - so a still frame under
+// reduced motion shows no trail, which is correct for a still.
 
 import { createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';

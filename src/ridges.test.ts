@@ -328,6 +328,179 @@ describe('rolling off the bottom', () => {
   });
 });
 
+describe('fill', () => {
+  it('lights far more of the field than lines alone', () => {
+    const lines = seeded(3);
+    renderRidges(lines, RIDGE_DEFAULTS);
+    const filled = seeded(3);
+    renderRidges(filled, { ...RIDGE_DEFAULTS, fill: true });
+    // Measured at about 1.8x. Not more, because the rows are stacked two or
+    // three cells apart and occlusion means each row's fill is only the sliver
+    // down to the silhouette in front of it.
+    expect(lit(filled)).toBeGreaterThan(lit(lines) * 1.5);
+  });
+
+  it('fills below each crest, not above it', () => {
+    // A filled stack is silhouettes. Above a crest belongs to the row behind.
+    const r = seeded(3);
+    renderRidges(r, { ...RIDGE_DEFAULTS, fill: true, rows: 1, overscan: 0, amplitude: 0.4, focus: 4 });
+
+    const params = { ...RIDGE_DEFAULTS, rows: 1, amplitude: 0.4 };
+    const base = rowY((Math.ceil(r.travel) - r.travel) / 1, H, params);
+
+    for (let x = 0; x < W; x += 7) {
+      const col = column(r, x);
+      const first = col.findIndex((v) => v > 0);
+      if (first < 0) continue;
+      // Nothing above the crest, and something immediately below it.
+      expect(col.slice(0, first).every((v) => v === 0)).toBe(true);
+      expect(col[Math.min(first + 1, H - 1)]).toBeGreaterThan(0);
+      expect(first).toBeLessThan(Math.ceil(base));
+    }
+  });
+
+  it('shades the fill below the line rather than at the same brightness', () => {
+    // Otherwise the ridgelines vanish into the silhouettes.
+    //
+    // Tested on the values present rather than by cell position. Position is
+    // unreliable twice over: with the full stack the cell below a crest often
+    // belongs to the next row's line, and even with one row a steep flank makes
+    // the line span several cells, so "two below the crest" is still the line.
+    const params = { ...RIDGE_DEFAULTS, fill: true, rows: 1, overscan: 0, amplitude: 0.4, focus: 4 };
+    const r = seeded(3);
+    renderRidges(r, params);
+
+    const values = [...new Set(Array.from(r.field).filter((v) => v > 0))].sort((a, b) => a - b);
+
+    // One row, so exactly two shades: its line, and its fill.
+    expect(values).toHaveLength(2);
+    expect(values[0]).toBeLessThan(values[1]);
+    expect(values[0] / values[1]).toBeCloseTo(params.fillLevel, 6);
+  });
+
+  it('scales with fillLevel, and matches the line at 1', () => {
+    const meanShade = (fillLevel: number) => {
+      const r = seeded(3);
+      renderRidges(r, { ...RIDGE_DEFAULTS, fill: true, fillLevel });
+      const values = Array.from(r.field).filter((v) => v > 0);
+      return values.reduce((a, b) => a + b, 0) / values.length;
+    };
+    expect(meanShade(0.7)).toBeGreaterThan(meanShade(0.2));
+  });
+
+  it('still hides what is behind the nearest silhouette', () => {
+    // Filling must not leak past the horizon, or the occlusion is undone.
+    const r = seeded(9);
+    renderRidges(r, { ...RIDGE_DEFAULTS, fill: true });
+
+    for (let x = 0; x < W; x++) {
+      const col = column(r, x);
+      const lowest = col.reduce((acc, v, y) => (v > 0 ? y : acc), -1);
+      if (lowest < 0) continue;
+      for (let y = lowest + 1; y < H; y++) expect(col[y]).toBe(0);
+    }
+  });
+});
+
+describe('trail', () => {
+  it('is off by default, leaving the field a pure function of travel', () => {
+    // Everything else here assumes that, so the default must not change it.
+    expect(RIDGE_DEFAULTS.trail).toBe(0);
+
+    const once = seeded(3);
+    renderRidges(once, RIDGE_DEFAULTS);
+    const twice = seeded(3);
+    renderRidges(twice, RIDGE_DEFAULTS);
+    renderRidges(twice, RIDGE_DEFAULTS);
+    expect(Array.from(twice.field)).toEqual(Array.from(once.field));
+  });
+
+  it('makes the field depend on history once switched on', () => {
+    // Has to *move* to differ. Re-rendering at an unchanged travel draws the
+    // same lines over their own ghosts, and a max leaves them exactly as they
+    // were - so two renders at one travel are identical whether trailing or not.
+    const params = { ...RIDGE_DEFAULTS, trail: 0.8, speed: 3 };
+
+    const arrived = seeded(3);
+    for (let i = 0; i < 8; i++) stepRidges(arrived, params, 1 / 24);
+
+    const jumped = seeded(3);
+    jumped.travel = arrived.travel;
+    renderRidges(jumped, params);
+
+    expect(Array.from(arrived.field)).not.toEqual(Array.from(jumped.field));
+  });
+
+  it('leaves a ghost where a crest has been', () => {
+    const params = { ...RIDGE_DEFAULTS, trail: 0.85, speed: 3 };
+    const r = seeded(3);
+    for (let i = 0; i < 6; i++) stepRidges(r, params, 1 / 24);
+
+    const none = seeded(3);
+    none.travel = r.travel;
+    renderRidges(none, { ...params, trail: 0 });
+
+    // The trailed frame lights everything the untrailed one does, and more.
+    expect(lit(r)).toBeGreaterThan(lit(none));
+  });
+
+  it('fades the ghost out rather than keeping it forever', () => {
+    // Stated as convergence rather than as a cell count. Counting cells with
+    // `v > 0` measures floating-point residue: a ghost decays geometrically and
+    // is visually gone at 1.5% brightness while still being strictly positive,
+    // so the count barely moves. What actually matters is that with nothing
+    // moving, the trailed field converges on the untrailed one.
+    const params = { ...RIDGE_DEFAULTS, trail: 0.5, speed: 4 };
+    const r = seeded(3);
+    for (let i = 0; i < 6; i++) stepRidges(r, params, 1 / 24);
+
+    const plain = seeded(3);
+    plain.travel = r.travel;
+    renderRidges(plain, { ...params, trail: 0 });
+
+    const distance = () => {
+      let total = 0;
+      for (let k = 0; k < r.field.length; k++) total += Math.abs(r.field[k] - plain.field[k]);
+      return total;
+    };
+
+    const before = distance();
+    expect(before).toBeGreaterThan(0);
+
+    for (let i = 0; i < 40; i++) renderRidges(r, params);
+    const after = distance();
+
+    expect(after).toBeLessThan(before);
+    // 0.5^40 of anything is nothing.
+    expect(after).toBeCloseTo(0, 4);
+  });
+
+  it('never pushes the field outside 0..1', () => {
+    const params = { ...RIDGE_DEFAULTS, trail: 0.95, speed: 2 };
+    const r = seeded(3);
+    for (let i = 0; i < 80; i++) stepRidges(r, params, 1 / 24);
+    for (const v of r.field) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('keeps full brightness exactly 1, so lines still survive the dither', () => {
+    const params = { ...RIDGE_DEFAULTS, trail: 0.9, speed: 2 };
+    const r = seeded(3);
+    for (let i = 0; i < 40; i++) stepRidges(r, params, 1 / 24);
+    expect(Math.max(...r.field)).toBe(1);
+  });
+
+  it('works with fill on', () => {
+    const params = { ...RIDGE_DEFAULTS, trail: 0.7, fill: true, speed: 3 };
+    const r = seeded(3);
+    for (let i = 0; i < 20; i++) stepRidges(r, params, 1 / 24);
+    expect(lit(r)).toBeGreaterThan(100);
+    for (const v of r.field) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
 describe('stepRidges', () => {
   it('flies forward at the speed it is given', () => {
     const r = seeded();
