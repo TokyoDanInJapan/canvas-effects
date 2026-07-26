@@ -222,6 +222,112 @@ describe('renderRidges', () => {
   });
 });
 
+describe('rolling off the bottom', () => {
+  /** The lowest row with anything drawn in it, or -1. */
+  const lowestLit = (r: Ridges) => {
+    for (let y = r.h - 1; y >= 0; y--) {
+      for (let x = 0; x < r.w; x++) if (r.field[y * r.w + x] > 0) return y;
+    }
+    return -1;
+  };
+
+  it('draws below bottomMargin, where nothing used to be drawn at all', () => {
+    // Without overscan the nearest row stops at `bottomMargin` and the strip
+    // below it is permanently blank.
+    const withOverscan = seeded(3);
+    renderRidges(withOverscan, RIDGE_DEFAULTS);
+    const without = seeded(3);
+    renderRidges(without, { ...RIDGE_DEFAULTS, overscan: 0 });
+
+    const margin = Math.floor(RIDGE_DEFAULTS.bottomMargin * H);
+    expect(lowestLit(without)).toBeLessThanOrEqual(margin);
+    expect(lowestLit(withOverscan)).toBeGreaterThan(margin);
+  });
+
+  it('does not pop a row out of existence as travel crosses a whole number', () => {
+    // The bug this fixes: the nearest row crept down to bottomMargin and then
+    // vanished, so the lowest drawn row jumped back up the screen once per row
+    // of travel. Sampled finely across a crossing, the low-water mark should
+    // move smoothly.
+    const r = seeded(3);
+    const params = { ...RIDGE_DEFAULTS, speed: 1 };
+    const samples: number[] = [];
+
+    for (let i = 0; i <= 24; i++) {
+      r.travel = 4 + i / 24;
+      renderRidges(r, params);
+      samples.push(lowestLit(r));
+    }
+
+    let worstJump = 0;
+    for (let i = 1; i < samples.length; i++) worstJump = Math.max(worstJump, Math.abs(samples[i] - samples[i - 1]));
+
+    // A deleted row showed up as a jump of several cells back up the screen.
+    expect(worstJump).toBeLessThanOrEqual(2);
+  });
+
+  it('keeps a crest visible after its baseline has left the screen', () => {
+    // Which is the whole reason the overscan rows are drawn rather than merely
+    // counted. Targeted rather than searched: pick the depth where a row's
+    // baseline is off screen but its crest is not, then place a row there.
+    const params = RIDGE_DEFAULTS;
+
+    let depth = 0;
+    for (let d = -0.005; d > -0.5; d -= 0.005) {
+      const base = rowY(d, H, params);
+      if (base > H && base - rowAmplitude(d, H, params) < H) {
+        depth = d;
+        break;
+      }
+    }
+    expect(depth).toBeLessThan(0);
+
+    // depth = (worldZ - travel) / rows, so this puts row 10 at that depth.
+    const travel = 10 - depth * params.rows;
+    const margin = Math.floor(params.bottomMargin * H);
+
+    const withOverscan = seeded(3);
+    withOverscan.travel = travel;
+    renderRidges(withOverscan, params);
+
+    const without = seeded(3);
+    without.travel = travel;
+    renderRidges(without, { ...params, overscan: 0 });
+
+    const belowMargin = (r: Ridges) => {
+      let n = 0;
+      for (let y = margin + 1; y < H; y++) for (let x = 0; x < W; x++) if (r.field[y * r.w + x] > 0) n++;
+      return n;
+    };
+
+    expect(belowMargin(withOverscan)).toBeGreaterThan(0);
+    expect(belowMargin(without)).toBe(0);
+  });
+
+  it('still lets rows leave, rather than looming forever', () => {
+    // Amplitude is frozen at the near edge so the baseline outruns it. If it
+    // kept growing, a passing row would never be fully below the screen and
+    // would occlude the entire field from behind the bottom edge.
+    const params = RIDGE_DEFAULTS;
+    for (const depth of [-0.05, -0.2, -0.6, -2]) {
+      const base = rowY(depth, H, params);
+      const amp = rowAmplitude(depth, H, params);
+      expect(amp).toBeLessThanOrEqual(rowAmplitude(0, H, params) + 1e-9);
+      if (depth <= -0.6) expect(base - amp).toBeGreaterThanOrEqual(H);
+    }
+  });
+
+  it('costs little: rows fully below the edge are skipped, not drawn', () => {
+    // Overscan is a bound rather than a workload. Raising it well past what the
+    // geometry needs must not change the picture.
+    const modest = seeded(3);
+    renderRidges(modest, RIDGE_DEFAULTS);
+    const generous = seeded(3);
+    renderRidges(generous, { ...RIDGE_DEFAULTS, overscan: 40 });
+    expect(Array.from(generous.field)).toEqual(Array.from(modest.field));
+  });
+});
+
 describe('stepRidges', () => {
   it('flies forward at the speed it is given', () => {
     const r = seeded();

@@ -75,6 +75,20 @@ export interface RidgeParams {
   depthFade: number;
   /** Rows crossed per second. This is the flying speed. */
   speed: number;
+  /**
+   * Extra rows kept alive past the near edge, so a profile rolls off the bottom
+   * of the screen instead of being deleted when it gets there.
+   *
+   * Without this the nearest row creeps down to `bottomMargin` and then pops out
+   * of existence the moment `travel` crosses the next whole number - and nothing
+   * is ever drawn below `bottomMargin` at all. Rows below the edge still matter
+   * on screen twice over: a crest can remain visible long after its baseline has
+   * gone, and its silhouette must keep occluding the rows behind it.
+   *
+   * A row is skipped once it is entirely below the bottom edge, so this is a
+   * bound rather than a cost - most of the extra rows do no work.
+   */
+  overscan: number;
 }
 
 export const RIDGE_DEFAULTS: RidgeParams = {
@@ -104,6 +118,10 @@ export const RIDGE_DEFAULTS: RidgeParams = {
   bottomMargin: 0.94,
   depthFade: 0.45,
   speed: 1.6,
+  // Enough that the nearest simulated row is always fully off screen at the
+  // default perspective and amplitude. Baselines grow faster than peaks as
+  // rows pass the edge, so this does not need to be large.
+  overscan: 8,
 };
 
 /** Seeds and offsets that give one run its landscape. */
@@ -155,14 +173,33 @@ export function rowY(depth: number, h: number, params: RidgeParams): number {
   return far + (near - far) * Math.pow(1 - depth, params.perspective);
 }
 
-/** Peak height for a row, in cells. Distant rows are shorter. */
+/**
+ * Peak height for a row, in cells. Distant rows are shorter.
+ *
+ * Held flat once a row passes the near edge rather than continuing to grow.
+ * Strict perspective would keep enlarging it - you are flying into it, after
+ * all - and a row only slightly past the edge would loom several screen heights
+ * tall, throw a silhouette across the whole field and occlude everything behind
+ * it. Worse, that growth outruns the baseline's, so such a row never qualifies
+ * as fully below the screen and never leaves at all. Freezing the size at the
+ * near edge lets a row simply slide out of frame, which is what rolling off the
+ * bottom should look like.
+ */
 export function rowAmplitude(depth: number, h: number, params: RidgeParams): number {
-  return params.amplitude * h * Math.pow(1 - depth, params.ampFalloff);
+  const clamped = depth < 0 ? 0 : depth;
+  return params.amplitude * h * Math.pow(1 - clamped, params.ampFalloff);
 }
 
-/** Line brightness for a row, 0 to 1. Distant rows are dimmer, and so hazier. */
+/**
+ * Line brightness for a row, 0 to 1. Distant rows are dimmer, and so hazier.
+ *
+ * Clamped at the top because `depth` goes negative for rows that have passed the
+ * near edge, and full brightness has to stay exactly 1 - it is a fixed point of
+ * the ordered dither, which is the only reason one-cell lines survive it.
+ */
 export function rowBrightness(depth: number, params: RidgeParams): number {
-  return 1 - depth * (1 - params.depthFade);
+  const value = 1 - depth * (1 - params.depthFade);
+  return value > 1 ? 1 : value;
 }
 
 export interface Ridges {
@@ -210,14 +247,20 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
 
   const first = Math.ceil(travel);
 
-  // Nearest first. The floating horizon only works front to back.
-  for (let k = 0; k < rows; k++) {
+  // Nearest first, starting below the bottom edge. The floating horizon only
+  // works front to back, and `depth` is negative for the overscan rows.
+  for (let k = -params.overscan; k < rows; k++) {
     const worldZ = first + k;
     const depth = (worldZ - travel) / rows;
     if (depth > 1) break;
 
     const base = rowY(depth, h, params);
     const amp = rowAmplitude(depth, h, params);
+
+    // Entirely below the bottom edge: it can draw nothing, and anything it
+    // would occlude is off screen too, so the horizon does not need it either.
+    if (base - amp >= h) continue;
+
     const brightness = rowBrightness(depth, params);
 
     for (let x = 0; x < w; x++) {

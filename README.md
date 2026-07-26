@@ -296,6 +296,17 @@ and the characteristic bitten-out look where a near crest eats into the rows abo
 draw from nearest to farthest, keep the highest point covered so far per column, and skip anything at or below it. One
 pass, no z-buffer, no sorting — `rows × width` work for a whole frame.
 
+**Rows roll off the bottom rather than being deleted at it.** `overscan` keeps rows alive past the near edge, because a
+crest stays visible long after its baseline has left the screen and its silhouette must keep occluding what is behind
+it. Without it the nearest row crept down to `bottomMargin`, popped out of existence the moment `travel` crossed the
+next whole number, and nothing was ever drawn below `bottomMargin` at all.
+
+One subtlety that came with it: `rowAmplitude` freezes a row's size once it passes the near edge. Strict perspective
+would keep enlarging it — you are flying into it — and a row barely past the edge would loom several screen heights
+tall and throw a silhouette across the whole field. Worse, that growth outruns the baseline's, so the row would never
+qualify as fully below the screen and would never leave. Freezing the size lets it simply slide out of frame. Rows that
+are entirely below the edge are skipped, so `overscan` is a bound rather than a workload.
+
 **Rows are indexed by travel, not by screen position.** A profile is tied to a whole number of `travel`, so it keeps
 its own shape for its whole life and simply slides down as you fly past it; a new one enters at the top each time
 `travel` crosses an integer. Tying profiles to screen slots instead makes the terrain churn in place without ever
@@ -505,6 +516,7 @@ And the `ridges` sub-options, all documented inline on `RidgeParams`:
 | `perspective`                | `1.35`          | 1 is an even stack (the flat plot); above 1 crowds the far rows.                                                |
 | `depthFade`                  | `0.45`          | Brightness of the farthest row. Below 1 it dithers into haze.                                                   |
 | `topMargin` / `bottomMargin` | `0.12` / `0.94` | Where the farthest and nearest rows sit.                                                                        |
+| `overscan`                   | `8`             | Rows kept alive past the near edge, so profiles roll off the bottom instead of being deleted there.             |
 
 Fire only:
 
