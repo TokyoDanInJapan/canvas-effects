@@ -7,6 +7,11 @@ export default defineConfig({
     // page and by whatever mounts it.
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Headroom above the 5s default. Several of these tests run numeric
+    // simulations for hundreds of frames, and under coverage instrumentation on
+    // a slow CI runner that is a different proposition from running locally -
+    // which is exactly how a fire test came to pass here and time out there.
+    testTimeout: 20_000,
     coverage: {
       // Without `include`, v8 only reports files a test happens to import, so
       // an entirely untested module is invisible rather than counted as 0%.

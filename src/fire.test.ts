@@ -177,20 +177,27 @@ describe('flame shape', () => {
     // The point of expressing this as a fraction rather than as heat lost per
     // row: a per-row figure fixes the height in cells, so the same value fills
     // a short field and leaves a strip on a tall one.
+    //
+    // Kept deliberately cheap. The first version ran `h * 4` frames over fields
+    // up to 120x150 and called this helper twice per size - 50M cell operations,
+    // which passed locally and timed out at 5s on a CI runner. The front climbs
+    // `reach * h` rows at two passes a frame, so `h` frames is already four
+    // times the settling time it needs.
     const reached = (w: number, h: number, reach: number) => {
       const fire = createFire(w, h, makeRandom(5));
       const rand = makeRandom(3);
-      for (let i = 0; i < h * 4; i++) stepFire(fire, { ...FIRE_DEFAULTS, reach }, rand, DT);
+      for (let i = 0; i < h; i++) stepFire(fire, { ...FIRE_DEFAULTS, reach }, rand, DT);
       return flameHeight(fire);
     };
 
     for (const [w, h] of [
-      [48, 40],
-      [48, 90],
-      [120, 150],
+      [32, 40],
+      [32, 90],
+      [48, 120],
     ]) {
-      expect(reached(w, h, 0.5)).toBeGreaterThan(0.3);
-      expect(reached(w, h, 0.5)).toBeLessThan(0.8);
+      const height = reached(w, h, 0.5);
+      expect(height).toBeGreaterThan(0.3);
+      expect(height).toBeLessThan(0.8);
     }
   });
 
