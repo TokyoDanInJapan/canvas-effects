@@ -1,14 +1,20 @@
-// canvas-effects: two animated, ordered-dithered greyscale backgrounds for a
+// canvas-effects: six animated, ordered-dithered greyscale backgrounds for a
 // 2D canvas. See the README for what they are and how they work.
 //
 // Three layers, and you can enter at any of them:
 //
-//   • The mounts - `createSmokeBackground`, `createPlasmaBackground`. A canvas
-//     in, a handle out, everything wired up.
-//   • The rendering - `createSurface`, and the dither and noise it is built on.
-//     Use these to shade a field of your own.
-//   • The maths - the fluid solver and the domain warp, both DOM-free and
-//     usable on their own.
+//   • The mounts - `createSmokeBackground` and the five beside it. A canvas in,
+//     a handle out, everything wired up.
+//   • The rendering - `createSurface` and the dither and noise it is built on,
+//     plus `mountBackground` if you would rather write a seventh effect than use
+//     one of these six. Use these to shade a field of your own.
+//   • The maths - the fluid solver, the domain warp, the projections. All
+//     DOM-free and usable on their own.
+//
+// Everything each module exports is re-exported here. That is checked by a test
+// rather than by good intentions: the interaction work went in without ever
+// reaching this file, and for two releases a caller could use `maxRipples`
+// without being able to name a `Ripple`.
 
 export { createSmokeBackground, SMOKE_BACKGROUND_DEFAULTS, type SmokeBackgroundOptions } from './smoke-background';
 
@@ -24,26 +30,51 @@ export {
   type MetaballsBackgroundOptions,
 } from './metaballs-background';
 
+export { createTunnelBackground, TUNNEL_BACKGROUND_DEFAULTS, type TunnelBackgroundOptions } from './tunnel-background';
+
+// The mount harness the six above are built on, for writing a seventh.
+export {
+  mountBackground,
+  createAgeingList,
+  aspectOf,
+  COMMON_BACKGROUND_DEFAULTS,
+  type AgeingList,
+  type Ageing,
+  type BackgroundSpec,
+  type CommonBackgroundOptions,
+  type Timestep,
+} from './background';
+
 export {
   createSurface,
   planSurface,
   buildPalette,
   defaultShading,
+  sameShading,
   type BackgroundHandle,
   type Shading,
   type Surface,
   type SurfaceOptions,
 } from './render';
 
-export { createDriver, prefersReducedMotion, type Driver, type DriverOptions } from './driver';
+export {
+  createDriver,
+  createDragSource,
+  prefersReducedMotion,
+  type DragOptions,
+  type Driver,
+  type DriverOptions,
+} from './driver';
 
 // The falling-streak field.
 export {
   RAIN_DEFAULTS,
   createRain,
+  distortField,
   rollLane,
   stepRain,
   meanBrightness,
+  type Distortion,
   type Rain,
   type RainLane,
   type RainParams,
@@ -55,14 +86,18 @@ export {
   createRidges,
   randomizeRidges,
   renderRidges,
+  depthAtY,
+  fillShadeFor,
   ridgeHeight,
   rowAmplitude,
   rowBrightness,
   rowY,
   stepRidges,
+  wobbleOffset,
   type RidgeParams,
   type RidgeState,
   type Ridges,
+  type Wobble,
 } from './ridges';
 
 // The implicit surface.
@@ -71,18 +106,21 @@ export {
   createMetaballs,
   randomizeMetaballs,
   renderMetaballs,
+  advanceThrow,
   ballsAt,
   fieldAt,
   falloff,
+  nearestBall,
+  startThrow,
   surface as metaballSurface,
   coverage,
   type Ball,
+  type BallOverride,
   type MetaballParams,
   type MetaballState,
   type Metaballs,
+  type Throw,
 } from './metaballs';
-
-export { createTunnelBackground, TUNNEL_BACKGROUND_DEFAULTS, type TunnelBackgroundOptions } from './tunnel-background';
 
 // The tunnel projection.
 export {
@@ -91,10 +129,15 @@ export {
   createTunnel,
   randomizeTunnel,
   renderTunnel,
+  axisAt,
+  axisFromTable,
+  createAxisTable,
+  fillAxisTable,
   sampleTile,
   tunnelCentre,
   vignetteAt,
   wallCoords,
+  type AxisTable,
   type Tunnel,
   type TunnelParams,
   type TunnelState,
@@ -143,8 +186,10 @@ export {
   buildPlasmaTile,
   fillDisplacementGrid,
   randomizePlasmaWarp,
+  rippleDisplacement,
   sampleDisplacementGrid,
   samplePlasma,
   type PlasmaWarpConfig,
   type PlasmaWarpSeed,
+  type Ripple,
 } from './plasma-warp';
