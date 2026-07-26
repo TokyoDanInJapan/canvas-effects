@@ -32,6 +32,30 @@ export const COPY: Record<string, Copy> = {
     ],
   },
 
+  tunnel: {
+    heading: 'Tunnel',
+    paragraphs: [
+      'The demoscene standby, and it is one division. Convert each pixel to polar coordinates about the vanishing ' +
+        'point and read a wall texture at <code>(angle, depth / radius)</code>. That reciprocal <em>is</em> the ' +
+        'perspective — a point on a cylinder wall lands at a radius inversely proportional to how far down it sits, ' +
+        'so there is no camera, no matrix and no depth buffer anywhere in it.',
+      'The corridor <strong>winds</strong>, and that is most of what makes it read as flight rather than as a cylinder ' +
+        'being looked down: its axis wanders, so the near wall sweeps past while the far end holds still, and the view ' +
+        'banks into the turn. It costs one extra pass of a fixed-point iteration — solve the straight tunnel, look up ' +
+        'where the axis had got to at that depth, subtract, solve again.',
+      'Adding to that coordinate walks you forward. Because the far wall is compressed into the middle, features do ' +
+        'not slide outward at a constant rate — they stretch, moving further the further out they already are, which ' +
+        'is the acceleration you feel. The middle is a genuine singularity, so the vignette takes it to nothing: the ' +
+        'place the maths gives up is the place nothing is drawn.',
+      'The wall is built from sinusoids at whole-number frequencies rather than sampled from noise, because it has to ' +
+        'wrap seamlessly around the circumference or a seam runs the length of the tunnel. <code>repeats</code> is ' +
+        'therefore a whole number too — and a rotation of a whole number of repeats is invisible.',
+      '<strong>Press and drag to steer it</strong>, pulling the vanishing point towards the pointer; let go and it ' +
+        'eases back to its own drift.',
+      SHARED,
+    ],
+  },
+
   plasma: {
     heading: 'Plasma',
     paragraphs: [

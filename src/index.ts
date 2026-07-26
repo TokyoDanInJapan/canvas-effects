@@ -99,6 +99,24 @@ export {
   type FireState,
 } from './fire';
 
+export { createTunnelBackground, TUNNEL_BACKGROUND_DEFAULTS, type TunnelBackgroundOptions } from './tunnel-background';
+
+// The tunnel projection.
+export {
+  TUNNEL_DEFAULTS,
+  buildTunnelTile,
+  createTunnel,
+  randomizeTunnel,
+  renderTunnel,
+  sampleTile,
+  tunnelCentre,
+  vignetteAt,
+  wallCoords,
+  type Tunnel,
+  type TunnelParams,
+  type TunnelState,
+} from './tunnel';
+
 export { withDefaults } from './options';
 
 export { BAYER_4X4, darken, orderedDither, quantise } from './dither';

@@ -13,7 +13,7 @@ what it does and where its default came from.
 
 ## The shared half: two resolutions and a dither
 
-All six render at two scales at once, and this is what makes them cheap enough to leave running:
+All seven render at two scales at once, and this is what makes them cheap enough to leave running:
 
 - The **field** — the expensive part, whatever generates it — is computed at `pixelSize × fieldScale` CSS pixels per
   cell. The smoke and plasma fields are soft and low-frequency and gain nothing from more samples, so they run at half
@@ -186,32 +186,10 @@ pace does.
 The decay is exponential rather than linear, so it is frame-rate independent: halving `dt` and stepping twice leaves
 the same brightness behind. There is a test pinning that to three decimal places.
 
-### Click a line to wobble the stack
-
-A click sets a disturbance running from the profile it landed on. It is a **wave packet** — an envelope around a
-travelling front times an oscillation — so the struck line ripples through a few crests rather than heaving once. A lone
-Gaussian would read as a shockwave, which is a different thing.
-
-Two decisions carry it:
-
-- **It is keyed to the row, not the screen point.** A wobble stores the `worldZ` of the profile it hit, so it travels
-  with the terrain as that profile approaches. Anchored to a screen position instead, it would sit still while rows slid
-  through it, which reads as a stationary distortion rather than as something you did to the landscape.
-- **Distance is measured in a space where a row counts as `wobbleRowSpacing` across.** That is what makes one front
-  spread sideways along the struck line _and_ outward through its neighbours. It is the dial between a wobble that runs
-  along one line and one that crosses the stack; lower spreads across rows faster.
-
-Working out which profile was clicked needs `depthAtY`, the inverse of `rowY` — the rows are placed by a perspective
-curve, so it is not a division. The offset is applied to the curve before anything is drawn, so the fill and the
-occlusion follow the wobbled line rather than the flat one.
-
-Measured with the flight slowed right down, so the wobble is the only thing moving: pixels changing per 200ms goes from
-2774 idle to 10901 mid-flight, and back to 2430 once the lifetime elapses.
-
 ### `fieldScale` is 1 here, and that matters
 
-The other two effects render the field at half the output resolution and let bilinear interpolation smooth it. For a
-continuous field that is free smoothing. For discrete lanes it is **blur** — neighbouring lanes bleed into each other
+The smoke, the plasma and the metaballs render the field at half the output resolution and let bilinear interpolation
+smooth it. For a continuous field that is free smoothing. For discrete lanes it is **blur** — neighbouring lanes bleed into each other
 and crisp streaks turn into soft vertical smudges.
 
 At `fieldScale: 1` every output pixel maps to exactly one field cell, the horizontal interpolation weight is zero
@@ -306,10 +284,32 @@ Values _between_ palette levels are the ones that break up, and that is put to w
 `depthFade`, land off-level, and dither into haze. Atmospheric perspective for free, from the thing that would
 otherwise be a problem.
 
-Two consequences worth knowing. `fieldScale` is 1, for the same reason as the rain — interpolating between cells smears
-line art. And `pixelSize` defaults to **4** rather than 6: a line is one cell wide, and at 6 the lines are thick
+Two consequences worth knowing. `fieldScale` is 1, for the same reason as the rain and the tunnel — interpolating between
+cells smears line art. And `pixelSize` defaults to **4** rather than 6: a line is one cell wide, and at 6 the lines are thick
 relative to the gaps between rows, so the stack reads as static rather than as a plot. Four still clears the pixel
 ceiling at 1080p (480 × 270 = 129,600 against a 160,000 cap).
+
+### Click a line to wobble the stack
+
+A click sets a disturbance running from the profile it landed on. It is a **wave packet** — an envelope around a
+travelling front times an oscillation — so the struck line ripples through a few crests rather than heaving once. A lone
+Gaussian would read as a shockwave, which is a different thing.
+
+Two decisions carry it:
+
+- **It is keyed to the row, not the screen point.** A wobble stores the `worldZ` of the profile it hit, so it travels
+  with the terrain as that profile approaches. Anchored to a screen position instead, it would sit still while rows slid
+  through it, which reads as a stationary distortion rather than as something you did to the landscape.
+- **Distance is measured in a space where a row counts as `wobbleRowSpacing` across.** That is what makes one front
+  spread sideways along the struck line _and_ outward through its neighbours. It is the dial between a wobble that runs
+  along one line and one that crosses the stack; lower spreads across rows faster.
+
+Working out which profile was clicked needs `depthAtY`, the inverse of `rowY` — the rows are placed by a perspective
+curve, so it is not a division. The offset is applied to the curve before anything is drawn, so the fill and the
+occlusion follow the wobbled line rather than the flat one.
+
+Measured with the flight slowed right down, so the wobble is the only thing moving: pixels changing per 200ms goes from
+2774 idle to 10901 mid-flight, and back to 2430 once the lifetime elapses.
 
 ## Fire: heat climbing
 
@@ -432,6 +432,101 @@ because a hard threshold produces a two-value field and wastes the palette entir
 blobs whose rims cross several palette levels and dither into a gradient.
 
 ---
+
+## Tunnel: one division
+
+`src/tunnel.ts`. For every cell, convert its position to polar coordinates about a vanishing point and read a wall
+texture at `(angle, depth / radius)`. That reciprocal is the entire perspective: a point on an infinite cylinder's wall
+projects to a screen radius inversely proportional to how far down the cylinder it sits, so sampling at `depth / radius`
+_is_ the projection. No camera, no matrix, no depth buffer.
+
+Adding to that coordinate walks the viewer forward. Because the far wall is compressed into the middle, features do not
+translate outward at a constant rate — they **stretch**, moving further the further out they already are. Measured over
+1.4 s at the defaults, a feature at radius 0.15 moves 0.007 while one at 0.5 moves 0.091 — twelve times as far. That is
+the acceleration you feel, and it also means no single cross-correlation shift fits a ray: the first test written for the forward motion
+reported zero displacement while the effect was working perfectly, and had to be rewritten against the projection itself.
+
+### It winds, which is most of the motion
+
+A straight cylinder with a drifting vanishing point reads as the camera wobbling — everything on screen moves together. A
+corridor whose _axis_ winds reads as flight, because the near wall sweeps past while the far end holds still. That is
+`bend`, and it is exact rather than faked.
+
+Put the wall at radius 1 about an axis at `(X(z), Y(z))` and project through a pinhole: a wall point at depth `z`, angle
+`t`, lands at `R · (X(z) + cos t, Y(z) + sin t)`, where `R = f / z` is the radius the wall appears at. Read that
+backwards — which is what sampling the field does — and the screen offset to undo is `R · X(z)`, with `R` the
+**corrected** radius rather than the raw one. So the exact answer is a fixed point, and one pass of it is enough: solve
+the straight tunnel, look up the axis at the depth that gives, subtract, solve again. One extra square root, and no extra
+`atan2` — the first pass needs only the radius.
+
+`R · X`, not `X`, is the part worth holding onto. A lateral offset subtends less the further away it is, so the
+correction vanishes at the centre of the screen and is largest at the edges. That is what makes the near wall sweep while
+the far end sits still, instead of the whole picture sliding sideways. It is also why the obvious test of it fails:
+measured in the depth coordinate the correction looks _biggest_ at the centre, because `dv/dr` runs away there, so the
+test has to be written against the displacement.
+
+Two things fell out of building it:
+
+- **The axis lookup stops at the edge of the vignette**, and that is not an optimisation. `v` runs away towards the
+  middle, so a winding axis sampled there swings by whole cycles between neighbouring cells and the throat fills with
+  churning noise. Nothing is drawn inside the vignette, so holding the lookup at its edge costs no visible detail — a
+  horizon, in effect, and a bent corridor really is blocked by its own wall beyond some depth.
+- **The axis is tabulated, not evaluated.** Two sines per cell measured 3.8 ms a frame on a 160,000-cell field, as much
+  again as the rest of the effect together. The axis depends on nothing but depth, and one frame only ever sees depths
+  between its furthest corner and the edge of the vignette — so a few hundred samples across that span replace every one
+  of those sines with a lerp, for a third off the bend's cost. The same trick as the wall tile, and a test pins the table
+  against the exact function.
+
+The bank is rolled by where the axis has got to rather than by how fast it is moving. The derivative is what a vehicle's
+roll actually follows, but it is a quarter-cycle out of phase with the lean, and that reads as the picture
+counter-rotating against its own bend.
+
+### The wall is built, not sampled from noise
+
+It has to wrap seamlessly around the circumference or a seam runs the length of the tunnel. fbm only wraps when the
+angular span happens to land on an integer lattice boundary, which is a constraint on two parameters at once and
+quietly breaks when either moves. A tile of sinusoids at whole-number frequencies is periodic by construction, so it
+wraps whatever the parameters do — the same reason the plasma builds one.
+
+That is also why `repeats` is a whole number, and it has a consequence that looks like a bug: rotating by a whole number
+of repeats is **invisible**, because it maps the tile onto itself. The tunnel has genuine rotational symmetry of order
+`repeats`. A test for `twist` picked 1.5 turns at two repeats — exactly three whole tiles — and failed while the twist
+worked.
+
+### The undersampling, which is what the vignette is really for
+
+`depth / radius` is not a uniform mapping, so evenly spaced cells do not sample it evenly. The coordinate moves by about
+`depth × cell / radius²` between neighbours, which grows without bound towards the middle — so however fine the field,
+there is an inner disc where consecutive cells land more than half a ring apart and the rings become noise. Two things
+follow, and neither was visible in any aggregate metric:
+
+- **`fieldScale` is 1**, as it is for the rain and the ridges. The first version rendered at `fieldScale: 2` with
+  `depth: 0.34` and was flat mottle with no rings in it at all — recognisable as a tunnel only when rendered at four
+  times the resolution. Supersampling puts a number on it: the error against a 4× reference halves, 0.037 to 0.020.
+- **The vignette is sized to cover that disc**, not just the singularity at the exact centre. Against the tile's highest
+  ring frequency the disc reaches r = 0.30 on a 133-row field and r = 0.20 at the pixel ceiling, so `vignette: 0.3`
+  covers both. Take it much below that and what is uncovered is a patch of moiré rather than a bright core.
+
+`depth` trades directly against this: it is how many rings land on screen at once, and it pushes the undersampled
+boundary outward as its square root. At the original 0.34 the whole visible annulus spanned 0.47 of a tile — 1.4 rings —
+which is why it read as mottle rather than as depth. At 1 it spans 2.3 tiles, or seven rings.
+
+Cost is an `atan2`, a square root and a reciprocal per cell, plus the bend's second square root and table lookup: on a
+full 160,000-cell field, 3.9 ms a frame straight and 6.2 ms bent, or 9% and 15% of one core at 24 fps. Between the plasma
+and the fluid solver. That ceiling is only reached above about 3200×1800 — at 1280×800 the bend costs nothing measurable
+against the frame clock's own quantisation.
+
+### Drag to steer it
+
+A press pulls the vanishing point towards the pointer and a release eases it back to its own drift. The blend is carried
+between frames — the one piece of state in an effect that is otherwise a pure function of the clock — and it eases in
+real seconds rather than scaled ones, because taking hold of the tunnel should not take longer just because the flight is
+slow.
+
+The dark centroid of the whole field is **not** a way to measure this, which cost a metric to find out: the wall's own
+dark bands are spread over the entire frame and swamp the vignette, so the centroid sits within 0.002 of the middle
+whatever the steer is doing. Comparing mean brightness in a small disc at the pointer against the same disc at the
+geometric centre does show it.
 
 ## Tuning
 

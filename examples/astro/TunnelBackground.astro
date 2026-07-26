@@ -1,0 +1,55 @@
+---
+/**
+ * The tunnel as an Astro component. A sibling of the other backgrounds - mount
+ * one, not several: they are all opaque and full-bleed, so two would stack.
+ *
+ * See SmokeBackground.astro for why `transition:persist`, the `astro:page-load`
+ * listener and the `dataset` guard are all needed together.
+ */
+---
+
+<canvas id="tunnel" class="tunnel" aria-hidden="true" transition:persist></canvas>
+
+<script>
+  import { createTunnelBackground } from 'canvas-effects';
+
+  /**
+   * Low, like the rest. The rings are broad soft bands, so a high amplitude puts
+   * a bright one straight through a paragraph.
+   */
+  const AMPLITUDE = { dark: 30, light: 24 };
+
+  function init() {
+    const canvas = document.getElementById('tunnel') as HTMLCanvasElement | null;
+    if (!canvas) return;
+
+    if (canvas.dataset.mounted === '1') return;
+    canvas.dataset.mounted = '1';
+
+    const handle = createTunnelBackground(canvas, {
+      shading: () => {
+        const dark = document.documentElement.classList.contains('dark');
+        // These must match your page background.
+        return dark ? { base: 18, amplitude: AMPLITUDE.dark } : { base: 255, amplitude: -AMPLITUDE.light };
+      },
+    });
+
+    if (!handle) canvas.remove();
+  }
+
+  init();
+  document.addEventListener('astro:page-load', init);
+</script>
+
+<style>
+  .tunnel {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    image-rendering: pixelated;
+  }
+</style>

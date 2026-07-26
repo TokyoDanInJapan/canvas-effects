@@ -13,12 +13,15 @@ import {
   RIDGE_DEFAULTS,
   RIDGES_BACKGROUND_DEFAULTS,
   SMOKE_BACKGROUND_DEFAULTS,
+  TUNNEL_BACKGROUND_DEFAULTS,
+  TUNNEL_DEFAULTS,
   createPlasmaBackground,
   createFireBackground,
   createMetaballsBackground,
   createRainBackground,
   createRidgesBackground,
   createSmokeBackground,
+  createTunnelBackground,
   type BackgroundHandle,
   type Shading,
 } from '../src/index';
@@ -65,7 +68,7 @@ const rampPick = document.getElementById('ramp') as HTMLSelectElement;
 const rampName = document.getElementById('ramp-name') as HTMLElement;
 const ditherButton = document.getElementById('dither') as HTMLButtonElement;
 
-type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'fire' | 'metaballs';
+type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'fire' | 'metaballs' | 'tunnel';
 
 type Stops = ReadonlyArray<readonly [number, number, number]>;
 
@@ -498,6 +501,69 @@ const METABALL_DIALS: Dial[] = [
   { key: 'releaseEase', label: 'releaseEase', min: 0.05, max: 3, step: 0.05, value: 0.9, note: 'settling back' },
 ];
 
+const TUNNEL_DIALS: Dial[] = [
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 30, note: 'the readability dial' },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 12,
+    step: 1,
+    value: TUNNEL_BACKGROUND_DEFAULTS.levels,
+    note: 'colours in the palette',
+  },
+  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: TUNNEL_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'fieldScale', label: 'fieldScale', min: 1, max: 4, step: 1, value: TUNNEL_BACKGROUND_DEFAULTS.fieldScale },
+  { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: TUNNEL_BACKGROUND_DEFAULTS.fps },
+  { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: TUNNEL_BACKGROUND_DEFAULTS.gamma },
+  { key: 'speed', label: 'speed', min: 0, max: 1.5, step: 0.02, value: TUNNEL_DEFAULTS.speed, note: 'flight speed' },
+  {
+    key: 'depth',
+    label: 'depth',
+    min: 0.05,
+    max: 1.2,
+    step: 0.01,
+    value: TUNNEL_DEFAULTS.depth,
+    note: 'longer and narrower',
+  },
+  { key: 'repeats', label: 'repeats', min: 1, max: 8, step: 1, value: TUNNEL_DEFAULTS.repeats, note: 'whole turns' },
+  { key: 'twist', label: 'twist', min: -0.5, max: 0.5, step: 0.01, value: TUNNEL_DEFAULTS.twist },
+  {
+    key: 'vignette',
+    label: 'vignette',
+    min: 0,
+    max: 1,
+    step: 0.02,
+    value: TUNNEL_DEFAULTS.vignette,
+    note: 'size of the dark throat',
+  },
+  { key: 'coreRadius', label: 'coreRadius', min: 0.005, max: 0.2, step: 0.005, value: TUNNEL_DEFAULTS.coreRadius },
+  {
+    key: 'bend',
+    label: 'bend',
+    min: 0,
+    max: 3,
+    step: 0.05,
+    value: TUNNEL_DEFAULTS.bend,
+    note: '0 = a straight tunnel',
+  },
+  { key: 'bendRate', label: 'bendRate', min: 0.05, max: 2, step: 0.05, value: TUNNEL_DEFAULTS.bendRate },
+  { key: 'bank', label: 'bank', min: 0, max: 0.3, step: 0.01, value: TUNNEL_DEFAULTS.bank, note: 'roll into a turn' },
+  { key: 'sway', label: 'sway', min: 0, max: 0.3, step: 0.01, value: TUNNEL_DEFAULTS.sway, note: 'how far it drifts' },
+  { key: 'swaySpeed', label: 'swaySpeed', min: 0, max: 1, step: 0.02, value: TUNNEL_DEFAULTS.swaySpeed },
+  { key: 'steerEase', label: 'steerEase', min: 0.05, max: 3, step: 0.05, value: 0.5, note: 'drag to steer it' },
+];
+
+const DIALS: Record<Effect, Dial[]> = {
+  smoke: SMOKE_DIALS,
+  plasma: PLASMA_DIALS,
+  rain: RAIN_DIALS,
+  ridges: RIDGE_DIALS,
+  fire: FIRE_DIALS,
+  metaballs: METABALL_DIALS,
+  tunnel: TUNNEL_DIALS,
+};
+
 let effect: Effect = 'smoke';
 let values: Record<string, number> = {};
 let handle: BackgroundHandle | null = null;
@@ -522,6 +588,29 @@ function mount() {
     fps: Math.round(values.fps),
     random,
   };
+
+  if (effect === 'tunnel') {
+    handle = createTunnelBackground(canvas, {
+      ...common,
+      fieldScale: Math.round(values.fieldScale),
+      steerEase: values.steerEase,
+      tunnel: {
+        speed: values.speed,
+        depth: values.depth,
+        repeats: Math.round(values.repeats),
+        twist: values.twist,
+        vignette: values.vignette,
+        coreRadius: values.coreRadius,
+        bend: values.bend,
+        bendRate: values.bendRate,
+        bank: values.bank,
+        sway: values.sway,
+        swaySpeed: values.swaySpeed,
+      },
+    });
+    if (!handle) fpsOut.textContent = 'no 2D context';
+    return;
+  }
 
   if (effect === 'metaballs') {
     handle = createMetaballsBackground(canvas, {
@@ -681,18 +770,10 @@ function buildRampPicker() {
 }
 
 function buildDials() {
-  const list =
-    effect === 'smoke'
-      ? SMOKE_DIALS
-      : effect === 'plasma'
-        ? PLASMA_DIALS
-        : effect === 'rain'
-          ? RAIN_DIALS
-          : effect === 'fire'
-            ? FIRE_DIALS
-            : effect === 'metaballs'
-              ? METABALL_DIALS
-              : RIDGE_DIALS;
+  // A lookup rather than the ternary chain this used to be: seven effects deep
+  // it had stopped being readable, and the fall-through arm meant a new effect
+  // silently showed the ridges' dials instead of failing to compile.
+  const list = DIALS[effect];
   values = Object.fromEntries(list.map((d) => [d.key, d.value]));
   dials.replaceChildren();
 
