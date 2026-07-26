@@ -183,16 +183,16 @@ export function createFireBackground(
     watchColorScheme: config.watchColorScheme,
   });
 
-  // Spaced at about two thirds of a spark's own radius, so a drag lays down an
-  // overlapping trail rather than a dotted line of separate blobs.
   const stopDragging =
     config.interactive && !still
       ? createDragSource(canvas, {
-          spacing: params.sparkRadius * 0.66,
+          // A fifth of a spark's radius, so consecutive blobs overlap heavily and
+          // the stroke is solid. Sparks are one-shot deposits with no lifetime,
+          // so a dense trail costs nothing beyond the deposits themselves.
+          spacing: params.sparkRadius * 0.2,
+          maxPerMove: 24,
           onEmit(u, v) {
             if (!fire) return;
-            // A fast drag should not queue a backlog of plumes.
-            if (pending.length > 6) return;
             pending.push({ x: u * fire.w, y: v * fire.h, strength: 1 });
           },
         })

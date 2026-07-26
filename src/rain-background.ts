@@ -68,7 +68,16 @@ export interface RainBackgroundOptions {
    * it never sees a pointer itself.
    */
   interactive: boolean;
-  /** Most distortions at once. A spare click is dropped rather than queued. */
+  /**
+   * Most distortions at once.
+   *
+   * At the cap the oldest is retired rather than the newest refused, so a drag
+   * keeps responding instead of going dead once it is full.
+   *
+   * Held lower than the other effects' equivalents on purpose: `distortField`
+   * sums every live distortion at every cell inside their combined bounding box,
+   * so this one is the only interaction here whose cost grows with the count.
+   */
   maxDistortions: number;
   /** Draw one settled frame and stop when the visitor has asked for less motion. */
   respectReducedMotion: boolean;
@@ -102,7 +111,7 @@ export const RAIN_BACKGROUND_DEFAULTS: RainBackgroundOptions = {
   shading: defaultShading,
   rain: {},
   interactive: true,
-  maxDistortions: 4,
+  maxDistortions: 12,
   respectReducedMotion: true,
   pauseWhenHidden: true,
   watchThemeClass: true,
@@ -193,10 +202,11 @@ export function createRainBackground(
   const stopDragging =
     config.interactive && !still
       ? createDragSource(canvas, {
-          spacing: 0.09,
+          spacing: 0.025,
+          maxPerMove: 10,
           onEmit(u, v) {
             if (!rain) return;
-            if (distortions.length >= config.maxDistortions) return;
+            if (distortions.length >= config.maxDistortions) distortions.shift();
             distortions.push({ x: u * rain.w, y: v * rain.h, age: 0, strength: 1 });
           },
         })

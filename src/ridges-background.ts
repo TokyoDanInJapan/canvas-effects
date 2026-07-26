@@ -69,7 +69,12 @@ export interface RidgesBackgroundOptions {
    * sees a pointer itself.
    */
   interactive: boolean;
-  /** Most wobbles at once. A spare click is dropped rather than queued. */
+  /**
+   * Most wobbles at once.
+   *
+   * At the cap the oldest is retired rather than the newest refused, so dragging
+   * across the stack keeps striking profiles instead of falling silent.
+   */
   maxWobbles: number;
   /** Draw one frame and stop when the visitor has asked for less motion. */
   respectReducedMotion: boolean;
@@ -99,7 +104,7 @@ export const RIDGES_BACKGROUND_DEFAULTS: RidgesBackgroundOptions = {
   shading: defaultShading,
   ridges: {},
   interactive: true,
-  maxWobbles: 4,
+  maxWobbles: 16,
   respectReducedMotion: true,
   pauseWhenHidden: true,
   watchThemeClass: true,
@@ -201,10 +206,11 @@ export function createRidgesBackground(
   const stopDragging =
     config.interactive && !still
       ? createDragSource(canvas, {
-          spacing: 0.06,
+          spacing: 0.02,
+          maxPerMove: 12,
           onEmit(u, v) {
             if (!ridges) return;
-            if (wobbles.length >= config.maxWobbles) return;
+            if (wobbles.length >= config.maxWobbles) wobbles.shift();
 
             const depth = depthAtY(v * ridges.h, ridges.h, params);
             wobbles.push({

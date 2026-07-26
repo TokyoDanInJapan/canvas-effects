@@ -117,15 +117,25 @@ export function createDriver(canvas: HTMLCanvasElement, options: DriverOptions):
 
 export interface DragOptions {
   /**
-   * Least the pointer must travel between emissions, as a fraction of the
-   * canvas's shorter side.
+   * Distance between emissions along the drag, as a fraction of the canvas's
+   * shorter side.
    *
-   * Gating on distance rather than on time is what makes a slow, careful drag
-   * emit as densely as a fast one - a time-based throttle bunches everything up
-   * when the pointer is moving slowly and leaves gaps when it is quick.
+   * This is a *sampling interval*, not a throttle, and the difference is what
+   * makes a drag feel continuous. A throttle only ever emits where a pointer
+   * event happened, so a fast drag - where the browser may deliver one event per
+   * 100px - leaves a dotted line. This walks the segment between the last
+   * emission and the current position, emitting every `spacing` along the way,
+   * so the stroke is evenly spaced however fast the pointer moved.
+   *
+   * Keep it small. It is what the stroke's resolution costs, not a rate limit.
    */
   spacing: number;
-  /** Called on press, and again each time the pointer has moved `spacing`. */
+  /**
+   * Ceiling on emissions from a single move event, so one enormous jump - a
+   * pointer re-entering the window, say - cannot flood a frame.
+   */
+  maxPerMove: number;
+  /** Called on press, and at every `spacing` along a drag. */
   onEmit: (u: number, v: number) => void;
 }
 
@@ -174,17 +184,34 @@ export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions
     const at = locate(event);
     if (!at) return;
 
-    // Measured against the shorter side, so `spacing` means the same thing
-    // whichever way round the window is.
+    // Measured in pixels against the shorter side, so `spacing` means the same
+    // thing whichever way round the window is.
     const rect = canvas.getBoundingClientRect();
-    const shorter = Math.min(rect.width, rect.height);
+    const step = options.spacing * Math.min(rect.width, rect.height);
+    if (step <= 0) return;
+
     const dx = (at[0] - lastX) * rect.width;
     const dy = (at[1] - lastY) * rect.height;
-    if (Math.hypot(dx, dy) < options.spacing * shorter) return;
+    const travelled = Math.hypot(dx, dy);
+    if (travelled < step) return;
 
-    lastX = at[0];
-    lastY = at[1];
-    options.onEmit(at[0], at[1]);
+    // Walk the segment rather than emitting only at its end. A fast drag can
+    // deliver one move event per hundred pixels, and emitting at the endpoint
+    // alone is exactly what makes a stroke come out dotted.
+    const steps = Math.min(Math.floor(travelled / step), options.maxPerMove);
+    const spanU = at[0] - lastX;
+    const spanV = at[1] - lastY;
+
+    for (let i = 1; i <= steps; i++) {
+      const t = (i * step) / travelled;
+      options.onEmit(lastX + spanU * t, lastY + spanV * t);
+    }
+
+    // Advance to the last point actually emitted, so the remainder carries into
+    // the next event instead of being rounded away every time.
+    const covered = (steps * step) / travelled;
+    lastX += spanU * covered;
+    lastY += spanV * covered;
   }
 
   function onUp() {

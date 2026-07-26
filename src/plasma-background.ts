@@ -69,7 +69,14 @@ export interface PlasmaBackgroundOptions {
    * a pointer itself.
    */
   interactive: boolean;
-  /** Most ripples alive at once. A spare click is dropped rather than queued. */
+  /**
+   * Most ripples alive at once.
+   *
+   * At the cap the *oldest* is retired to make room, rather than the newest being
+   * dropped. That distinction is what makes a drag feel alive: dropping the
+   * newest means an ongoing drag stops producing anything the moment the cap is
+   * reached, which reads as the effect having died.
+   */
   maxRipples: number;
   /** Draw one frame and stop when the visitor has asked for less motion. */
   respectReducedMotion: boolean;
@@ -106,7 +113,9 @@ export const PLASMA_BACKGROUND_DEFAULTS: PlasmaBackgroundOptions = {
   shading: defaultShading,
   warp: {},
   interactive: true,
-  maxRipples: 5,
+  // Room for a wake rather than a handful of clicks. A ripple costs one pass over
+  // the 1,008-cell warp grid, so this is affordable.
+  maxRipples: 18,
   respectReducedMotion: true,
   pauseWhenHidden: true,
   watchThemeClass: true,
@@ -238,13 +247,11 @@ export function createPlasmaBackground(
   const stopDragging =
     config.interactive && !still
       ? createDragSource(canvas, {
-          // Wide: a ripple's ring is a fifth of the screen across by the time it
-          // is obvious, and rings on top of each other read as noise.
-          spacing: 0.12,
+          spacing: 0.02,
+          maxPerMove: 12,
           onEmit(u, v) {
-            // Dropped rather than queued, so a long drag does not leave the page
-            // rippling for seconds after the reader has stopped.
-            if (ripples.length >= config.maxRipples) return;
+            // Retire the oldest rather than refuse the newest - see `maxRipples`.
+            if (ripples.length >= config.maxRipples) ripples.shift();
             ripples.push({ x: u, y: v, age: 0, strength: 1 });
           },
         })
