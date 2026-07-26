@@ -77,6 +77,11 @@ export const COPY: Record<string, Copy> = {
       'Hidden lines are the effect. Without occlusion this is a tangle; with it you get depth, and the notch where a ' +
         'near crest bites into the rows above. It is done with a floating horizon — draw nearest to farthest, keep ' +
         'the highest point covered so far per column — which is one pass and no z-buffer.',
+      '<strong>Click a line to set a wobble running through the stack.</strong> It is a wave packet — an envelope ' +
+        'around a travelling front times an oscillation — so the struck profile ripples through a few crests rather ' +
+        'than heaving once, and the disturbance spreads outward to its neighbours as it goes. It is keyed to the row ' +
+        'it hit rather than to the point on screen, so it travels with the terrain instead of sitting still while ' +
+        'rows pass through it.',
       'Rows are tied to whole numbers of travel rather than to screen positions, so a profile keeps its own shape, ' +
         'slides down as you pass it, and rolls off the bottom edge instead of vanishing at it.',
       SHARED,

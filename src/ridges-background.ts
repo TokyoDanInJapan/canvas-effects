@@ -6,14 +6,25 @@
 // only state is `travel`, which is a number rather than a simulation. That makes
 // the reduced-motion path a single draw.
 //
-// The exception is `ridges.trail`. Above zero, each frame starts from the last
-// one faded and the field does depend on history - so a still frame under
-// reduced motion shows no trail, which is correct for a still.
+// Two exceptions. `ridges.trail`, above zero, starts each frame from the last one
+// faded, so the field does depend on history. And a click leaves a wobble
+// travelling through the stack for a second or two, which is state of its own.
+// Both are absent under reduced motion, where a single still frame is drawn -
+// correct for a still in either case.
 
 import { createDriver, prefersReducedMotion } from './driver';
 import { withDefaults } from './options';
 import { createSurface, defaultShading, type BackgroundHandle, type Shading } from './render';
-import { RIDGE_DEFAULTS, createRidges, renderRidges, stepRidges, type RidgeParams, type Ridges } from './ridges';
+import {
+  RIDGE_DEFAULTS,
+  createRidges,
+  depthAtY,
+  renderRidges,
+  stepRidges,
+  type RidgeParams,
+  type Ridges,
+  type Wobble,
+} from './ridges';
 
 export interface RidgesBackgroundOptions {
   /** CSS pixels per rendered pixel - one dither cell, and one line thickness. */
@@ -47,6 +58,16 @@ export interface RidgesBackgroundOptions {
   shading: Shading | (() => Shading);
   /** Landscape parameters. Anything omitted falls back to `RIDGE_DEFAULTS`. */
   ridges: Partial<RidgeParams>;
+  /**
+   * Let a click set a wobble running through the stack from the profile it hit.
+   *
+   * Listened for on the window rather than the canvas, like every other
+   * interaction here: a background canvas is `pointer-events: none`, so it never
+   * sees a pointer itself.
+   */
+  interactive: boolean;
+  /** Most wobbles at once. A spare click is dropped rather than queued. */
+  maxWobbles: number;
   /** Draw one frame and stop when the visitor has asked for less motion. */
   respectReducedMotion: boolean;
   /** Stop the loop while the tab is hidden. */
@@ -74,6 +95,8 @@ export const RIDGES_BACKGROUND_DEFAULTS: RidgesBackgroundOptions = {
   gamma: 1,
   shading: defaultShading,
   ridges: {},
+  interactive: true,
+  maxWobbles: 4,
   respectReducedMotion: true,
   pauseWhenHidden: true,
   watchThemeClass: true,
@@ -114,6 +137,9 @@ export function createRidgesBackground(
   let ridges: Ridges | null = null;
   let shading: Shading = { base: 0, amplitude: 0 };
 
+  // Live click wobbles, aged in real seconds.
+  const wobbles: Wobble[] = [];
+
   function readShading() {
     shading = typeof config.shading === 'function' ? config.shading() : config.shading;
   }
@@ -131,13 +157,18 @@ export function createRidgesBackground(
     ridges.travel = travel;
     // Same landscape, too - only the resolution it is drawn at has changed.
     if (state) ridges.state = state;
-    renderRidges(ridges, params);
+    renderRidges(ridges, params, wobbles);
   }
 
   const driver = createDriver(canvas, {
     fps: config.fps,
     onFrame() {
-      if (ridges) stepRidges(ridges, params, dt);
+      for (let i = wobbles.length - 1; i >= 0; i--) {
+        wobbles[i].age += dt;
+        if (wobbles[i].age >= params.wobbleLifetime) wobbles.splice(i, 1);
+      }
+
+      if (ridges) stepRidges(ridges, params, dt, wobbles);
       shade();
     },
     onResize() {
@@ -154,6 +185,38 @@ export function createRidgesBackground(
     watchThemeClass: config.watchThemeClass,
     watchColorScheme: config.watchColorScheme,
   });
+
+  /**
+   * A click sets a wobble running from the profile it landed on.
+   *
+   * `depthAtY` is what turns a screen position into a row: the profiles are
+   * placed by a perspective curve, so which one is under the cursor is not a
+   * division. The wobble is then keyed to that row's `worldZ` rather than to the
+   * screen point, so it travels with the terrain as it approaches instead of
+   * sitting still while rows pass through it.
+   */
+  function onPointerDown(event: PointerEvent) {
+    if (still || !ridges) return;
+    if (wobbles.length >= config.maxWobbles) return;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const u = (event.clientX - rect.left) / rect.width;
+    const cellY = ((event.clientY - rect.top) / rect.height) * ridges.h;
+    const depth = depthAtY(cellY, ridges.h, params);
+
+    wobbles.push({
+      z: Math.round(ridges.travel + depth * params.rows),
+      x: u,
+      age: 0,
+      strength: 1,
+    });
+  }
+
+  if (config.interactive && !still) {
+    window.addEventListener('pointerdown', onPointerDown, { passive: true });
+  }
 
   readShading();
   surface.resize();
@@ -173,6 +236,8 @@ export function createRidgesBackground(
     },
     destroy() {
       driver.destroy();
+      window.removeEventListener('pointerdown', onPointerDown);
+      wobbles.length = 0;
       ridges = null;
     },
   };

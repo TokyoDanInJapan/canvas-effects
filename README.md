@@ -300,6 +300,28 @@ pace does.
 The decay is exponential rather than linear, so it is frame-rate independent: halving `dt` and stepping twice leaves
 the same brightness behind. There is a test pinning that to three decimal places.
 
+#### Click a line to wobble the stack
+
+A click sets a disturbance running from the profile it landed on. It is a **wave packet** — an envelope around a
+travelling front times an oscillation — so the struck line ripples through a few crests rather than heaving once. A lone
+Gaussian would read as a shockwave, which is a different thing.
+
+Two decisions carry it:
+
+- **It is keyed to the row, not the screen point.** A wobble stores the `worldZ` of the profile it hit, so it travels
+  with the terrain as that profile approaches. Anchored to a screen position instead, it would sit still while rows slid
+  through it, which reads as a stationary distortion rather than as something you did to the landscape.
+- **Distance is measured in a space where a row counts as `wobbleRowSpacing` across.** That is what makes one front
+  spread sideways along the struck line _and_ outward through its neighbours. It is the dial between a wobble that runs
+  along one line and one that crosses the stack; lower spreads across rows faster.
+
+Working out which profile was clicked needs `depthAtY`, the inverse of `rowY` — the rows are placed by a perspective
+curve, so it is not a division. The offset is applied to the curve before anything is drawn, so the fill and the
+occlusion follow the wobbled line rather than the flat one.
+
+Measured with the flight slowed right down, so the wobble is the only thing moving: pixels changing per 200ms goes from
+2774 idle to 10901 mid-flight, and back to 2430 once the lifetime elapses.
+
 #### `fieldScale` is 1 here, and that matters
 
 The other two effects render the field at half the output resolution and let bilinear interpolation smooth it. For a
@@ -650,22 +672,26 @@ Ridges only:
 
 And the `ridges` sub-options, all documented inline on `RidgeParams`:
 
-| Parameter                    | Default         | Does                                                                                                            |
-| ---------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
-| `rows`                       | `34`            | Profiles on screen. Too many and they merge into static.                                                        |
-| `speed`                      | `1.6`           | Rows crossed per second — the flying speed.                                                                     |
-| `amplitude` / `ampFalloff`   | `0.18` / `1.5`  | Peak height of the nearest row, and how fast peaks shrink with distance.                                        |
-| `focus`                      | `0.2`           | Width of the central band. The signature of the look.                                                           |
-| `sharpness`                  | `3.2`           | Exponent on the ridged noise — higher is spikier, flatter between.                                              |
-| `xScale` / `zScale`          | `3.1` / `0.32`  | Terrain frequency across and into the screen. Keep `zScale` small or consecutive rows stop being one landscape. |
-| `perspective`                | `1.35`          | 1 is an even stack (the flat plot); above 1 crowds the far rows.                                                |
-| `depthFade`                  | `0.45`          | Brightness of the farthest row. Below 1 it dithers into haze.                                                   |
-| `topMargin` / `bottomMargin` | `0.12` / `0.94` | Where the farthest and nearest rows sit.                                                                        |
-| `overscan`                   | `8`             | Rows kept alive past the near edge, so profiles roll off the bottom instead of being deleted there.             |
-| `fill`                       | `false`         | Fill each profile into a solid silhouette instead of a line.                                                    |
-| `fillLevel`                  | `0.34`          | Ceiling on fill brightness. Scales both kinds of fill.                                                          |
-| `fillRandom`                 | `false`         | Give every profile its own fill value, so each silhouette takes a different palette colour.                     |
-| `trail`                      | `0`             | Fraction of the previous frame kept - a ghost trailing each profile. Makes the field stateful.                  |
+| Parameter                          | Default         | Does                                                                                                            |
+| ---------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
+| `rows`                             | `34`            | Profiles on screen. Too many and they merge into static.                                                        |
+| `speed`                            | `1.6`           | Rows crossed per second — the flying speed.                                                                     |
+| `amplitude` / `ampFalloff`         | `0.18` / `1.5`  | Peak height of the nearest row, and how fast peaks shrink with distance.                                        |
+| `focus`                            | `0.2`           | Width of the central band. The signature of the look.                                                           |
+| `sharpness`                        | `3.2`           | Exponent on the ridged noise — higher is spikier, flatter between.                                              |
+| `xScale` / `zScale`                | `3.1` / `0.32`  | Terrain frequency across and into the screen. Keep `zScale` small or consecutive rows stop being one landscape. |
+| `perspective`                      | `1.35`          | 1 is an even stack (the flat plot); above 1 crowds the far rows.                                                |
+| `depthFade`                        | `0.45`          | Brightness of the farthest row. Below 1 it dithers into haze.                                                   |
+| `topMargin` / `bottomMargin`       | `0.12` / `0.94` | Where the farthest and nearest rows sit.                                                                        |
+| `overscan`                         | `8`             | Rows kept alive past the near edge, so profiles roll off the bottom instead of being deleted there.             |
+| `fill`                             | `false`         | Fill each profile into a solid silhouette instead of a line.                                                    |
+| `fillLevel`                        | `0.34`          | Ceiling on fill brightness. Scales both kinds of fill.                                                          |
+| `fillRandom`                       | `false`         | Give every profile its own fill value, so each silhouette takes a different palette colour.                     |
+| `trail`                            | `0`             | Fraction of the previous frame kept - a ghost trailing each profile. Makes the field stateful.                  |
+| `wobbleAmplitude`                  | `0.045`         | Peak displacement of a click wobble, as a fraction of the field height.                                         |
+| `wobbleSpeed` / `wobbleWavelength` | `0.55` / `0.13` | How fast the front spreads, and the ripple's wavelength, in screen widths.                                      |
+| `wobbleRowSpacing`                 | `0.045`         | How far apart rows count as. Lower spreads the wobble across the stack faster.                                  |
+| `wobbleLifetime`                   | `2.2`           | Seconds a wobble lasts.                                                                                         |
 
 Fire only:
 

@@ -148,6 +148,25 @@ export interface RidgeParams {
    * the occlusion does not clip, so trails need no special handling against it.
    */
   trail: number;
+
+  /** How fast a click wobble spreads, in screen widths per second. */
+  wobbleSpeed: number;
+  /** Wavelength of the ripple, in screen widths. Sets how many crests show. */
+  wobbleWavelength: number;
+  /** Peak vertical displacement, as a fraction of the field height. */
+  wobbleAmplitude: number;
+  /** Seconds a wobble lasts. */
+  wobbleLifetime: number;
+  /**
+   * How far apart consecutive rows count as, in the same units as the
+   * horizontal spread.
+   *
+   * This is the dial between a wobble that runs *along* the line it struck and
+   * one that spreads *across* the stack. Small values put the rows close
+   * together in the metric, so the disturbance reaches its neighbours almost as
+   * fast as it travels sideways.
+   */
+  wobbleRowSpacing: number;
 }
 
 export const RIDGE_DEFAULTS: RidgeParams = {
@@ -186,6 +205,16 @@ export const RIDGE_DEFAULTS: RidgeParams = {
   fillLevel: 0.34,
   fillRandom: false,
   trail: 0,
+  wobbleSpeed: 0.55,
+  wobbleWavelength: 0.13,
+  // About two thirds of a row gap at the defaults, so a crest is clearly a
+  // displacement of the line rather than enough to shove it through its
+  // neighbour.
+  wobbleAmplitude: 0.045,
+  wobbleLifetime: 2.2,
+  // Crosses roughly 26 of the 34 rows over a wobble's life, so it visibly
+  // travels through the stack rather than staying on the line that was hit.
+  wobbleRowSpacing: 0.045,
 };
 
 /** Seeds and offsets that give one run its landscape. */
@@ -254,6 +283,84 @@ export function rowAmplitude(depth: number, h: number, params: RidgeParams): num
   return params.amplitude * h * Math.pow(1 - clamped, params.ampFalloff);
 }
 
+/** A click disturbance travelling through the stack. */
+export interface Wobble {
+  /** The row that was struck, as a whole number of `travel`. */
+  z: number;
+  /** Where along it, as a fraction of the width. */
+  x: number;
+  /** Seconds since the click. */
+  age: number;
+  /** Multiplier on `wobbleAmplitude`. */
+  strength: number;
+}
+
+/**
+ * Which depth a screen row sits at - the inverse of `rowY`.
+ *
+ * Needed to work out *which* profile a click landed on, since the rows are
+ * placed by a perspective curve rather than evenly. Returns a depth clamped to
+ * 0..1; the caller turns that into a `worldZ`.
+ */
+export function depthAtY(y: number, h: number, params: RidgeParams): number {
+  const near = params.bottomMargin * h;
+  const far = params.topMargin * h;
+  const span = near - far;
+  if (span <= 0) return 0;
+
+  const t = (y - far) / span;
+  if (t <= 0) return 1;
+  if (t >= 1) return 0;
+  return 1 - Math.pow(t, 1 / params.perspective);
+}
+
+/**
+ * Vertical displacement the live wobbles apply to one point on one profile, in
+ * cells. Negative is up.
+ *
+ * A wave packet rather than a single bump: an envelope around the travelling
+ * front times an oscillation, so a struck line ripples through two or three
+ * crests instead of simply heaving once. A lone Gaussian reads as a shockwave,
+ * which is a different thing.
+ *
+ * Distance is measured in a space where a row counts as `wobbleRowSpacing`
+ * across, so the same front spreads sideways along the line it struck *and*
+ * outward through its neighbours. That is what makes it propagate across the
+ * stack rather than staying on one line.
+ */
+export function wobbleOffset(
+  u: number,
+  worldZ: number,
+  wobbles: readonly Wobble[],
+  params: RidgeParams,
+  h: number
+): number {
+  let offset = 0;
+
+  for (let i = 0; i < wobbles.length; i++) {
+    const wobble = wobbles[i];
+    if (wobble.age < 0 || wobble.age >= params.wobbleLifetime) continue;
+
+    const du = u - wobble.x;
+    const dz = (worldZ - wobble.z) * params.wobbleRowSpacing;
+    const distance = Math.sqrt(du * du + dz * dz);
+
+    const front = wobble.age * params.wobbleSpeed;
+    const phase = (distance - front) / params.wobbleWavelength;
+
+    // Wide enough to show a couple of crests either side of the front.
+    const envelope = Math.exp(-((phase / 1.5) * (phase / 1.5)));
+    if (envelope < 1e-4) continue;
+
+    const fade = 1 - wobble.age / params.wobbleLifetime;
+    const swing = Math.cos(phase * Math.PI * 2);
+
+    offset -= params.wobbleAmplitude * h * wobble.strength * envelope * swing * fade * fade;
+  }
+
+  return offset;
+}
+
 /**
  * The fill value for one profile, 0.2 to 1.
  *
@@ -317,7 +424,7 @@ export function createRidges(w: number, h: number, rand: () => number = Math.ran
  * at the top each time `travel` crosses an integer. Tying profiles to screen
  * slots instead would make the terrain morph in place rather than approach.
  */
-export function renderRidges(ridges: Ridges, params: RidgeParams): void {
+export function renderRidges(ridges: Ridges, params: RidgeParams, wobbles: readonly Wobble[] = []): void {
   const { w, h, field, horizon, ys, previous, state, travel } = ridges;
   const { rows, trail } = params;
 
@@ -356,6 +463,9 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
     for (let x = 0; x < w; x++) {
       const u = w > 1 ? x / (w - 1) : 0.5;
       ys[x] = base - ridgeHeight(u, worldZ, params, state) * amp;
+      // Applied to the curve before anything is drawn, so the fill and the
+      // occlusion follow the wobbled line rather than the flat one.
+      if (wobbles.length > 0) ys[x] += wobbleOffset(u, worldZ, wobbles, params, h);
     }
 
     let previousY = ys[0];
@@ -400,7 +510,7 @@ export function renderRidges(ridges: Ridges, params: RidgeParams): void {
 }
 
 /** Flies forward and redraws. */
-export function stepRidges(ridges: Ridges, params: RidgeParams, dt: number): void {
+export function stepRidges(ridges: Ridges, params: RidgeParams, dt: number, wobbles: readonly Wobble[] = []): void {
   ridges.travel += params.speed * dt;
-  renderRidges(ridges, params);
+  renderRidges(ridges, params, wobbles);
 }

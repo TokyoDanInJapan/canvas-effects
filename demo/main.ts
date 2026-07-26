@@ -383,6 +383,26 @@ const RIDGE_DIALS: Dial[] = [
   },
   { key: 'fillRandom', label: 'fillRandom', min: 0, max: 1, step: 1, value: 0, note: 'a colour per ridge' },
   {
+    key: 'wobbleAmplitude',
+    label: 'wobbleAmplitude',
+    min: 0,
+    max: 0.15,
+    step: 0.005,
+    value: 0.045,
+    note: 'click to wobble',
+  },
+  { key: 'wobbleSpeed', label: 'wobbleSpeed', min: 0.05, max: 2, step: 0.05, value: 0.55 },
+  { key: 'wobbleWavelength', label: 'wobbleWavelength', min: 0.03, max: 0.5, step: 0.01, value: 0.13 },
+  {
+    key: 'wobbleRowSpacing',
+    label: 'wobbleRowSpacing',
+    min: 0.005,
+    max: 0.3,
+    step: 0.005,
+    value: 0.045,
+    note: 'lower spreads across rows',
+  },
+  {
     key: 'trail',
     label: 'trail',
     min: 0,
@@ -557,6 +577,10 @@ function mount() {
         fillLevel: values.fillLevel,
         fillRandom: values.fillRandom >= 0.5,
         trail: values.trail,
+        wobbleAmplitude: values.wobbleAmplitude,
+        wobbleSpeed: values.wobbleSpeed,
+        wobbleWavelength: values.wobbleWavelength,
+        wobbleRowSpacing: values.wobbleRowSpacing,
       },
     });
     if (!handle) fpsOut.textContent = 'no 2D context';

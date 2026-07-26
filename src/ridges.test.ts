@@ -5,7 +5,10 @@ import { orderedDither } from './dither';
 import {
   RIDGE_DEFAULTS,
   createRidges,
+  depthAtY,
   fillShadeFor,
+  wobbleOffset,
+  type Wobble,
   randomizeRidges,
   renderRidges,
   ridgeHeight,
@@ -672,5 +675,188 @@ describe('stepRidges', () => {
       stepRidges(b, RIDGE_DEFAULTS, 1 / 24);
     }
     expect(Array.from(a.field)).toEqual(Array.from(b.field));
+  });
+});
+
+describe('depthAtY', () => {
+  it('inverts rowY', () => {
+    // The reason it exists: rows are placed by a perspective curve, so working
+    // out which profile a click landed on is not a division.
+    for (const depth of [0, 0.15, 0.5, 0.83, 1]) {
+      const y = rowY(depth, H, RIDGE_DEFAULTS);
+      expect(depthAtY(y, H, RIDGE_DEFAULTS)).toBeCloseTo(depth, 5);
+    }
+  });
+
+  it('clamps outside the band rather than returning nonsense', () => {
+    expect(depthAtY(-100, H, RIDGE_DEFAULTS)).toBe(1);
+    expect(depthAtY(H * 4, H, RIDGE_DEFAULTS)).toBe(0);
+  });
+
+  it('inverts an even stack too', () => {
+    const even = { ...RIDGE_DEFAULTS, perspective: 1 };
+    for (const depth of [0.2, 0.6]) {
+      expect(depthAtY(rowY(depth, H, even), H, even)).toBeCloseTo(depth, 6);
+    }
+  });
+});
+
+describe('wobbleOffset', () => {
+  const params = RIDGE_DEFAULTS;
+  const hit = (over: Partial<Wobble> = {}): Wobble => ({ z: 10, x: 0.5, age: 0.2, strength: 1, ...over });
+  const at = (u: number, z: number, w: Wobble) => wobbleOffset(u, z, [w], params, H);
+
+  /** Largest displacement anywhere along one row. */
+  const along = (z: number, w: Wobble) => {
+    let peak = 0;
+    for (let i = 0; i <= 60; i++) peak = Math.max(peak, Math.abs(at(i / 60, z, w)));
+    return peak;
+  };
+
+  it('is nothing when there are no wobbles', () => {
+    expect(wobbleOffset(0.5, 10, [], params, H)).toBe(0);
+  });
+
+  it('displaces the row that was struck', () => {
+    expect(along(10, hit())).toBeGreaterThan(0.1);
+  });
+
+  it('swings both ways, so it is a wobble and not a shove', () => {
+    // A wave packet: an envelope times an oscillation. A single Gaussian would
+    // only ever push one direction, and reads as a shockwave.
+    let up = false;
+    let down = false;
+    for (let i = 0; i <= 200; i++) {
+      const v = at(i / 200, 10, hit({ age: 0.5 }));
+      if (v < -0.01) up = true;
+      if (v > 0.01) down = true;
+    }
+    expect(up).toBe(true);
+    expect(down).toBe(true);
+  });
+
+  it('propagates across the stack, not just along one line', () => {
+    // The whole point: a row eight away is barely touched at first and fully
+    // disturbed once the front reaches it.
+    //
+    // Compared as a ratio rather than against a fixed "has it arrived" cutoff.
+    // The envelope is a Gaussian, so its tail is non-zero across the entire
+    // screen from the first frame - any small threshold reports every row as
+    // reached immediately, which is what the first version of this did.
+    const early = along(18, hit({ age: 0.05 }));
+    const arrived = along(18, hit({ age: 0.8 }));
+    expect(arrived).toBeGreaterThan(early * 3);
+  });
+
+  it('spreads across rows faster when they count as closer together', () => {
+    const spread = (wobbleRowSpacing: number) => {
+      let furthest = 0;
+      for (let z = 10; z < 60; z++) {
+        let peak = 0;
+        for (let i = 0; i <= 40; i++) {
+          peak = Math.max(
+            peak,
+            Math.abs(wobbleOffset(i / 40, z, [hit({ age: 0.9 })], { ...params, wobbleRowSpacing }, H))
+          );
+        }
+        if (peak > 0.05) furthest = z - 10;
+      }
+      return furthest;
+    };
+    expect(spread(0.02)).toBeGreaterThan(spread(0.2));
+  });
+
+  it('travels outward along the struck line', () => {
+    // Measured as where the peak *is*, not how far the disturbance extends. The
+    // extent saturates immediately - the Gaussian tail covers the whole width by
+    // age 0.2 - so comparing extents compares 0.5 with 0.5.
+    const peakOffset = (age: number) => {
+      let best = 0;
+      let bestAt = 0;
+      for (let i = 0; i <= 400; i++) {
+        const u = i / 400;
+        const v = Math.abs(at(u, 10, hit({ age })));
+        if (v > best) {
+          best = v;
+          bestAt = Math.abs(u - 0.5);
+        }
+      }
+      return bestAt;
+    };
+
+    // Both fronts still inside the screen: 0.055 and 0.385 of the width.
+    expect(peakOffset(0.7)).toBeGreaterThan(peakOffset(0.1));
+  });
+
+  it('fades out by its lifetime and stays out', () => {
+    expect(along(10, hit({ age: 0.2 }))).toBeGreaterThan(0.1);
+    for (const age of [params.wobbleLifetime, params.wobbleLifetime + 1, 99]) {
+      expect(along(10, hit({ age }))).toBe(0);
+    }
+  });
+
+  it('weakens as it ages', () => {
+    const onItsOwnFront = (age: number) => {
+      const front = age * params.wobbleSpeed;
+      return Math.abs(at(0.5 + front, 10, hit({ age })));
+    };
+    expect(onItsOwnFront(1.8)).toBeLessThan(onItsOwnFront(0.3));
+  });
+
+  it('ignores a negative age', () => {
+    expect(along(10, hit({ age: -1 }))).toBe(0);
+  });
+
+  it('scales with strength', () => {
+    expect(along(10, hit({ strength: 1 }))).toBeGreaterThan(along(10, hit({ strength: 0.2 })));
+  });
+
+  it('adds several wobbles together', () => {
+    const one = wobbleOffset(0.5, 10, [hit({ x: 0.2 })], params, H);
+    const two = wobbleOffset(0.5, 10, [hit({ x: 0.2 }), hit({ x: 0.8 })], params, H);
+    expect(two).not.toBe(one);
+  });
+
+  describe('through the render', () => {
+    it('changes nothing when there are none', () => {
+      const a = seeded(3);
+      renderRidges(a, RIDGE_DEFAULTS);
+      const b = seeded(3);
+      renderRidges(b, RIDGE_DEFAULTS, []);
+      expect(Array.from(b.field)).toEqual(Array.from(a.field));
+    });
+
+    it('moves the drawn lines when there is one', () => {
+      const plain = seeded(3);
+      renderRidges(plain, RIDGE_DEFAULTS);
+      const wobbled = seeded(3);
+      wobbled.travel = plain.travel;
+      renderRidges(wobbled, RIDGE_DEFAULTS, [hit({ z: Math.ceil(plain.travel) + 5, age: 0.3 })]);
+      expect(Array.from(wobbled.field)).not.toEqual(Array.from(plain.field));
+    });
+
+    it('carries the fill and the occlusion with it', () => {
+      // The offset is applied to the curve before anything is drawn, so a filled
+      // silhouette follows the wobbled line rather than the flat one.
+      const params2 = { ...RIDGE_DEFAULTS, fill: true };
+      const r = seeded(3);
+      renderRidges(r, params2, [hit({ z: Math.ceil(r.travel) + 5, age: 0.3 })]);
+
+      for (let x = 0; x < W; x++) {
+        const col = column(r, x);
+        const lowest = col.reduce((acc, v, y) => (v > 0 ? y : acc), -1);
+        if (lowest < 0) continue;
+        for (let y = lowest + 1; y < H; y++) expect(col[y]).toBe(0);
+      }
+    });
+
+    it('keeps the field inside 0..1', () => {
+      const r = seeded(3);
+      renderRidges(r, RIDGE_DEFAULTS, [hit({ z: Math.ceil(r.travel) + 4, age: 0.4, strength: 3 })]);
+      for (const v of r.field) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+    });
   });
 });
