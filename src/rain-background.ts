@@ -12,10 +12,18 @@ import {
   createAgeingList,
   mountBackground,
   type CommonBackgroundOptions,
-} from './background';
-import { withDefaults } from './options';
-import { type BackgroundHandle } from './render';
-import { RAIN_DEFAULTS, createRain, distortField, stepRain, type Distortion, type Rain, type RainParams } from './rain';
+} from './background.js';
+import { withDefaults } from './options.js';
+import { type BackgroundHandle } from './render.js';
+import {
+  RAIN_DEFAULTS,
+  createRain,
+  distortField,
+  stepRain,
+  type Distortion,
+  type Rain,
+  type RainParams,
+} from './rain.js';
 
 export interface RainBackgroundOptions extends CommonBackgroundOptions {
   /**

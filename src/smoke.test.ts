@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fbm, makeRandom } from './noise';
+import { fbm, makeRandom } from './noise.js';
 import {
   SMOKE_DEFAULTS,
   advect,
@@ -19,7 +19,7 @@ import {
   solvePressure,
   stepFluid,
   subtractPressureGradient,
-} from './smoke';
+} from './smoke.js';
 
 const seeded = () => randomizeSmoke(makeRandom(4242));
 
@@ -200,6 +200,33 @@ describe('the pressure projection', () => {
     computeDivergence(fluid);
     solvePressure(fluid, 40);
     for (const value of fluid.pressure) expect(Number.isFinite(value)).toBe(true);
+  });
+
+  it('warm-starts from the previous solve instead of rediscovering it', () => {
+    // The solve keeps last frame's pressure as its initial guess, and the flow
+    // changes little between frames, so the iterations refine an answer that
+    // is already nearly right. Zeroing the pressure before every step
+    // re-imposes the old cold start; across a run, the warm-started fluid must
+    // be left with no more divergence than that. Summed over the steps rather
+    // than compared at one, because the two trajectories drift apart after the
+    // first frame and any single step is a noisy sample.
+    const warm = stirred();
+    const cold = stirred();
+    const state = seeded();
+
+    let time = 0;
+    let warmResidual = 0;
+    let coldResidual = 0;
+    for (let i = 0; i < 8; i++) {
+      time += 1 / 24;
+      cold.pressure.fill(0);
+      stepFluid(cold, SMOKE_DEFAULTS, state, time, 1 / 24);
+      stepFluid(warm, SMOKE_DEFAULTS, state, time, 1 / 24);
+      warmResidual += meanAbsDivergence(warm);
+      coldResidual += meanAbsDivergence(cold);
+    }
+
+    expect(warmResidual).toBeLessThanOrEqual(coldResidual);
   });
 });
 
@@ -641,6 +668,19 @@ describe('applyStroke', () => {
     const once = at(fluid, 16, 12);
     applyStroke(fluid, { x: 16, y: 12, dx: 1, dy: 0 }, SMOKE_DEFAULTS, 1 / 24);
     expect(at(fluid, 16, 12)).toBeCloseTo(once * 2, 4);
+  });
+
+  it('injects the same velocity whatever the timestep', () => {
+    // Strokes are emitted per distance dragged, so the number of them already
+    // scales with how finely time is sliced. Scaling each by dt as well would
+    // make the same drag half as strong at double the frame rate.
+    const at24 = createFluid(W, H);
+    const at48 = createFluid(W, H);
+    applyStroke(at24, { x: 16, y: 12, dx: 2, dy: 1 }, SMOKE_DEFAULTS, 1 / 24);
+    applyStroke(at48, { x: 16, y: 12, dx: 2, dy: 1 }, SMOKE_DEFAULTS, 1 / 48);
+
+    expect(Array.from(at48.u)).toEqual(Array.from(at24.u));
+    expect(Array.from(at48.v)).toEqual(Array.from(at24.v));
   });
 
   it('caps a flick, so it stays emphatic rather than destructive', () => {

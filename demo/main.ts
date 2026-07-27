@@ -21,8 +21,8 @@ import {
   createTunnelBackground,
   type BackgroundHandle,
   type Shading,
-} from '../src/index';
-import { COPY } from './copy';
+} from '../src/index.js';
+import { COPY } from './copy.js';
 
 const canvas = document.getElementById('background') as HTMLCanvasElement;
 

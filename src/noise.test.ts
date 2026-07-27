@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fbm, hash2, makeRandom, valueNoise } from './noise';
+import { fbm, hash2, makeRandom, valueNoise } from './noise.js';
 
 describe('makeRandom', () => {
   it('is deterministic for a seed', () => {

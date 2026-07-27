@@ -11,14 +11,14 @@
 // wired to the wrong axis - reaches the page and nothing else here would notice.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { makeRandom } from './noise';
-import { createMetaballsBackground } from './metaballs-background';
-import { createPlasmaBackground } from './plasma-background';
-import { createRainBackground } from './rain-background';
-import { createRidgesBackground } from './ridges-background';
-import { createSmokeBackground } from './smoke-background';
-import { createTunnelBackground } from './tunnel-background';
-import { type BackgroundHandle } from './render';
+import { makeRandom } from './noise.js';
+import { createMetaballsBackground } from './metaballs-background.js';
+import { createPlasmaBackground } from './plasma-background.js';
+import { createRainBackground } from './rain-background.js';
+import { createRidgesBackground } from './ridges-background.js';
+import { createSmokeBackground } from './smoke-background.js';
+import { createTunnelBackground } from './tunnel-background.js';
+import { type BackgroundHandle } from './render.js';
 
 type Listener = (event?: unknown) => void;
 
@@ -115,7 +115,7 @@ function page({ width = 900, height = 600, reducedMotion = false } = {}): Page {
   };
 
   const pointer = (u: number, v: number, buttons: number) =>
-    ({ clientX: u * width, clientY: v * height, buttons }) as PointerEvent;
+    ({ clientX: u * width, clientY: v * height, buttons, pointerId: 1 }) as PointerEvent;
 
   return {
     canvas,
@@ -142,7 +142,7 @@ function page({ width = 900, height = 600, reducedMotion = false } = {}): Page {
     },
     press: (u, v) => fire('pointerdown', pointer(u, v, 1)),
     dragTo: (u, v) => fire('pointermove', pointer(u, v, 1)),
-    release: () => fire('pointerup'),
+    release: () => fire('pointerup', { pointerId: 1 }),
     listeners: () => {
       let total = 0;
       for (const bag of Object.values(targets)) for (const set of bag.values()) total += set.size;
@@ -455,6 +455,65 @@ describe('effect specifics', () => {
       // Back on its own drift, which is a different picture from the steered one.
       expect(differs(steered, dom.greys())).toBe(true);
     });
+
+    it('keeps the same corridor across a resize', () => {
+      // A rebuild must not reroll the tunnel's state: shrinking the window and
+      // growing it back has to land on the picture a never-resized run shows at
+      // the same elapsed time, rather than teleport into a fresh corridor.
+      const run = (resize: boolean) => {
+        const dom = page();
+        createTunnelBackground(dom.canvas, { random: makeRandom(3), shading });
+        dom.frame();
+        if (resize) {
+          dom.resizeTo(450, 300);
+          dom.resizeTo(900, 600);
+        }
+        dom.frame();
+        return dom.greys().join();
+      };
+
+      const steady = run(false);
+      vi.unstubAllGlobals();
+      expect(run(true)).toBe(steady);
+    });
+
+    it('eases the steer the same however the frames are chopped', () => {
+      // The steer's blend weight runs on the clock timestep, whose `dt` is
+      // whatever the frame rate hands it - so, like the metaballs' throw
+      // damping, the ease must land in the same place whether a stretch of time
+      // arrives whole or as two halves.
+      const run = (gaps: number[]) => {
+        const dom = page();
+        let queued: ((now: number) => void) | null = null;
+        let clock = 1000;
+        // Re-stubbed over page()'s own stubs, so each frame's gap - and with it
+        // `dt` - can be chosen per run instead of the harness's fixed 200ms.
+        vi.stubGlobal('performance', { now: () => clock });
+        vi.stubGlobal('requestAnimationFrame', (fn: (now: number) => void) => {
+          queued = fn;
+          return 1;
+        });
+        const pump = (gap: number) => {
+          clock += gap;
+          const fn = queued;
+          queued = null;
+          fn?.(clock);
+        };
+
+        createTunnelBackground(dom.canvas, { random: makeRandom(3), shading, steerEase: 0.15 });
+        dom.press(0.85, 0.2);
+        dom.dragTo(0.84, 0.21);
+        // The first gap only primes the clock - `dt` is zero until there is a
+        // previous frame to measure from - so both runs share it.
+        pump(50);
+        for (const gap of gaps) pump(gap);
+        return dom.greys().join();
+      };
+
+      const whole = run([100]);
+      vi.unstubAllGlobals();
+      expect(run([50, 50])).toBe(whole);
+    });
   });
 
   describe('metaballs', () => {
@@ -478,6 +537,132 @@ describe('effect specifics', () => {
 
       // Settled back onto its own path - the hold has been given up entirely.
       expect(differs(held, dom.greys())).toBe(true);
+    });
+
+    it('keeps the same arrangement across a resize', () => {
+      // A rebuild must not reroll the arrangement: shrinking the window and
+      // growing it back has to land on the picture a never-resized run shows at
+      // the same elapsed time, rather than teleport every blob.
+      const run = (resize: boolean) => {
+        const dom = page();
+        createMetaballsBackground(dom.canvas, { random: makeRandom(11), shading });
+        dom.frame();
+        if (resize) {
+          dom.resizeTo(450, 300);
+          dom.resizeTo(900, 600);
+        }
+        dom.frame();
+        return dom.greys().join();
+      };
+
+      const steady = run(false);
+      vi.unstubAllGlobals();
+      expect(run(true)).toBe(steady);
+    });
+
+    it('eases the grab the same however the frames are chopped', () => {
+      // The mount-level mirror of the throw-damping test in metaballs.test.ts:
+      // the hold's blend weight runs on the clock timestep, whose `dt` is
+      // whatever the frame rate hands it, so the ease must land in the same
+      // place whether a stretch of time arrives whole or as two halves.
+      const run = (gaps: number[]) => {
+        const dom = page();
+        let queued: ((now: number) => void) | null = null;
+        let clock = 1000;
+        // Re-stubbed over page()'s own stubs, so each frame's gap - and with it
+        // `dt` - can be chosen per run instead of the harness's fixed 200ms.
+        vi.stubGlobal('performance', { now: () => clock });
+        vi.stubGlobal('requestAnimationFrame', (fn: (now: number) => void) => {
+          queued = fn;
+          return 1;
+        });
+        const pump = (gap: number) => {
+          clock += gap;
+          const fn = queued;
+          queued = null;
+          fn?.(clock);
+        };
+
+        createMetaballsBackground(dom.canvas, { random: makeRandom(11), shading, metaballs: { grabReach: 2 } });
+        dom.press(0.5, 0.5);
+        dom.dragTo(0.6, 0.5);
+        // The first gap only primes the clock - `dt` is zero until there is a
+        // previous frame to measure from - so both runs share it.
+        pump(50);
+        for (const gap of gaps) pump(gap);
+        return dom.greys().join();
+      };
+
+      const whole = run([100]);
+      vi.unstubAllGlobals();
+      expect(run([50, 50])).toBe(whole);
+    });
+
+    it('grabs nothing when the press lands on empty space', () => {
+      // A miss must leave no residue behind - no phantom hold, no throw that
+      // nothing ever advances - so a missed press, drag and release paints
+      // exactly what an untouched run paints.
+      const run = (touch: boolean) => {
+        const dom = page();
+        createMetaballsBackground(dom.canvas, {
+          random: makeRandom(11),
+          shading,
+          metaballs: { grabReach: 0.001 },
+        });
+        if (touch) {
+          dom.press(0.02, 0.02);
+          dom.dragTo(0.05, 0.03);
+        }
+        dom.frame();
+        if (touch) dom.release();
+        dom.frame();
+        return dom.greys().join();
+      };
+
+      const untouched = run(false);
+      vi.unstubAllGlobals();
+      expect(run(true)).toBe(untouched);
+    });
+  });
+
+  describe('plasma', () => {
+    /** Spread of a frame's greys about their mean - contrast, whatever the size. */
+    const contrast = (greys: number[]) => {
+      const mean = greys.reduce((sum, grey) => sum + grey, 0) / greys.length;
+      return greys.reduce((sum, grey) => sum + Math.abs(grey - mean), 0) / greys.length;
+    };
+
+    it('opens at full contrast rather than fading in from black', () => {
+      // The motion blur mixes each frame towards the last, and on mount there is
+      // no last: blending against the zeroed buffer used to paint the first
+      // frame at a fraction of its real contrast - permanently so under reduced
+      // motion, where that frame is the only one. The rebuild now seeds the
+      // blur, so the very first paint must already look like a settled one.
+      const dom = page();
+      createPlasmaBackground(dom.canvas, { random: makeRandom(5), shading });
+      const first = contrast(dom.greys());
+
+      for (let i = 0; i < 30; i++) dom.frame();
+
+      // 0.9, not a looser bound: the dither noise on a washed-out frame props
+      // its measured spread up to ~0.73 of a settled one, so anything below 0.9
+      // would let the bug this exists for straight back through.
+      expect(first).toBeGreaterThan(contrast(dom.greys()) * 0.9);
+    });
+
+    it('does not dip in contrast across a resize', () => {
+      // Every resize rebuilds the field, and a blur restarting from the zeroed
+      // buffer there was a visible darkening on every window drag.
+      const dom = page();
+      createPlasmaBackground(dom.canvas, { random: makeRandom(5), shading });
+      for (let i = 0; i < 30; i++) dom.frame();
+      const settled = contrast(dom.greys());
+
+      dom.resizeTo(1200, 500);
+
+      // The same 0.9 as the mount test, for the same reason: dither noise makes
+      // a washed frame measure ~0.73, and a slacker bound would not catch it.
+      expect(contrast(dom.greys())).toBeGreaterThan(settled * 0.9);
     });
   });
 

@@ -8,10 +8,16 @@
 // carried between frames, and is absent under reduced motion where there is
 // nothing to steer.
 
-import { COMMON_BACKGROUND_DEFAULTS, aspectOf, mountBackground, type CommonBackgroundOptions } from './background';
-import { withDefaults } from './options';
-import { type BackgroundHandle } from './render';
-import { TUNNEL_DEFAULTS, createTunnel, renderTunnel, tunnelCentre, type Tunnel, type TunnelParams } from './tunnel';
+import {
+  COMMON_BACKGROUND_DEFAULTS,
+  approach,
+  aspectOf,
+  mountBackground,
+  type CommonBackgroundOptions,
+} from './background.js';
+import { withDefaults } from './options.js';
+import { type BackgroundHandle } from './render.js';
+import { TUNNEL_DEFAULTS, createTunnel, renderTunnel, tunnelCentre, type Tunnel, type TunnelParams } from './tunnel.js';
 
 export interface TunnelBackgroundOptions extends CommonBackgroundOptions {
   /**
@@ -83,18 +89,20 @@ export function createTunnelBackground(
   let steerX = 0;
   let steerY = 0;
   let weight = 0;
-  const blended = new Float32Array(2);
+  // A plain tuple rather than a Float32Array, because it is also what `steer`
+  // returns - reused across frames, so steering allocates nothing per frame.
+  const blended: [number, number] = [0, 0];
   const natural = new Float32Array(2);
 
   /** The steer to draw with, or null to leave the tunnel on its own drift. */
-  function steer(): [number, number] | null {
+  function steer(): readonly [number, number] | null {
     if (!tunnel || weight <= 0) return null;
     tunnelCentre(elapsed, aspectOf(tunnel), params, tunnel.state, natural);
     // Blended rather than switched, so taking hold of the tunnel and letting go
     // of it are both gradual.
     blended[0] = natural[0] + (steerX - natural[0]) * weight;
     blended[1] = natural[1] + (steerY - natural[1]) * weight;
-    return [blended[0], blended[1]];
+    return blended;
   }
 
   return mountBackground(canvas, config, {
@@ -104,8 +112,13 @@ export function createTunnelBackground(
 
     rebuild(fieldW, fieldH) {
       // A resize rebuilds the field but keeps `elapsed`, so the flight does not
-      // jump back to the mouth of the tunnel on a window drag.
+      // jump back to the mouth of the tunnel on a window drag - and the state,
+      // which is resolution-independent, is carried over the same way so the
+      // whole picture does not teleport into a freshly rolled corridor. Only
+      // the first build randomizes.
+      const state = tunnel?.state;
       tunnel = createTunnel(fieldW, fieldH, config.random, params);
+      if (state) tunnel.state = state;
       renderTunnel(tunnel, params, elapsed, steer());
     },
 
@@ -117,9 +130,7 @@ export function createTunnelBackground(
       // Real seconds, unscaled by `speed`: taking hold of the tunnel should not
       // take longer because the flight happens to be slow.
       if (weight > 0 || steering) {
-        const towards = steering ? 1 : 0;
-        const rate = config.steerEase;
-        weight += (towards - weight) * (rate > 0 ? Math.min(1, dt / rate) : 1);
+        weight = approach(weight, steering ? 1 : 0, dt, config.steerEase);
         if (!steering && weight < 0.002) weight = 0;
       }
 

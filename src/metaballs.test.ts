@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { makeRandom } from './noise';
+import { makeRandom } from './noise.js';
 import {
   METABALL_DEFAULTS,
   ballsAt,
@@ -17,7 +17,7 @@ import {
   surface,
   type Ball,
   type Metaballs,
-} from './metaballs';
+} from './metaballs.js';
 
 const W = 80;
 const H = 60;
@@ -176,6 +176,26 @@ describe('ballsAt', () => {
     expect(wide[0].x / 2).toBeCloseTo(narrow[0].x, 6);
     expect(wide[0].y).toBeCloseTo(narrow[0].y, 6);
     expect(wide[0].radius).toBe(narrow[0].radius);
+  });
+
+  it('reuses the output array objects across calls', () => {
+    // The balls are recomputed every frame for the life of the page, so the
+    // array is a scratch buffer like the field: fresh objects on every call
+    // would be a small but steady trickle of garbage.
+    const out: Ball[] = [];
+    ballsAt(1, 1.5, METABALL_DEFAULTS, state, out);
+    const first = out[0];
+    ballsAt(2, 1.5, METABALL_DEFAULTS, state, out);
+    expect(out[0]).toBe(first);
+  });
+
+  it('shrinks the output rather than leaving stale balls behind', () => {
+    const fewer = randomizeMetaballs(makeRandom(4), { ...METABALL_DEFAULTS, count: 2 });
+    const out: Ball[] = [];
+    ballsAt(1, 1.5, METABALL_DEFAULTS, state, out);
+    expect(out).toHaveLength(METABALL_DEFAULTS.count);
+    ballsAt(1, 1.5, METABALL_DEFAULTS, fewer, out);
+    expect(out).toHaveLength(2);
   });
 
   it('does not fall into a short common period', () => {

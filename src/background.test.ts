@@ -10,12 +10,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   COMMON_BACKGROUND_DEFAULTS,
+  approach,
   aspectOf,
+  cellSpansOf,
   createAgeingList,
   mountBackground,
+  ringPulse,
   type BackgroundSpec,
   type CommonBackgroundOptions,
-} from './background';
+} from './background.js';
 
 type Listener = (event?: unknown) => void;
 
@@ -408,6 +411,97 @@ describe('mountBackground', () => {
       dom.advance(2000);
       expect(effect.calls).toEqual(['step']);
     });
+
+    it('starts animating when the preference is lifted after mount', () => {
+      // Sampled once, the preference would freeze the background for the life
+      // of the page however often the visitor changed their mind.
+      const dom = stub();
+      dom.reducedMotion = true;
+      const effect = spec();
+      const handle = mountBackground(dom.canvas, config(), effect)!;
+      effect.reset();
+
+      dom.reducedMotion = false;
+      dom.fire('media', 'change');
+      dom.advance(2000);
+
+      expect(effect.calls).toContain('step');
+      expect(handle.still).toBe(false);
+    });
+
+    it('falls still when the preference arrives after mount', () => {
+      const dom = stub();
+      const effect = spec();
+      const handle = mountBackground(dom.canvas, config(), effect)!;
+
+      dom.reducedMotion = true;
+      dom.fire('media', 'change');
+      effect.reset();
+      dom.advance(2000);
+
+      expect(effect.calls).toEqual([]);
+      expect(handle.still).toBe(true);
+      expect(handle.running).toBe(false);
+    });
+
+    it('does not resume a background the host had stopped', () => {
+      const dom = stub();
+      dom.reducedMotion = true;
+      const effect = spec();
+      const handle = mountBackground(dom.canvas, config(), effect)!;
+
+      handle.stop();
+      dom.reducedMotion = false;
+      dom.fire('media', 'change');
+      effect.reset();
+      dom.advance(2000);
+
+      // The visitor allowing motion is not the host asking for it.
+      expect(effect.calls).toEqual([]);
+      expect(handle.running).toBe(false);
+    });
+
+    it('wires up pointer handling when the preference is lifted', () => {
+      const dom = stub();
+      dom.reducedMotion = true;
+      let emissions = 0;
+      mountBackground(
+        dom.canvas,
+        config(),
+        spec({ drag: { spacing: 0.02, maxPerMove: 4, onEmit: () => emissions++ } })
+      );
+
+      dom.reducedMotion = false;
+      dom.fire('media', 'change');
+
+      dom.fire('window', 'pointerdown', { clientX: 10, clientY: 10, buttons: 1, pointerId: 1 });
+      expect(emissions).toBe(1);
+    });
+  });
+
+  describe('the handle state', () => {
+    it('reports running while the loop draws and not once stopped', () => {
+      const dom = stub();
+      const handle = mountBackground(dom.canvas, config(), spec())!;
+
+      expect(handle.running).toBe(true);
+      expect(handle.still).toBe(false);
+      handle.stop();
+      expect(handle.running).toBe(false);
+      handle.start();
+      expect(handle.running).toBe(true);
+    });
+
+    it('distinguishes still from merely stopped', () => {
+      const dom = stub();
+      dom.reducedMotion = true;
+      const handle = mountBackground(dom.canvas, config(), spec())!;
+
+      // `start()` refusing is only legible if the handle says why.
+      handle.start();
+      expect(handle.running).toBe(false);
+      expect(handle.still).toBe(true);
+    });
   });
 
   describe('pointer handling', () => {
@@ -602,5 +696,62 @@ describe('aspectOf', () => {
     // A field with no height would otherwise take a frame's worth of positions
     // down with it.
     expect(aspectOf({ w: 200, h: 0 })).toBe(1);
+  });
+});
+
+describe('cellSpansOf', () => {
+  it('spaces cell centres across the unit square', () => {
+    const [spanX, spanY] = cellSpansOf({ w: 5, h: 3 });
+    // Last cell centre lands exactly on the far edge of [0, aspect] x [0, 1].
+    expect(spanX * 4).toBeCloseTo(5 / 3, 10);
+    expect(spanY * 2).toBeCloseTo(1, 10);
+  });
+
+  it('hands back zero spans for a single-cell axis rather than dividing by zero', () => {
+    expect(cellSpansOf({ w: 1, h: 3 })[0]).toBe(0);
+    expect(cellSpansOf({ w: 3, h: 1 })[1]).toBe(0);
+  });
+});
+
+describe('approach', () => {
+  it('eases towards the target without overshooting', () => {
+    const eased = approach(0, 1, 0.1, 0.2);
+    expect(eased).toBeGreaterThan(0);
+    expect(eased).toBeLessThan(1);
+  });
+
+  it('is frame-rate independent: two half-steps equal one whole step', () => {
+    const whole = approach(0, 1, 0.2, 0.3);
+    const halved = approach(approach(0, 1, 0.1, 0.3), 1, 0.1, 0.3);
+    expect(halved).toBeCloseTo(whole, 12);
+  });
+
+  it('stays put for no time and jumps for no rate', () => {
+    expect(approach(0.4, 1, 0, 0.3)).toBe(0.4);
+    // A zero rate must not manufacture a NaN out of 0/0.
+    expect(approach(0.4, 1, 0, 0)).toBe(0.4);
+    expect(approach(0.4, 1, 0.1, 0)).toBe(1);
+  });
+});
+
+describe('ringPulse', () => {
+  it('peaks on the expanding radius', () => {
+    // At age 2 with speed 3 the ring sits at distance 6.
+    const on = ringPulse(6, 2, 3, 1, 10);
+    const off = ringPulse(9, 2, 3, 1, 10);
+    expect(on).toBeGreaterThan(off);
+    // On the band and half through life: exactly the squared fade remains.
+    expect(ringPulse(6, 5, 1.2, 1, 10)).toBeCloseTo(0.25, 10);
+  });
+
+  it('thins with the square of remaining life', () => {
+    const early = ringPulse(1, 1, 1, 1, 10);
+    const late = ringPulse(9, 9, 1, 1, 10);
+    expect(late).toBeLessThan(early);
+  });
+
+  it('is silent before birth and after death', () => {
+    expect(ringPulse(0, -0.1, 1, 1, 10)).toBe(0);
+    expect(ringPulse(0, 10, 1, 1, 10)).toBe(0);
   });
 });

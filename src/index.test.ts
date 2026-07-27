@@ -14,26 +14,26 @@
 
 import { describe, expect, it } from 'vitest';
 
-import * as index from './index';
-import * as background from './background';
-import * as dither from './dither';
-import * as driver from './driver';
-import * as metaballs from './metaballs';
-import * as noise from './noise';
-import * as options from './options';
-import * as plasmaWarp from './plasma-warp';
-import * as rain from './rain';
-import * as render from './render';
-import * as ridges from './ridges';
-import * as smoke from './smoke';
-import * as tunnel from './tunnel';
+import * as index from './index.js';
+import * as background from './background.js';
+import * as dither from './dither.js';
+import * as driver from './driver.js';
+import * as metaballs from './metaballs.js';
+import * as noise from './noise.js';
+import * as options from './options.js';
+import * as plasmaWarp from './plasma-warp.js';
+import * as rain from './rain.js';
+import * as render from './render.js';
+import * as ridges from './ridges.js';
+import * as smoke from './smoke.js';
+import * as tunnel from './tunnel.js';
 
-import * as metaballsBackground from './metaballs-background';
-import * as plasmaBackground from './plasma-background';
-import * as rainBackground from './rain-background';
-import * as ridgesBackground from './ridges-background';
-import * as smokeBackground from './smoke-background';
-import * as tunnelBackground from './tunnel-background';
+import * as metaballsBackground from './metaballs-background.js';
+import * as plasmaBackground from './plasma-background.js';
+import * as rainBackground from './rain-background.js';
+import * as ridgesBackground from './ridges-background.js';
+import * as smokeBackground from './smoke-background.js';
+import * as tunnelBackground from './tunnel-background.js';
 
 /**
  * Runtime values only. A type-only export leaves nothing behind at runtime, so

@@ -14,9 +14,9 @@
 //     lurch. Hence the fixed timestep: a slow frame makes the smoke drift
 //     slower, never further.
 
-import { COMMON_BACKGROUND_DEFAULTS, mountBackground, type CommonBackgroundOptions } from './background';
-import { withDefaults } from './options';
-import { type BackgroundHandle } from './render';
+import { COMMON_BACKGROUND_DEFAULTS, mountBackground, type CommonBackgroundOptions } from './background.js';
+import { withDefaults } from './options.js';
+import { type BackgroundHandle } from './render.js';
 import {
   SMOKE_DEFAULTS,
   applyJet,
@@ -31,7 +31,7 @@ import {
   type Jet,
   type SmokeParams,
   type Stroke,
-} from './smoke';
+} from './smoke.js';
 
 export interface SmokeBackgroundOptions extends CommonBackgroundOptions {
   /**
@@ -52,7 +52,11 @@ export interface SmokeBackgroundOptions extends CommonBackgroundOptions {
   maxSimCells: number;
   /** Redraw rate. The timestep is `1 / fps`, fixed - see the note above. */
   fps: number;
-  /** Steps run before the first paint, so it opens as smoke rather than fog. */
+  /**
+   * Steps run before the first paint, so it opens as smoke rather than fog.
+   * Only the first build pays this in full; a resize replaces smoke that was
+   * already moving and settles in a handful of steps instead.
+   */
   settleSteps: number;
   /** Solver parameters. Anything omitted falls back to `SMOKE_DEFAULTS`. */
   simulation: Partial<SmokeParams>;
@@ -77,6 +81,13 @@ export const SMOKE_BACKGROUND_DEFAULTS: SmokeBackgroundOptions = {
 };
 
 /**
+ * Steps a resize rebuild runs, against the ninety a first build does. Capped by
+ * `settleSteps` too, so nobody who configures a short settle gets a longer one
+ * on resize.
+ */
+const RESIZE_SETTLE_STEPS = 6;
+
+/**
  * Mounts the smoke on a canvas. The canvas keeps whatever size CSS gives it;
  * this only ever sets its backing-store dimensions.
  *
@@ -96,6 +107,7 @@ export function createSmokeBackground(
 
   let fluid: Fluid | null = null;
   let elapsed = 0;
+  let settledOnce = false;
 
   // Jets fire on their own schedule rather than every N frames, so they do not
   // fall into step with anything else on the page.
@@ -141,11 +153,18 @@ export function createSmokeBackground(
     rebuild(fieldW, fieldH) {
       fluid = createFluid(fieldW, fieldH);
 
-      // Resizing throws the simulation away, so run a fresh one up to speed
-      // rather than opening on still, unmoved source noise.
+      // Rebuilding throws the simulation away, so run the fresh one up to
+      // speed rather than opening on still, unmoved source noise. The full
+      // settle is only owed once, though: rebuild also fires on every size
+      // change during a window drag, and ninety synchronous steps per resize
+      // event is tens of milliseconds spent repeatedly while the browser is
+      // already struggling to keep up. A resize replaces smoke that was
+      // already moving, so a few steps to get the new field flowing is enough.
       computeSource(elapsed, params, state, fluid.source, fluid.w, fluid.h);
       fluid.density.set(fluid.source);
-      for (let i = 0; i < config.settleSteps; i++) step();
+      const steps = settledOnce ? Math.min(config.settleSteps, RESIZE_SETTLE_STEPS) : config.settleSteps;
+      for (let i = 0; i < steps; i++) step();
+      settledOnce = true;
     },
 
     field: () => fluid?.density ?? null,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { makeRandom } from './noise';
-import { orderedDither } from './dither';
+import { makeRandom } from './noise.js';
+import { orderedDither } from './dither.js';
 import {
   RIDGE_DEFAULTS,
   createRidges,
@@ -17,7 +17,7 @@ import {
   rowY,
   stepRidges,
   type Ridges,
-} from './ridges';
+} from './ridges.js';
 
 const W = 60;
 const H = 80;
@@ -191,6 +191,68 @@ describe('renderRidges', () => {
       }
     });
 
+    it('keeps a far bright fill from punching through a steep near flank', () => {
+      // The segment fill inks column x from min(prevY, y) downward, so a steep
+      // flank lays ink well above the sample itself. The horizon has to record
+      // that ink, not just the sample: under `fillRandom` with a `fillLevel`
+      // near 1 a farther row's fill can be brighter than a mid-depth line, and
+      // if the flank cells sit above the recorded horizon that fill paints
+      // straight over the flank that should be hiding it.
+      const params = {
+        ...RIDGE_DEFAULTS,
+        rows: 2,
+        overscan: 0,
+        fill: true,
+        fillRandom: true,
+        fillLevel: 1,
+        amplitude: 0.5,
+        focus: 4,
+      };
+
+      // travel 3.5 puts the near row at depth 0.25 - dim enough for a bright
+      // far fill to beat it under the max blend - and the far row at 0.75.
+      const travel = 3.5;
+      const nearZ = 4;
+      const farZ = 5;
+      const nearDepth = (nearZ - travel) / params.rows;
+      const nearBrightness = rowBrightness(nearDepth, params);
+      const base = rowY(nearDepth, H, params);
+      const amp = rowAmplitude(nearDepth, H, params);
+
+      const curve = (r: Ridges) =>
+        Array.from({ length: W }, (_, x) => base - ridgeHeight(x / (W - 1), nearZ, params, r.state) * amp);
+
+      // Hunt for a landscape where the failure can actually show: the far
+      // row's fill brighter than the near line, and a flank steep enough that
+      // the segment reaches several cells above its sample. Deterministic once
+      // found - the seeded generator always lands on the same one.
+      let r: Ridges | null = null;
+      for (let seed = 1; seed < 500 && !r; seed++) {
+        const candidate = createRidges(W, H, makeRandom(seed));
+        candidate.travel = travel;
+        if (fillShadeFor(farZ, candidate.state) * params.fillLevel <= nearBrightness + 0.02) continue;
+        const ys = curve(candidate);
+        if (ys.some((y, x) => x > 0 && Math.abs(y - ys[x - 1]) >= 4)) r = candidate;
+      }
+      expect(r).not.toBeNull();
+
+      renderRidges(r!, params);
+
+      // Every cell the near row inked - the whole segment per column, flanks
+      // included - must still hold the near line's brightness. The far row's
+      // brighter fill overwriting any of them is the punch-through.
+      const ys = curve(r!);
+      let previousY = ys[0];
+      for (let x = 0; x < W; x++) {
+        const lo = Math.max(0, Math.floor(Math.min(previousY, ys[x])));
+        const hi = Math.min(H - 1, Math.floor(Math.max(previousY, ys[x])));
+        for (let iy = lo; iy <= hi; iy++) {
+          expect(r!.field[iy * W + x]).toBeCloseTo(nearBrightness, 6);
+        }
+        previousY = ys[x];
+      }
+    });
+
     it('lets a tall near peak bite into the rows behind it', () => {
       // The characteristic notch. Counting lit cells in a band does not show
       // this: a tall near peak *adds* its own ink to the same band it hides
@@ -223,6 +285,85 @@ describe('renderRidges', () => {
       return levels.size > 1;
     });
     expect(textured).toBe(true);
+  });
+});
+
+describe('profile cache', () => {
+  // The terrain profile of a row depends only on things that hold still for
+  // its whole life, so it is sampled once and replayed. The one thing that
+  // must never be visible is the cache itself: a cached frame has to be
+  // pixel-identical to one computed from scratch.
+
+  it('draws a cached frame pixel-identical to a fresh one', () => {
+    const cold = seeded(3);
+    cold.travel = 4.5;
+    renderRidges(cold, RIDGE_DEFAULTS);
+
+    // The first render fills the cache; the second is served from it.
+    const warm = seeded(3);
+    warm.travel = 4.5;
+    renderRidges(warm, RIDGE_DEFAULTS);
+    renderRidges(warm, RIDGE_DEFAULTS);
+
+    expect(Array.from(warm.field)).toEqual(Array.from(cold.field));
+  });
+
+  it('replays profiles across travel without changing the picture', () => {
+    // Advancing less than a whole row keeps every profile alive, so the second
+    // render reuses all of them - and must still match an instance that has
+    // never cached anything at that travel.
+    const stepped = seeded(3);
+    renderRidges(stepped, RIDGE_DEFAULTS);
+    stepped.travel = 0.4;
+    renderRidges(stepped, RIDGE_DEFAULTS);
+
+    const fresh = seeded(3);
+    fresh.travel = 0.4;
+    renderRidges(fresh, RIDGE_DEFAULTS);
+
+    expect(Array.from(stepped.field)).toEqual(Array.from(fresh.field));
+  });
+
+  it('is dropped when the landscape is re-rolled', () => {
+    // Swapping the state is how randomize works, and stale profiles would
+    // silently keep drawing the old landscape.
+    const r = seeded(3);
+    renderRidges(r, RIDGE_DEFAULTS);
+    const before = Array.from(r.field);
+
+    r.state = randomizeRidges(makeRandom(99));
+    renderRidges(r, RIDGE_DEFAULTS);
+
+    const fresh = seeded(3);
+    fresh.state = randomizeRidges(makeRandom(99));
+    renderRidges(fresh, RIDGE_DEFAULTS);
+
+    // A different seed is a different landscape, drawn as if never cached.
+    expect(Array.from(r.field)).not.toEqual(before);
+    expect(Array.from(r.field)).toEqual(Array.from(fresh.field));
+  });
+
+  it('is dropped when the terrain params change', () => {
+    // Params arrive per call, so the same instance can legitimately be asked
+    // for a different terrain on the next frame.
+    const r = seeded(3);
+    renderRidges(r, RIDGE_DEFAULTS);
+
+    const busier = { ...RIDGE_DEFAULTS, xScale: 5.7 };
+    renderRidges(r, busier);
+
+    const fresh = seeded(3);
+    renderRidges(fresh, busier);
+
+    expect(Array.from(r.field)).toEqual(Array.from(fresh.field));
+  });
+
+  it('stays bounded however long the flight runs', () => {
+    // Rows that have left the live range are dropped, so the cache is a ring
+    // over the visible stack rather than a log of everywhere we have been.
+    const r = seeded(3);
+    for (let i = 0; i < 300; i++) stepRidges(r, RIDGE_DEFAULTS, 1 / 24);
+    expect(r.profiles.size).toBeLessThanOrEqual(RIDGE_DEFAULTS.rows + RIDGE_DEFAULTS.overscan + 1);
   });
 });
 

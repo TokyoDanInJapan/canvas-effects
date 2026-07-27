@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { BAYER_4X4, darken, orderedDither, quantise } from './dither';
+import { BAYER_4X4, darken, orderedDither, quantise } from './dither.js';
 
 describe('darken', () => {
   it('leaves the field alone at gamma 1', () => {

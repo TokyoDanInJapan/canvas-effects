@@ -26,6 +26,8 @@
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // metaballs-background.ts.
 
+import { aspectOf, cellSpansOf } from './background.js';
+
 export interface MetaballParams {
   /** How many balls. */
   count: number;
@@ -190,7 +192,12 @@ export function ballsAt(
   const halfX = aspect / 2;
   const halfY = 0.5;
 
-  out.length = 0;
+  // The array's objects are reused across calls rather than rebuilt, because
+  // this runs every frame for the life of the page and would otherwise leave a
+  // small but steady trail of garbage behind it.
+  while (out.length < state.radii.length) out.push({ x: 0, y: 0, radius: 0, strength: 0 });
+  out.length = state.radii.length;
+
   for (let i = 0; i < state.radii.length; i++) {
     let x = halfX + Math.sin(t * state.fx[i] + state.px[i]) * state.ax[i] * halfX * params.wander;
     let y = halfY + Math.sin(t * state.fy[i] + state.py[i]) * state.ay[i] * halfY * params.wander;
@@ -203,7 +210,11 @@ export function ballsAt(
       y += (override.y - y) * w;
     }
 
-    out.push({ x, y, radius: state.radii[i], strength: params.strength });
+    const ball = out[i];
+    ball.x = x;
+    ball.y = y;
+    ball.radius = state.radii[i];
+    ball.strength = params.strength;
   }
 }
 
@@ -376,13 +387,13 @@ export function renderMetaballs(
   override: BallOverride | null = null
 ): void {
   const { w, h, field, raw, balls, state } = metaballs;
-  const aspect = h > 0 ? w / h : 1;
+  const aspect = aspectOf(metaballs);
 
   ballsAt(time, aspect, params, state, balls, override);
   raw.fill(0);
 
-  const spanX = w > 1 ? aspect / (w - 1) : 0;
-  const spanY = h > 1 ? 1 / (h - 1) : 0;
+  // Once per frame, not per cell: it hands back a fresh tuple.
+  const [spanX, spanY] = cellSpansOf(metaballs);
 
   for (const ball of balls) {
     // Only the cells this ball can possibly reach.

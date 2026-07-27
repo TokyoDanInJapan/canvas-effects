@@ -13,13 +13,14 @@
 
 import {
   COMMON_BACKGROUND_DEFAULTS,
+  aspectOf,
   createAgeingList,
   mountBackground,
   type CommonBackgroundOptions,
-} from './background';
-import { withDefaults } from './options';
-import { type BackgroundHandle } from './render';
-import { darken } from './dither';
+} from './background.js';
+import { withDefaults } from './options.js';
+import { type BackgroundHandle } from './render.js';
+import { darken } from './dither.js';
 import {
   WARP_GRID_X,
   WARP_GRID_Y,
@@ -31,7 +32,7 @@ import {
   samplePlasma,
   type PlasmaWarpConfig,
   type Ripple,
-} from './plasma-warp';
+} from './plasma-warp.js';
 
 export interface PlasmaBackgroundOptions extends CommonBackgroundOptions {
   /**
@@ -44,7 +45,13 @@ export interface PlasmaBackgroundOptions extends CommonBackgroundOptions {
   fps: number;
   /** A multiplier on animation time. Slow, by default: this is meant to go unnoticed. */
   speed: number;
-  /** Motion blur - how far each frame mixes towards the previous one. */
+  /**
+   * Motion blur - the fraction of the previous frame each new one keeps, as
+   * measured at 24fps, the rate the defaults were tuned at. The actual
+   * per-frame factor is rescaled to the real frame interval, so the trail
+   * lasts the same wall-clock time whatever `fps` is set to; existing configs
+   * keep the look they were tuned for.
+   */
   blend: number;
   /** Edge of the plasma tile, in samples. Wrapped on both axes. */
   tileSize: number;
@@ -111,11 +118,21 @@ export function createPlasmaBackground(
   let previous = new Float32Array(0);
   let width = 0;
   let height = 0;
+  let aspect = 1;
   let elapsed = 0;
 
-  /** The expensive half: warp and sample the plasma, coarsely. */
-  function updateField(animTime: number) {
-    fillDisplacementGrid(animTime, params, state, grid, ripples.items);
+  /**
+   * The expensive half: warp and sample the plasma, coarsely.
+   *
+   * `keep` is the fraction of the previous frame that survives into this one -
+   * the blur, already rescaled by the caller to the frame interval it is
+   * stepping by. Zero means no blur at all, which is what a rebuild needs: the
+   * buffer it would blend against is freshly zeroed, and mixing towards black
+   * washes out the first frame - visibly so under reduced motion, where that
+   * first frame is the only one there will ever be.
+   */
+  function updateField(animTime: number, keep: number) {
+    fillDisplacementGrid(animTime, params, state, grid, ripples.items, aspect);
 
     const sx = width > 1 ? 1 / (width - 1) : 0;
     const sy = height > 1 ? 1 / (height - 1) : 0;
@@ -128,7 +145,7 @@ export function createPlasmaBackground(
         // Darkened here rather than at shade time, so the blur below carries
         // the biased value forward and successive frames agree with each other.
         const sampled = darken(samplePlasma(tile, config.tileSize, uv[0], uv[1]), config.gamma);
-        const smoothed = previous[index] + (sampled - previous[index]) * (1 - config.blend);
+        const smoothed = sampled + (previous[index] - sampled) * keep;
         previous[index] = smoothed;
         field[index] = smoothed;
       }
@@ -146,11 +163,17 @@ export function createPlasmaBackground(
     rebuild(fieldW, fieldH) {
       width = fieldW;
       height = fieldH;
+      // The real aspect of what is on screen, for the ripples: the warp domain
+      // keeps its fixed 4:3, but a click ring has to be a circle on the actual
+      // window, whatever shape that is.
+      aspect = aspectOf({ w: fieldW, h: fieldH });
       field = new Float32Array(fieldW * fieldH);
       previous = new Float32Array(fieldW * fieldH);
       // Filled as well as allocated, so the frame painted straight after a resize
-      // is this field rather than an empty one.
-      updateField(elapsed);
+      // is this field rather than an empty one - and with the blur off, because
+      // blending against the zeroed buffer would paint it at a fraction of its
+      // contrast. See `updateField`.
+      updateField(elapsed, 0);
     },
 
     field: () => field,
@@ -162,7 +185,11 @@ export function createPlasmaBackground(
       // Real seconds, deliberately unscaled by `speed`: a splash should not
       // slow down because the field it is disturbing is drifting slowly.
       ripples.advance(dt);
-      updateField(elapsed);
+      // `blend` is the per-frame keep factor at the 24fps the defaults were
+      // tuned at; raising it to `dt * 24` makes the trail a length of wall-clock
+      // time rather than a count of frames, so halving the frame rate no longer
+      // doubles the blur.
+      updateField(elapsed, Math.pow(config.blend, dt * 24));
     },
 
     drag: {

@@ -11,8 +11,8 @@ import {
   randomizePlasmaWarp,
   sampleDisplacementGrid,
   samplePlasma,
-} from './plasma-warp';
-import { makeRandom } from './noise';
+} from './plasma-warp.js';
+import { makeRandom } from './noise.js';
 
 const grid = () => new Float32Array(WARP_GRID_X * WARP_GRID_Y * 2);
 const seeded = () => randomizePlasmaWarp(makeRandom(12345));
@@ -355,14 +355,20 @@ describe('ripples', () => {
   });
 
   it('makes a circular ring, not an ellipse on a wide window', () => {
-    // Distances are aspect-corrected. Equal *screen* distances away from the
+    // Distances are corrected by the aspect the caller passes - the field's real
+    // one, not the fixed 4:3 warp domain. Equal *screen* distances away from the
     // centre should feel the same push, which means the horizontal offset has to
-    // be smaller by the aspect ratio.
-    const aspect = 4 / 3;
+    // be smaller by the aspect ratio. Asserted at 16:9 because that is the shape
+    // the old hard-wired 4:3 correction turned into an ellipse.
+    const aspect = 16 / 9;
     const r = ripple({ age: 0.5 });
     const radius = 0.5 * params.rippleSpeed;
-    const across = magnitude(0.5 + radius / aspect, 0.5, r);
-    const down = magnitude(0.5, 0.5 + radius, r);
+    const magnitudeAt = (su: number, sv: number) => {
+      rippleDisplacement(su, sv, r, params, out, aspect);
+      return Math.hypot(out[0], out[1]);
+    };
+    const across = magnitudeAt(0.5 + radius / aspect, 0.5);
+    const down = magnitudeAt(0.5, 0.5 + radius);
     expect(across).toBeCloseTo(down, 4);
   });
 
@@ -399,6 +405,28 @@ describe('ripples', () => {
         return moved.join(',');
       };
       expect(displaced(0)).toBe(displaced(140));
+    });
+
+    it('threads the caller aspect through to the ripples', () => {
+      // The wiring the ellipse bug hid behind: the grid accepted an aspect but a
+      // ripple that never received it would still make these two fields equal.
+      const state = seeded();
+      const wide = grid();
+      const square = grid();
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, wide, [ripple({ age: 0.4 })], 16 / 9);
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, square, [ripple({ age: 0.4 })], 1);
+      expect(Array.from(wide)).not.toEqual(Array.from(square));
+    });
+
+    it('leaves the warp domain itself on its fixed aspect', () => {
+      // Only the ripples follow the window. The field is meant to keep its shape
+      // across resizes, so with no ripple in play the aspect must change nothing.
+      const state = seeded();
+      const wide = grid();
+      const square = grid();
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, wide, [], 16 / 9);
+      fillDisplacementGrid(2, PLASMA_WARP_DEFAULTS, state, square, [], 1);
+      expect(Array.from(wide)).toEqual(Array.from(square));
     });
 
     it('adds several ripples together', () => {
