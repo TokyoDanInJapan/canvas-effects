@@ -221,7 +221,7 @@ function shading(): Shading {
 }
 
 const SMOKE_DIALS: Dial[] = [
-  { key: 'amplitude', label: 'amplitude', min: 0, max: 90, step: 1, value: 26, note: 'the readability dial' },
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 255, step: 1, value: 26, note: 'the readability dial' },
   { key: 'gamma', label: 'gamma', min: 0.6, max: 3, step: 0.05, value: SMOKE_BACKGROUND_DEFAULTS.gamma },
   {
     key: 'levels',
@@ -245,7 +245,7 @@ const SMOKE_DIALS: Dial[] = [
 ];
 
 const PLASMA_DIALS: Dial[] = [
-  { key: 'amplitude', label: 'amplitude', min: 0, max: 90, step: 1, value: 24, note: 'the readability dial' },
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 255, step: 1, value: 24, note: 'the readability dial' },
   { key: 'gamma', label: 'gamma', min: 0.6, max: 3, step: 0.05, value: PLASMA_BACKGROUND_DEFAULTS.gamma },
   {
     key: 'levels',
@@ -279,7 +279,7 @@ const PLASMA_DIALS: Dial[] = [
 ];
 
 const RAIN_DIALS: Dial[] = [
-  { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 52, note: 'the readability dial' },
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 255, step: 1, value: 52, note: 'the readability dial' },
   {
     key: 'levels',
     label: 'levels',
@@ -322,7 +322,7 @@ const RAIN_DIALS: Dial[] = [
 ];
 
 const RIDGE_DIALS: Dial[] = [
-  { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 46, note: 'the readability dial' },
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 255, step: 1, value: 46, note: 'the readability dial' },
   {
     key: 'levels',
     label: 'levels',
@@ -421,7 +421,7 @@ const RIDGE_DIALS: Dial[] = [
 ];
 
 const METABALL_DIALS: Dial[] = [
-  { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 34, note: 'the readability dial' },
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 255, step: 1, value: 34, note: 'the readability dial' },
   {
     key: 'levels',
     label: 'levels',
@@ -462,7 +462,7 @@ const METABALL_DIALS: Dial[] = [
 ];
 
 const TUNNEL_DIALS: Dial[] = [
-  { key: 'amplitude', label: 'amplitude', min: 0, max: 120, step: 1, value: 30, note: 'the readability dial' },
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 255, step: 1, value: 30, note: 'the readability dial' },
   {
     key: 'levels',
     label: 'levels',
