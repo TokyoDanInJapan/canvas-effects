@@ -7,8 +7,11 @@ notice them.
 No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All six together are 12.1 kB
 minified and gzipped.
 
+The `canvas-effects` name on the npm registry belongs to an unrelated package, so this one installs from GitHub - npm
+aliases a Git URL under the package's own name, and imports stay `from 'canvas-effects'`:
+
 ```bash
-npm install canvas-effects
+npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.2.0
 ```
 
 ## The effects
