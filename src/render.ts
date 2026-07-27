@@ -75,6 +75,22 @@ export interface Shading {
    * than a tint does, so read a long paragraph over it.
    */
   ramp?: ReadonlyArray<readonly [number, number, number]>;
+  /**
+   * The slice of the spectrum the palette actually uses, as `[min, max]`
+   * fractions of the full throw, each 0..1. `[0, 1]` - the default - is the
+   * whole thing; `[0.15, 0.8]` pins the darkest level above the floor and the
+   * lightest below the ceiling without touching `amplitude`.
+   *
+   * This is the dial for the two *ends* where `amplitude` is the dial for the
+   * *distance*: softening only the extremes with `amplitude` alone means
+   * retuning it and losing overall contrast. With a `ramp` it slices the ramp
+   * the same way, so `[0.5, 1]` reads only its upper half.
+   *
+   * One caution: a `min` above 0 moves the empty field's colour off `base`, so
+   * the canvas shows as a flat wash where there is no effect - which stops
+   * being invisible against the page. Raise it knowingly.
+   */
+  range?: readonly [number, number];
 }
 
 /**
@@ -90,13 +106,17 @@ export function buildPalette(shading: Shading, levels: number): Uint8ClampedArra
   const out = new Uint8ClampedArray(count * 3);
   const last = count > 1 ? count - 1 : 1;
 
+  // The ends of the used slice. Applied to the level, not the bytes, so it
+  // means the same thing to a grey run, a tint and a ramp.
+  const [rangeLo, rangeHi] = shading.range ?? [0, 1];
+
   if (shading.ramp && shading.ramp.length > 0) {
     const stops = shading.ramp;
     const span = stops.length - 1;
 
     for (let i = 0; i < count; i++) {
       const t = count > 1 ? i / last : 0;
-      const at = t * span;
+      const at = (rangeLo + t * (rangeHi - rangeLo)) * span;
       const lo = Math.min(Math.floor(at), span);
       const hi = Math.min(lo + 1, span);
       const f = at - lo;
@@ -112,7 +132,8 @@ export function buildPalette(shading: Shading, levels: number): Uint8ClampedArra
   const scale = tint ?? [1, 1, 1];
 
   for (let i = 0; i < count; i++) {
-    const level = count > 1 ? i / last : 0;
+    const t = count > 1 ? i / last : 0;
+    const level = rangeLo + t * (rangeHi - rangeLo);
     for (let c = 0; c < 3; c++) out[i * 3 + c] = base + level * amplitude * scale[c];
   }
   return out;
@@ -149,8 +170,16 @@ export function sameShading(a: Shading, b: Shading): boolean {
     }
   }
 
+  // An absent range and an explicit [0, 1] paint the same picture, which is
+  // the whole question this function answers.
+  const aRange = a.range ?? FULL_RANGE;
+  const bRange = b.range ?? FULL_RANGE;
+  if (aRange[0] !== bRange[0] || aRange[1] !== bRange[1]) return false;
+
   return true;
 }
+
+const FULL_RANGE: readonly [number, number] = [0, 1];
 
 /**
  * The greys used when nothing else is specified: near-black behind a dark page,
@@ -341,6 +370,7 @@ export function createSurface(
       amplitude: shading.amplitude,
       tint: shading.tint ? [shading.tint[0], shading.tint[1], shading.tint[2]] : undefined,
       ramp: shading.ramp ? shading.ramp.map((stop) => [stop[0], stop[1], stop[2]] as const) : undefined,
+      range: shading.range ? [shading.range[0], shading.range[1]] : undefined,
     };
     paletteLevels = levels;
     return palette;

@@ -184,6 +184,34 @@ describe('buildPalette', () => {
     });
   });
 
+  describe('range', () => {
+    it('pins both ends of the spectrum without touching the throw', () => {
+      const p = buildPalette({ base: 0, amplitude: 255, range: [0.2, 0.8] }, 5);
+      // Level 0 sits at 20% of the throw, the last level at 80%.
+      expect(triple(p, 0)).toEqual([51, 51, 51]);
+      expect(triple(p, 4)).toEqual([204, 204, 204]);
+      // The levels between are still evenly spaced across the slice.
+      expect(triple(p, 2)).toEqual([128, 128, 128]);
+    });
+
+    it('defaults to the whole spectrum, explicitly or by omission', () => {
+      const bare = buildPalette({ base: 18, amplitude: 40 }, 5);
+      const full = buildPalette({ base: 18, amplitude: 40, range: [0, 1] }, 5);
+      expect([...full]).toEqual([...bare]);
+    });
+
+    it('slices a ramp the same way it slices the greys', () => {
+      const stops: Array<[number, number, number]> = [
+        [0, 0, 0],
+        [200, 100, 50],
+      ];
+      // The upper half only: level 0 starts halfway along the ramp.
+      const p = buildPalette({ base: 0, amplitude: 0, ramp: stops, range: [0.5, 1] }, 3);
+      expect(triple(p, 0)).toEqual([100, 50, 25]);
+      expect(triple(p, 2)).toEqual([200, 100, 50]);
+    });
+  });
+
   it('returns one triple per level', () => {
     for (const levels of [1, 2, 5, 12]) {
       expect(buildPalette({ base: 18, amplitude: 40 }, levels)).toHaveLength(levels * 3);
@@ -275,6 +303,22 @@ describe('sameShading', () => {
     it('notices a ramp being lengthened or dropped', () => {
       expect(sameShading(fire, { ...fire, ramp: fire.ramp!.slice(0, 2) })).toBe(false);
       expect(sameShading(fire, { base: 18, amplitude: 0 })).toBe(false);
+    });
+  });
+
+  describe('a range', () => {
+    it('notices either end moving', () => {
+      const a: Shading = { base: 18, amplitude: 26, range: [0.1, 0.9] };
+      expect(sameShading(a, { ...a, range: [0.2, 0.9] })).toBe(false);
+      expect(sameShading(a, { ...a, range: [0.1, 0.8] })).toBe(false);
+      expect(sameShading(a, { base: 18, amplitude: 26, range: [0.1, 0.9] })).toBe(true);
+    });
+
+    it('treats the full range and no range as the same picture', () => {
+      const bare: Shading = { base: 18, amplitude: 26 };
+      expect(sameShading(bare, { ...bare, range: [0, 1] })).toBe(true);
+      expect(sameShading({ ...bare, range: [0, 1] }, bare)).toBe(true);
+      expect(sameShading(bare, { ...bare, range: [0, 0.9] })).toBe(false);
     });
   });
 });

@@ -195,6 +195,10 @@ function shading(): Shading {
   const chosen = RAMPS.find((r) => r.id === rampId);
   const stops = dark ? chosen?.dark : chosen?.light;
 
+  // The two ends of the spectrum, straight off their dials. `[0, 1]` is the
+  // whole throw, and what the library does with no `range` at all.
+  const range = [values.rangeLo ?? 0, values.rangeHi ?? 1] as [number, number];
+
   if (stops) {
     // `amplitude` still has to mean something with a ramp on, or the readability
     // dial would go dead. It scales each stop back towards the page colour.
@@ -208,12 +212,12 @@ function shading(): Shading {
           page[2] + (stop[2] - page[2]) * strength,
         ] as [number, number, number]
     );
-    return { base: page[0], amplitude: 0, ramp };
+    return { base: page[0], amplitude: 0, ramp, range };
   }
 
   return dark
-    ? { base: 18, amplitude: values.amplitude }
-    : { base: 255, amplitude: -Math.round(values.amplitude * 0.85) };
+    ? { base: 18, amplitude: values.amplitude, range }
+    : { base: 255, amplitude: -Math.round(values.amplitude * 0.85), range };
 }
 
 const SMOKE_DIALS: Dial[] = [
@@ -703,11 +707,26 @@ function buildRampPicker() {
   });
 }
 
+// Shared by every effect, because they are dials on the shading rather than on
+// any field: the two ends of the spectrum, as fractions of the full throw.
+const SHADING_DIALS: Dial[] = [
+  {
+    key: 'rangeLo',
+    label: 'darkest',
+    min: 0,
+    max: 0.9,
+    step: 0.05,
+    value: 0,
+    note: 'floor of the spectrum - above 0 the canvas shows as a wash',
+  },
+  { key: 'rangeHi', label: 'lightest', min: 0.1, max: 1, step: 0.05, value: 1, note: 'ceiling of the spectrum' },
+];
+
 function buildDials() {
   // A lookup rather than the ternary chain this used to be: six effects deep it
   // had stopped being readable, and the fall-through arm meant a new effect
   // silently showed the ridges' dials instead of failing to compile.
-  const list = DIALS[effect];
+  const list = [...DIALS[effect], ...SHADING_DIALS];
   values = Object.fromEntries(list.map((d) => [d.key, d.value]));
   dials.replaceChildren();
 

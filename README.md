@@ -136,6 +136,10 @@ createSmokeBackground(canvas, {
 - **`tint`** - optional `[r, g, b]` multipliers on `amplitude`. Only the modulation is tinted, never `base`, so the effect
   reads as coloured light over the page rather than a coloured rectangle.
 - **`ramp`** - optional colour ramp, below.
+- **`range`** - optional `[min, max]` slice of the spectrum, each 0..1. Pins how dark and how light the two ends are
+  allowed to go without retuning `amplitude` - `[0.15, 0.8]` softens both extremes; with a `ramp` it reads just that
+  slice of the ramp. A `min` above 0 moves the empty field off the page colour, so the canvas shows as a flat wash -
+  raise it knowingly.
 
 A theme change only re-shades; the field is untouched, because only the greys it maps onto have changed.
 
