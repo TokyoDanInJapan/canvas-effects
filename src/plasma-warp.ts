@@ -19,7 +19,8 @@
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // plasma-background.ts.
 
-import { fbm } from './noise';
+import { ringPulse } from './background.js';
+import { fbm } from './noise.js';
 
 /**
  * How much wider than tall the sampled domain is, before the warp touches it.
@@ -29,6 +30,10 @@ import { fbm } from './noise';
  * that is what it means: a fixed 4:3, not the window's actual aspect. The field
  * is abstract and only has to look unstretched, and making it follow the window
  * would mean the pattern changed shape every time the window did.
+ *
+ * Ripples are the exception: they are anchored on the screen and have to read
+ * as circles on it, so their distance correction takes the real aspect from the
+ * caller and only falls back to this.
  */
 const DOMAIN_ASPECT = 4 / 3;
 
@@ -158,34 +163,33 @@ export interface Ripple {
  *
  * The ring is a Gaussian band about the expanding radius, so the disturbance
  * travels outward instead of the whole disc heaving at once. Distances are
- * aspect-corrected, or the ring would be an ellipse on a wide window.
+ * corrected by `aspect` - the actual field aspect, not the fixed domain one -
+ * or the ring would be an ellipse on anything but a 4:3 window.
  */
 export function rippleDisplacement(
   su: number,
   sv: number,
   ripple: Ripple,
   params: PlasmaWarpConfig,
-  out: Float32Array
+  out: Float32Array,
+  aspect: number = DOMAIN_ASPECT
 ): void {
   out[0] = 0;
   out[1] = 0;
 
-  const life = params.rippleLifetime;
-  if (ripple.age < 0 || ripple.age >= life) return;
+  // `ringPulse` would return zero anyway; returning first keeps a dead ripple
+  // from paying for a square root per grid cell, and guarantees an exact zero
+  // rather than a signed one.
+  if (ripple.age < 0 || ripple.age >= params.rippleLifetime) return;
 
-  const dx = (su - ripple.x) * DOMAIN_ASPECT;
+  const dx = (su - ripple.x) * aspect;
   const dy = sv - ripple.y;
   const distance = Math.sqrt(dx * dx + dy * dy);
   // Dead centre has no outward direction to push along.
   if (distance < 1e-6) return;
 
-  const radius = ripple.age * params.rippleSpeed;
-  const offset = (distance - radius) / params.rippleWidth;
-  const band = Math.exp(-offset * offset);
-
-  // Squared, so a ripple thins out rather than stopping abruptly.
-  const fade = 1 - ripple.age / life;
-  const push = params.rippleStrength * ripple.strength * band * fade * fade;
+  const pulse = ringPulse(distance, ripple.age, params.rippleSpeed, params.rippleWidth, params.rippleLifetime);
+  const push = params.rippleStrength * ripple.strength * pulse;
 
   out[0] = (dx / distance) * push;
   out[1] = (dy / distance) * push;
@@ -205,13 +209,18 @@ export function rippleDisplacement(
  * inner fields against each other, which is what makes it evolve in place.
  *
  * The output routinely leaves `[0, 1]`; the caller is expected to wrap it.
+ *
+ * `aspect` is the real aspect of the field being drawn, used only to keep the
+ * ripples circular on screen; the warp domain itself stays on the fixed
+ * `DOMAIN_ASPECT` - see the note on that constant.
  */
 export function fillDisplacementGrid(
   animTime: number,
   params: PlasmaWarpConfig,
   state: PlasmaWarpSeed,
   gridOut: Float32Array,
-  ripples: readonly Ripple[] = []
+  ripples: readonly Ripple[] = [],
+  aspect: number = DOMAIN_ASPECT
 ): void {
   const { frequency, warp1, warp2, octaves, spread } = params;
   const { seeds, offsets, drift, churn } = state;
@@ -250,13 +259,20 @@ export function fillDisplacementGrid(
       // Applied to the finished coordinate, in screen space, so a ripple stays
       // where it was clicked while the field drifts underneath it.
       for (let k = 0; k < ripples.length; k++) {
-        rippleDisplacement(su, sv, ripples[k], params, ripple);
+        rippleDisplacement(su, sv, ripples[k], params, ripple, aspect);
         gridOut[idx] += ripple[0];
         gridOut[idx + 1] += ripple[1];
       }
     }
   }
 }
+
+/**
+ * Plain lerp, at module scope rather than inside `sampleDisplacementGrid`: that
+ * function runs once per field cell per frame - tens of thousands of calls -
+ * and a closure allocated on every one of them is avoidable garbage.
+ */
+const mix = (a: number, b: number, k: number) => a + (b - a) * k;
 
 /**
  * Bilinear lookup into the warp grid, writing `[u, v]` into `out`.
@@ -277,8 +293,6 @@ export function sampleDisplacementGrid(grid: Float32Array, s: number, t: number,
   const i10 = i00 + 2;
   const i01 = i00 + WARP_GRID_X * 2;
   const i11 = i01 + 2;
-
-  const mix = (a: number, b: number, k: number) => a + (b - a) * k;
 
   out[0] = mix(mix(grid[i00], grid[i10], fx), mix(grid[i01], grid[i11], fx), fy);
   out[1] = mix(mix(grid[i00 + 1], grid[i10 + 1], fx), mix(grid[i01 + 1], grid[i11 + 1], fx), fy);

@@ -23,7 +23,7 @@
 // amplitude`, so the effect modulates a page colour rather than replacing it -
 // which is what lets body text sit directly on top of one of these.
 
-import { darken, orderedDither, quantise } from './dither';
+import { orderedDither, quantise } from './dither.js';
 
 /** How the field's 0..1 levels are mapped onto actual greys. */
 export interface Shading {
@@ -179,6 +179,18 @@ export interface BackgroundHandle {
   stop(): void;
   /** Re-reads the shading and repaints. Call after changing the theme by hand. */
   refresh(): void;
+  /**
+   * True while the loop is actually drawing - false when stopped, paused by a
+   * hidden tab, or held still by reduced motion. A host building a play/pause
+   * control reads this rather than shadowing the state itself.
+   */
+  readonly running: boolean;
+  /**
+   * True while the effect is a single still frame because the visitor asked for
+   * less motion. Distinct from `running`, because `start()` silently refusing is
+   * otherwise indistinguishable from the loop merely not having begun.
+   */
+  readonly still: boolean;
   readonly canvas: HTMLCanvasElement;
 }
 
@@ -267,8 +279,11 @@ export function planSurface(
   // the shading touches each output pixel once.
   if (fieldW * fieldH > options.maxFieldCells) {
     const shrink = Math.sqrt((fieldW * fieldH) / options.maxFieldCells);
-    fieldW = Math.max(2, Math.round(fieldW / shrink));
-    fieldH = Math.max(2, Math.round(fieldH / shrink));
+    // Floored, not rounded: rounding can nudge both axes up and land a cell or
+    // two over the ceiling this promises to be. The cost is at most one cell
+    // per axis under budget, which the ceiling was never precise about anyway.
+    fieldW = Math.max(2, Math.floor(fieldW / shrink));
+    fieldH = Math.max(2, Math.floor(fieldH / shrink));
   }
 
   return { width, height, fieldW, fieldH };
@@ -307,6 +322,48 @@ export function createSurface(
   let mapX: AxisMap = { i0: new Int32Array(0), i1: new Int32Array(0), t: new Float32Array(0) };
   let mapY: AxisMap = mapX;
 
+  // The palette only changes when the shading does - a handful of times in a
+  // page's life - so rebuilding it per frame was the one steady-state allocation
+  // in the frame path. Cached against a *copy* of the shading, because the
+  // natural way to drive `shade` is to mutate one shading object in place, and
+  // comparing an object against itself would wave every change through.
+  let palette: Uint8ClampedArray | null = null;
+  let paletteShading: Shading | null = null;
+  let paletteLevels = 0;
+
+  function paletteFor(shading: Shading, levels: number): Uint8ClampedArray {
+    if (palette && paletteLevels === levels && paletteShading && sameShading(shading, paletteShading)) {
+      return palette;
+    }
+    palette = buildPalette(shading, levels);
+    paletteShading = {
+      base: shading.base,
+      amplitude: shading.amplitude,
+      tint: shading.tint ? [shading.tint[0], shading.tint[1], shading.tint[2]] : undefined,
+      ramp: shading.ramp ? shading.ramp.map((stop) => [stop[0], stop[1], stop[2]] as const) : undefined,
+    };
+    paletteLevels = levels;
+    return palette;
+  }
+
+  // Gamma via a table rather than `Math.pow` per pixel, which was the dominant
+  // per-pixel cost for the effects that use it - millions of transcendentals a
+  // second. A thousand entries is far below what the 5-level quantise plus
+  // dither can distinguish. Identity gamma skips the table entirely, so the
+  // effects that bias their own fields lose nothing to it.
+  const GAMMA_STEPS = 1024;
+  let gammaTable: Float32Array | null = null;
+  let gammaFor = 1;
+
+  function gammaTableFor(gamma: number): Float32Array {
+    if (!gammaTable || gammaFor !== gamma) {
+      gammaTable = new Float32Array(GAMMA_STEPS);
+      for (let i = 0; i < GAMMA_STEPS; i++) gammaTable[i] = Math.pow(i / (GAMMA_STEPS - 1), gamma);
+      gammaFor = gamma;
+    }
+    return gammaTable;
+  }
+
   function resize(): boolean {
     // The element's own box rather than the viewport, so a canvas that is not
     // full-screen still renders at its true size.
@@ -342,9 +399,10 @@ export function createSurface(
     // One triple per level, resolved out here. Greyscale, tinted and ramped
     // shadings all collapse to the same table, so the inner loop does not care
     // which was asked for.
-    const palette = buildPalette(shading, levels);
+    const palette = paletteFor(shading, levels);
     const steps = levels > 1 ? levels - 1 : 1;
     const dithering = options.dither;
+    const gammaLut = gamma === 1 ? null : gammaTableFor(gamma);
 
     const x0s = mapX.i0;
     const x1s = mapX.i1;
@@ -363,7 +421,9 @@ export function createSurface(
 
         const top = field[rowA + x0] + (field[rowA + x1] - field[rowA + x0]) * tx;
         const bottom = field[rowB + x0] + (field[rowB + x1] - field[rowB + x0]) * tx;
-        const value = darken(top + (bottom - top) * ty, gamma);
+        let value = top + (bottom - top) * ty;
+        value = value < 0 ? 0 : value > 1 ? 1 : value;
+        if (gammaLut) value = gammaLut[(value * (GAMMA_STEPS - 1) + 0.5) | 0];
 
         // Both branches return a value already snapped to the palette, so this
         // index is exact rather than a re-quantisation. The condition is

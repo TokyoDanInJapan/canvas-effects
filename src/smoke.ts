@@ -38,7 +38,7 @@
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // smoke-background.ts.
 
-import { fbm } from './noise';
+import { fbm } from './noise.js';
 
 export interface SmokeParams {
   /** Jacobi iterations in the pressure solve. More is rounder, and slower. */
@@ -330,9 +330,13 @@ export function sampleBounds(field: Float32Array, w: number, h: number, x: numbe
  * sharp edges it is meant to preserve, producing values outside the original
  * range - here, densities outside 0..1, and eventually a field that blows up.
  */
+// Scratch for the limiter below, hoisted so the advection stays allocation-free
+// like every other per-frame pass.
+const macCormackBounds = new Float32Array(2);
+
 export function advectMacCormack(fluid: Fluid, dt: number): void {
   const { density, densityNext, densityBack, u, v, w, h } = fluid;
-  const bounds = new Float32Array(2);
+  const bounds = macCormackBounds;
 
   advect(density, densityNext, u, v, w, h, dt);
   advect(densityNext, densityBack, u, v, w, h, -dt);
@@ -377,12 +381,17 @@ export function computeDivergence(fluid: Fluid): void {
  * easier to reason about and faster here. It converges more slowly per pass,
  * but the pressure only has to be approximately right - what matters is that
  * most of the divergence goes away.
+ *
+ * The solve starts from whatever pressure is already in the struct rather than
+ * from zero. The flow evolves smoothly, so last frame's pressure is an
+ * excellent initial guess, and the iterations spend their budget refining it
+ * instead of rediscovering it. Only the pressure *gradient* is ever used, so
+ * any stale component the guess carries is harmless to the projection.
  */
 export function solvePressure(fluid: Fluid, iterations: number): void {
   const { divergence, left, right, up, down } = fluid;
   let p = fluid.pressure;
   let next = fluid.pressureNext;
-  p.fill(0);
 
   for (let iter = 0; iter < iterations; iter++) {
     for (let k = 0; k < p.length; k++) {
@@ -459,6 +468,40 @@ export function applyBuoyancy(fluid: Fluid, strength: number, dt: number): void 
 }
 
 /**
+ * The stirring and source noise is evaluated every this-many cells per axis and
+ * bilinearly interpolated to full resolution - the same trick the plasma warp
+ * uses for its warp grid. Both fields are far lower frequency than the grid (a
+ * stirScale of 2.4 spreads one noise feature across dozens of cells), so the
+ * interpolation error is invisible, while the three full-resolution fbm sweeps
+ * it replaces were the single most expensive per-frame work in the solver.
+ */
+const NOISE_STRIDE = 4;
+
+// Scratch for the coarse noise evaluations, grown on demand and reused across
+// frames so the per-frame path stays allocation-free.
+let coarseA = new Float32Array(0);
+let coarseB = new Float32Array(0);
+
+function growCoarseGrids(cells: number): void {
+  if (coarseA.length < cells) {
+    coarseA = new Float32Array(cells);
+    coarseB = new Float32Array(cells);
+  }
+}
+
+/**
+ * Bilinear read of one coarse noise grid. `row0` and `row1` are the offsets of
+ * the coarse rows bracketing the point; `ci`, `tx` and `ty` place it between
+ * them. The grids carry one row and column of overhang, so `ci + 1` and `row1`
+ * are always in range.
+ */
+function sampleCoarse(grid: Float32Array, row0: number, row1: number, ci: number, tx: number, ty: number): number {
+  const top = grid[row0 + ci] + (grid[row0 + ci + 1] - grid[row0 + ci]) * tx;
+  const bottom = grid[row1 + ci] + (grid[row1 + ci + 1] - grid[row1 + ci]) * tx;
+  return top + (bottom - top) * ty;
+}
+
+/**
  * A light, slowly changing stir.
  *
  * Buoyancy on its own is a closed loop - it drives the flow from the density,
@@ -471,13 +514,35 @@ export function applyStirring(fluid: Fluid, params: SmokeParams, state: SmokeSta
   const { seeds, offsets } = state;
   const t = time * stirChurn;
 
+  // One column and row beyond the last stride, so every cell has four coarse
+  // samples to interpolate between.
+  const cw = Math.ceil(w / NOISE_STRIDE) + 1;
+  const ch = Math.ceil(h / NOISE_STRIDE) + 1;
+  growCoarseGrids(cw * ch);
+
+  for (let cj = 0; cj < ch; cj++) {
+    const y = ((cj * NOISE_STRIDE) / h) * stirScale;
+    for (let ci = 0; ci < cw; ci++) {
+      const x = ((ci * NOISE_STRIDE) / w) * stirScale;
+      const c = cj * cw + ci;
+      coarseA[c] = fbm(x + offsets[0] + t, y + offsets[1], seeds[0], octaves);
+      coarseB[c] = fbm(x + offsets[2], y + offsets[3] - t, seeds[1], octaves);
+    }
+  }
+
   for (let j = 0; j < h; j++) {
-    const y = (j / h) * stirScale;
+    const cy = j / NOISE_STRIDE;
+    const cj = cy | 0;
+    const ty = cy - cj;
+    const row0 = cj * cw;
+    const row1 = row0 + cw;
     for (let i = 0; i < w; i++) {
+      const cx = i / NOISE_STRIDE;
+      const ci = cx | 0;
+      const tx = cx - ci;
       const k = j * w + i;
-      const x = (i / w) * stirScale;
-      u[k] += (fbm(x + offsets[0] + t, y + offsets[1], seeds[0], octaves) - 0.5) * stir * dt;
-      v[k] += (fbm(x + offsets[2], y + offsets[3] - t, seeds[1], octaves) - 0.5) * stir * dt;
+      u[k] += (sampleCoarse(coarseA, row0, row1, ci, tx, ty) - 0.5) * stir * dt;
+      v[k] += (sampleCoarse(coarseB, row0, row1, ci, tx, ty) - 0.5) * stir * dt;
     }
   }
 }
@@ -619,8 +684,14 @@ export interface Stroke {
  * unconditionally stable - but which tears a hole straight through the field
  * and takes several seconds to settle. The cap keeps a hard drag emphatic
  * rather than destructive.
+ *
+ * The timestep is deliberately unused. Strokes are emitted per distance
+ * dragged, so the number of them already scales with how finely time is
+ * sliced - scaling each one by `dt` as well would make the same drag half as
+ * strong at double the frame rate. The parameter stays for symmetry with
+ * `applyJet`, where the timestep genuinely belongs.
  */
-export function applyStroke(fluid: Fluid, stroke: Stroke, params: SmokeParams, dt: number): void {
+export function applyStroke(fluid: Fluid, stroke: Stroke, params: SmokeParams, _dt: number): void {
   const { w, h, u, v } = fluid;
   const drag = Math.hypot(stroke.dx, stroke.dy);
   if (drag < 1e-4) return;
@@ -646,8 +717,8 @@ export function applyStroke(fluid: Fluid, stroke: Stroke, params: SmokeParams, d
 
       // Smooth to nothing at the rim, so the cursor has no hard edge.
       const falloff = (1 - squared / radius2) ** 2;
-      u[k] += pushU * falloff * dt * 24;
-      v[k] += pushV * falloff * dt * 24;
+      u[k] += pushU * falloff;
+      v[k] += pushV * falloff;
     }
   }
 }
@@ -672,11 +743,33 @@ export function computeSource(
   const dy = drift[1] * time;
   const span = sourceHigh - sourceLow || 1;
 
+  // Coarse-plus-interpolate, exactly as in `applyStirring`. Only the raw noise
+  // is interpolated; the smoothstep shaping stays per cell, so the edges it
+  // cuts are as sharp as they were at full resolution - and the edges are the
+  // point of the shaping.
+  const cw = Math.ceil(w / NOISE_STRIDE) + 1;
+  const ch = Math.ceil(h / NOISE_STRIDE) + 1;
+  growCoarseGrids(cw * ch);
+
+  for (let cj = 0; cj < ch; cj++) {
+    const y = ((cj * NOISE_STRIDE) / h) * sourceScale + dy;
+    for (let ci = 0; ci < cw; ci++) {
+      const x = ((ci * NOISE_STRIDE) / w) * sourceScale + dx;
+      coarseA[cj * cw + ci] = fbm(x + offsets[2], y + offsets[0], seeds[2], octaves);
+    }
+  }
+
   for (let j = 0; j < h; j++) {
-    const y = (j / h) * sourceScale + dy;
+    const cy = j / NOISE_STRIDE;
+    const cj = cy | 0;
+    const ty = cy - cj;
+    const row0 = cj * cw;
+    const row1 = row0 + cw;
     for (let i = 0; i < w; i++) {
-      const x = (i / w) * sourceScale + dx;
-      const raw = fbm(x + offsets[2], y + offsets[0], seeds[2], octaves);
+      const cx = i / NOISE_STRIDE;
+      const ci = cx | 0;
+      const tx = cx - ci;
+      const raw = sampleCoarse(coarseA, row0, row1, ci, tx, ty);
       const t = Math.min(1, Math.max(0, (raw - sourceLow) / span));
       out[j * w + i] = t * t * (3 - 2 * t);
     }

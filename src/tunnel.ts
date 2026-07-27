@@ -66,6 +66,8 @@
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // tunnel-background.ts.
 
+import { aspectOf, cellSpansOf } from './background.js';
+
 const TAU = Math.PI * 2;
 
 export interface TunnelParams {
@@ -458,7 +460,7 @@ export function renderTunnel(
   steer: readonly [number, number] | null = null
 ): void {
   const { w, h, field, tile, state, centre, coords, axis } = tunnel;
-  const aspect = h > 0 ? w / h : 1;
+  const aspect = aspectOf(tunnel);
 
   tunnelCentre(time, aspect, params, state, centre);
   const cx = steer ? steer[0] : centre[0];
@@ -466,24 +468,29 @@ export function renderTunnel(
 
   const travel = time * params.speed + state.offset;
   const spin = time * params.twist;
-  const spanX = w > 1 ? aspect / (w - 1) : 0;
-  const spanY = h > 1 ? 1 / (h - 1) : 0;
+
+  // Only the fractional parts reach the per-cell coordinates. `travel` and
+  // `spin` both grow without bound, and the coordinates pass through a
+  // Float32Array - after a day of travel its precision is a visible fraction of
+  // a tile cell, so the texture would quantise on a long-running page. The tile
+  // repeats every whole unit on both axes and `repeats` is a whole number, so
+  // dropping the whole parts changes nothing the sampler can see.
+  const travelFrac = travel - Math.floor(travel);
+  const spinFrac = spin - Math.floor(spin);
+
+  const [spanX, spanY] = cellSpansOf(tunnel);
 
   if (params.bend !== 0) {
     // The depths this frame can see, from the furthest corner to the edge of the
     // vignette. Taken from the actual centre rather than assumed, because a steer
-    // can push it right up against one side and put a corner much further away.
-    let far = 0;
-    for (const [x, y] of [
-      [0, 0],
-      [aspect, 0],
-      [0, 1],
-      [aspect, 1],
-    ]) {
-      const d = Math.hypot(x - cx, y - cy);
-      if (d > far) far = d;
-    }
+    // can push it right up against one side and put a corner much further away -
+    // and the furthest corner is simply the larger reach on each axis.
+    const far = Math.hypot(Math.max(cx, aspect - cx), Math.max(cy, 1 - cy));
     const near = Math.max(params.vignette, params.coreRadius);
+    // Built on the unreduced travel, in float64: the axis is deliberately not
+    // periodic, so its shape has to come from the true depth. The table is then
+    // shifted into the reduced coordinate the cells actually pass, so lookups
+    // still land on the right samples.
     fillAxisTable(
       axis.table,
       params.depth / Math.max(far, near) + travel,
@@ -492,13 +499,14 @@ export function renderTunnel(
       state,
       axis.scratch
     );
+    axis.table.from -= travel - travelFrac;
   }
 
   for (let j = 0; j < h; j++) {
     const dy = j * spanY - cy;
 
     for (let i = 0; i < w; i++) {
-      wallCoords(i * spanX - cx, dy, params, travel, spin, coords, axis);
+      wallCoords(i * spanX - cx, dy, params, travelFrac, spinFrac, coords, axis);
       field[j * w + i] = sampleTile(tile, params.tileSize, coords[0], coords[1]) * vignetteAt(coords[2], params);
     }
   }

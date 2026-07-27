@@ -14,9 +14,9 @@ import {
   createAgeingList,
   mountBackground,
   type CommonBackgroundOptions,
-} from './background';
-import { withDefaults } from './options';
-import { type BackgroundHandle } from './render';
+} from './background.js';
+import { withDefaults } from './options.js';
+import { type BackgroundHandle } from './render.js';
 import {
   RIDGE_DEFAULTS,
   createRidges,
@@ -26,7 +26,7 @@ import {
   type RidgeParams,
   type Ridges,
   type Wobble,
-} from './ridges';
+} from './ridges.js';
 
 export interface RidgesBackgroundOptions extends CommonBackgroundOptions {
   /** CSS pixels per rendered pixel - one dither cell, and one line thickness. */

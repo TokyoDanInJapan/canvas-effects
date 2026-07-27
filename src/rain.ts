@@ -28,6 +28,8 @@
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // rain-background.ts.
 
+import { ringPulse } from './background.js';
+
 export interface RainParams {
   /**
    * How fast a trail fades, as a proportion lost per second. This is what sets
@@ -261,7 +263,12 @@ function sampleField(field: Float32Array, w: number, h: number, x: number, y: nu
   const fx = Math.floor(x);
   const fy = Math.floor(y);
   const tx = x - fx;
-  const ty = y - fy;
+  // Above the top the row indices clamp to 0 and 1, so a surviving fraction
+  // would blend downward into the field instead of holding the edge row - the
+  // fraction has to clamp with them. Below the bottom both indices land on the
+  // last row and the fraction cancels on its own, so only this side needs a
+  // guard.
+  const ty = fy < 0 ? 0 : y - fy;
 
   const x0 = (((fx % w) + w) % w) | 0;
   const x1 = (x0 + 1) % w;
@@ -296,45 +303,53 @@ function sampleField(field: Float32Array, w: number, h: number, x: number, y: nu
  */
 export function distortField(rain: Rain, distortions: readonly Distortion[], params: RainParams): Float32Array {
   const { w, h, field, warped } = rain;
-  if (distortions.length === 0) return field;
+
+  // Expiry is settled here, once, rather than per cell in the loops below. The
+  // ring's shape lives in `ringPulse`, shared with the plasma's ripples; the
+  // only per-distortion constant it does not cover is the peak push, so that
+  // is the one hoisted alongside.
+  const live = distortions
+    .filter((d) => d.age >= 0 && d.age < params.distortLifetime)
+    .map((d) => ({ x: d.x, y: d.y, age: d.age, amp: params.distortStrength * d.strength }));
+  if (live.length === 0) return field;
 
   warped.set(field);
-
-  // How far out a ring can still be felt: its radius plus a few widths of tail.
-  const reach = (d: Distortion) => d.age * params.distortSpeed + params.distortWidth * 3;
 
   let x0 = w;
   let x1 = -1;
   let y0 = h;
   let y1 = -1;
-  for (const d of distortions) {
-    if (d.age < 0 || d.age >= params.distortLifetime) continue;
-    const r = reach(d);
+  for (const d of live) {
+    // How far out a ring can still be felt: its radius plus a few widths of
+    // tail.
+    const r = d.age * params.distortSpeed + params.distortWidth * 3;
     x0 = Math.min(x0, Math.floor(d.x - r));
     x1 = Math.max(x1, Math.ceil(d.x + r));
     y0 = Math.max(0, Math.min(y0, Math.floor(d.y - r)));
     y1 = Math.min(h - 1, Math.max(y1, Math.ceil(d.y + r)));
   }
   if (x1 < x0 || y1 < y0) return field;
+  // A grown ring's box can be wider than the field. Left to lap round, the
+  // wrap below would write the same output column twice - and the second
+  // visit, at a different distance from the centre, would overwrite the first
+  // with the far ring's push. One field's width of columns is every column.
+  if (x1 - x0 >= w) x1 = x0 + w - 1;
 
   for (let y = y0; y <= y1; y++) {
     for (let xi = x0; xi <= x1; xi++) {
       let ox = 0;
       let oy = 0;
 
-      for (const d of distortions) {
-        if (d.age < 0 || d.age >= params.distortLifetime) continue;
-
-        const dx = xi - d.x;
+      for (const d of live) {
+        // The lanes wrap sideways, so distance must too: a cell feels the
+        // nearest image of the centre, not the literal coordinate difference.
+        const dx = ((((xi - d.x + w * 0.5) % w) + w) % w) - w * 0.5;
         const dy = y - d.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         if (distance < 1e-6) continue;
 
-        const radius = d.age * params.distortSpeed;
-        const offset = (distance - radius) / params.distortWidth;
-        const band = Math.exp(-offset * offset);
-        const fade = 1 - d.age / params.distortLifetime;
-        const push = params.distortStrength * d.strength * band * fade * fade;
+        const push =
+          d.amp * ringPulse(distance, d.age, params.distortSpeed, params.distortWidth, params.distortLifetime);
 
         ox += (dx / distance) * push;
         oy += (dy / distance) * push;

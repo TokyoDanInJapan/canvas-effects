@@ -16,34 +16,49 @@
 // reaching this file, and for two releases a caller could use `maxRipples`
 // without being able to name a `Ripple`.
 
-export { createSmokeBackground, SMOKE_BACKGROUND_DEFAULTS, type SmokeBackgroundOptions } from './smoke-background';
+export { createSmokeBackground, SMOKE_BACKGROUND_DEFAULTS, type SmokeBackgroundOptions } from './smoke-background.js';
 
-export { createPlasmaBackground, PLASMA_BACKGROUND_DEFAULTS, type PlasmaBackgroundOptions } from './plasma-background';
+export {
+  createPlasmaBackground,
+  PLASMA_BACKGROUND_DEFAULTS,
+  type PlasmaBackgroundOptions,
+} from './plasma-background.js';
 
-export { createRainBackground, RAIN_BACKGROUND_DEFAULTS, type RainBackgroundOptions } from './rain-background';
+export { createRainBackground, RAIN_BACKGROUND_DEFAULTS, type RainBackgroundOptions } from './rain-background.js';
 
-export { createRidgesBackground, RIDGES_BACKGROUND_DEFAULTS, type RidgesBackgroundOptions } from './ridges-background';
+export {
+  createRidgesBackground,
+  RIDGES_BACKGROUND_DEFAULTS,
+  type RidgesBackgroundOptions,
+} from './ridges-background.js';
 
 export {
   createMetaballsBackground,
   METABALLS_BACKGROUND_DEFAULTS,
   type MetaballsBackgroundOptions,
-} from './metaballs-background';
+} from './metaballs-background.js';
 
-export { createTunnelBackground, TUNNEL_BACKGROUND_DEFAULTS, type TunnelBackgroundOptions } from './tunnel-background';
+export {
+  createTunnelBackground,
+  TUNNEL_BACKGROUND_DEFAULTS,
+  type TunnelBackgroundOptions,
+} from './tunnel-background.js';
 
 // The mount harness the six above are built on, for writing a seventh.
 export {
   mountBackground,
   createAgeingList,
   aspectOf,
+  cellSpansOf,
+  approach,
+  ringPulse,
   COMMON_BACKGROUND_DEFAULTS,
   type AgeingList,
   type Ageing,
   type BackgroundSpec,
   type CommonBackgroundOptions,
   type Timestep,
-} from './background';
+} from './background.js';
 
 export {
   createSurface,
@@ -55,7 +70,7 @@ export {
   type Shading,
   type Surface,
   type SurfaceOptions,
-} from './render';
+} from './render.js';
 
 export {
   createDriver,
@@ -64,7 +79,7 @@ export {
   type DragOptions,
   type Driver,
   type DriverOptions,
-} from './driver';
+} from './driver.js';
 
 // The falling-streak field.
 export {
@@ -78,7 +93,7 @@ export {
   type Rain,
   type RainLane,
   type RainParams,
-} from './rain';
+} from './rain.js';
 
 // The ridgeline landscape.
 export {
@@ -98,7 +113,7 @@ export {
   type RidgeState,
   type Ridges,
   type Wobble,
-} from './ridges';
+} from './ridges.js';
 
 // The implicit surface.
 export {
@@ -120,7 +135,7 @@ export {
   type MetaballState,
   type Metaballs,
   type Throw,
-} from './metaballs';
+} from './metaballs.js';
 
 // The tunnel projection.
 export {
@@ -141,13 +156,13 @@ export {
   type Tunnel,
   type TunnelParams,
   type TunnelState,
-} from './tunnel';
+} from './tunnel.js';
 
-export { withDefaults } from './options';
+export { withDefaults } from './options.js';
 
-export { BAYER_4X4, darken, orderedDither, quantise } from './dither';
+export { BAYER_4X4, darken, orderedDither, quantise } from './dither.js';
 
-export { fbm, hash2, makeRandom, valueNoise } from './noise';
+export { fbm, hash2, makeRandom, valueNoise } from './noise.js';
 
 // The fluid solver, in the order a frame uses it.
 export {
@@ -176,7 +191,7 @@ export {
   type SmokeParams,
   type SmokeState,
   type Stroke,
-} from './smoke';
+} from './smoke.js';
 
 // The domain warp.
 export {
@@ -192,4 +207,4 @@ export {
   type PlasmaWarpConfig,
   type PlasmaWarpSeed,
   type Ripple,
-} from './plasma-warp';
+} from './plasma-warp.js';

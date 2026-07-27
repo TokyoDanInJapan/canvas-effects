@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { makeRandom } from './noise';
+import { makeRandom } from './noise.js';
 import {
   TUNNEL_DEFAULTS,
   axisAt,
@@ -18,7 +18,7 @@ import {
   type Tunnel,
   type TunnelParams,
   type TunnelState,
-} from './tunnel';
+} from './tunnel.js';
 
 const W = 90;
 const H = 60;
@@ -542,6 +542,53 @@ describe('renderTunnel', () => {
       expect(Number.isFinite(out[0])).toBe(true);
       expect(Number.isFinite(out[1])).toBe(true);
     }
+  });
+
+  it('keeps the wall crisp at a huge travel: only the fraction reaches float32', () => {
+    // `travel` grows without bound while the wall coordinate passes through a
+    // Float32Array, whose spacing after a day or two of travel is a visible
+    // fraction of a tile cell - the texture would quantise on a long-running
+    // page. The tile repeats every whole unit, so a travel of exactly a million
+    // must give the very field a travel of zero does.
+    const p = { ...params, sway: 0, bend: 0, twist: 0, speed: 1 };
+    const aged = seeded(6);
+    aged.state.offset = 0;
+    const young = seeded(6);
+    young.state.offset = 0;
+    renderTunnel(aged, p, 1e6);
+    renderTunnel(young, p, 0);
+    expect(Array.from(aged.field)).toEqual(Array.from(young.field));
+
+    // The spin grows and reduces the same way: a million whole turns of a wall
+    // that repeats a whole number of times around is no turn at all.
+    const spinning = { ...params, sway: 0, bend: 0, speed: 0, twist: 1 };
+    const spun = seeded(6);
+    renderTunnel(spun, spinning, 1e6);
+    const still = seeded(6);
+    renderTunnel(still, spinning, 0);
+    expect(Array.from(spun.field)).toEqual(Array.from(still.field));
+  });
+
+  it('bends by the true depth even though the sampled coordinate is reduced', () => {
+    // The axis is deliberately not periodic - reducing its depth coordinate
+    // would make the corridor repeat - so the table is built on the unreduced
+    // travel and then shifted into the reduced coordinate the cells sample
+    // with. Pin both halves of that: the table's origin sits at the reduced
+    // travel, and its first sample is the exact axis at the unreduced depth.
+    const p = { ...params, sway: 0, speed: 1 };
+    const t = seeded(6);
+    t.state.offset = 0;
+    renderTunnel(t, p, 1000.25);
+
+    const aspect = W / H;
+    const far = Math.hypot(aspect / 2, 0.5);
+    const head = p.depth / Math.max(far, Math.max(p.vignette, p.coreRadius));
+    expect(t.axis.table.from).toBeCloseTo(head + 0.25, 6);
+
+    const exact = new Float32Array(2);
+    axisAt(head + 1000.25, p, t.state, exact);
+    expect(t.axis.table.values[0]).toBeCloseTo(exact[0], 5);
+    expect(t.axis.table.values[1]).toBeCloseTo(exact[1], 5);
   });
 
   it('normalises a tile with no range in it', () => {

@@ -61,6 +61,11 @@ export function createDriver(canvas: HTMLCanvasElement, options: DriverOptions):
   let lastDrawn = 0;
   const teardown: Array<() => void> = [];
 
+  // A non-positive rate would make the interval infinite, so the loop would
+  // report itself running and never draw. Taken as one frame a second instead:
+  // a bad value is visible as a slideshow, a silent one is a mystery.
+  const interval = 1000 / (options.fps > 0 ? options.fps : 1);
+
   // Whether the *host* wants the loop running, as distinct from whether it
   // currently is. Hiding the tab stops the loop without changing this, so
   // showing it again resumes only what was running beforehand.
@@ -74,8 +79,13 @@ export function createDriver(canvas: HTMLCanvasElement, options: DriverOptions):
 
   function tick(now: number) {
     frame = requestAnimationFrame(tick);
-    if (now - lastDrawn < 1000 / options.fps) return;
-    lastDrawn = now;
+    if (now - lastDrawn < interval) return;
+    // Carry the remainder rather than snapping to `now`. Snapping rounds every
+    // gap up to a whole display frame, so a 24fps target on a 60Hz screen
+    // actually draws at 20fps - and at some other rate on a 120Hz one. Keeping
+    // the overshoot means the *average* interval is the target, whatever the
+    // refresh rate happens to be.
+    lastDrawn = now - ((now - lastDrawn) % interval);
     options.onFrame();
   }
 
@@ -220,6 +230,11 @@ export interface DragOptions {
  */
 export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions): () => void {
   let dragging = false;
+  // Which pointer the drag belongs to. Listening on the window means every
+  // finger on the screen reports here, and treating them as one path would
+  // re-anchor the drag on each second touch and then zigzag between the two.
+  // The first pointer down owns the drag until it is released.
+  let pointer = -1;
   let lastX = 0;
   let lastY = 0;
 
@@ -234,13 +249,26 @@ export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions
   function release() {
     if (!dragging) return;
     dragging = false;
+    pointer = -1;
     options.onRelease?.();
   }
 
+  /** A release, but only from the pointer that owns the drag. */
+  function onUp(event: PointerEvent) {
+    if (event.pointerId === pointer) release();
+  }
+
   function onDown(event: PointerEvent) {
+    if (dragging) return;
     const at = locate(event);
     if (!at) return;
+    // Only a press inside the canvas box starts a drag. The window-level
+    // listener sees every press on the page, and `locate` happily extrapolates
+    // beyond the box, so without this a canvas smaller than the viewport would
+    // react - at an aliased position - to clicks that have nothing to do with it.
+    if (at[0] < 0 || at[0] > 1 || at[1] < 0 || at[1] > 1) return;
     dragging = true;
+    pointer = event.pointerId;
     lastX = at[0];
     lastY = at[1];
     // No step on a press: there is nothing to have moved from yet.
@@ -248,15 +276,23 @@ export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions
   }
 
   function onMove(event: PointerEvent) {
+    if (!dragging || event.pointerId !== pointer) return;
     // `buttons` as well as our own flag: a pointerup that lands outside the
     // window never reaches us, and without this the drag would stay stuck on.
-    if (!dragging || event.buttons === 0) {
+    if (event.buttons === 0) {
       release();
       return;
     }
 
     const at = locate(event);
     if (!at) return;
+
+    // A drag that wanders off the canvas walks along its edge rather than
+    // beyond it, which keeps every emission inside the 0..1 the callback is
+    // promised - the box is convex, so a segment between two clamped points
+    // never leaves it.
+    at[0] = at[0] < 0 ? 0 : at[0] > 1 ? 1 : at[0];
+    at[1] = at[1] < 0 ? 0 : at[1] > 1 ? 1 : at[1];
 
     // Measured in pixels against the shorter side, so `spacing` means the same
     // thing whichever way round the window is.
@@ -296,8 +332,8 @@ export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions
 
   window.addEventListener('pointerdown', onDown, { passive: true });
   window.addEventListener('pointermove', onMove, { passive: true });
-  window.addEventListener('pointerup', release, { passive: true });
-  window.addEventListener('pointercancel', release, { passive: true });
+  window.addEventListener('pointerup', onUp, { passive: true });
+  window.addEventListener('pointercancel', onUp, { passive: true });
   // A drag interrupted by the tab losing focus should not resume on return.
   window.addEventListener('blur', release);
 
@@ -307,8 +343,8 @@ export function createDragSource(canvas: HTMLCanvasElement, options: DragOptions
     release();
     window.removeEventListener('pointerdown', onDown);
     window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', release);
-    window.removeEventListener('pointercancel', release);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
     window.removeEventListener('blur', release);
   };
 }

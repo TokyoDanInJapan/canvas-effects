@@ -15,8 +15,8 @@
 // again. Hand it a field and it will size it, shade it, animate it and clean up
 // after it.
 
-import { createDragSource, createDriver, prefersReducedMotion, type DragOptions } from './driver';
-import { createSurface, defaultShading, sameShading, type BackgroundHandle, type Shading } from './render';
+import { createDragSource, createDriver, prefersReducedMotion, type DragOptions } from './driver.js';
+import { createSurface, defaultShading, sameShading, type BackgroundHandle, type Shading } from './render.js';
 
 /**
  * The options every background takes, whatever it draws.
@@ -157,7 +157,13 @@ export function mountBackground(
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return null;
 
-  const still = config.respectReducedMotion && prefersReducedMotion();
+  let still = config.respectReducedMotion && prefersReducedMotion();
+
+  // Whether the *host* wants the animation, as distinct from whether reduced
+  // motion currently permits it. Mounting implies wanting; only the handle's
+  // own `stop` withdraws it. Kept here rather than leaning on the driver's
+  // notion, because the driver forgets intent when reduced motion stops it.
+  let hostWants = true;
 
   const surface = createSurface(canvas, ctx, {
     pixelSize: config.pixelSize,
@@ -189,7 +195,9 @@ export function mountBackground(
 
   /** Seconds to advance by on this frame. */
   function elapse(): number {
-    if (spec.timestep === 'fixed') return 1 / config.fps;
+    // The same guard the driver applies: a non-positive rate would hand a
+    // fixed-step effect an infinite dt.
+    if (spec.timestep === 'fixed') return 1 / (config.fps > 0 ? config.fps : 1);
 
     const now = performance.now();
     // Clamped, so a backgrounded tab does not lurch on return.
@@ -220,23 +228,64 @@ export function mountBackground(
   });
 
   // Reduced motion gets one still frame and no listeners: an effect that cannot
-  // be dragged is the point, not an oversight.
-  const stopDragging = spec.drag && config.interactive && !still ? createDragSource(canvas, spec.drag) : null;
+  // be dragged is the point, not an oversight. Wired lazily, because reduced
+  // motion is a live preference rather than a fact about the mount - see below.
+  let stopDragging: (() => void) | null = null;
+
+  function wireDrag() {
+    if (!stopDragging && spec.drag && config.interactive && !still) {
+      stopDragging = createDragSource(canvas, spec.drag);
+    }
+  }
+
+  function unwireDrag() {
+    stopDragging?.();
+    stopDragging = null;
+  }
+
+  // The preference is watched, not sampled once: a visitor who turns reduced
+  // motion off after the page loads used to get a permanently frozen background
+  // with no recovery short of remounting, because `start()` kept refusing.
+  // The colour scheme already gets a listener; motion deserves the same.
+  let unwatchMotion: (() => void) | null = null;
+  if (config.respectReducedMotion && typeof window.matchMedia === 'function') {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onMotionChange = () => {
+      // Sampled fresh rather than read off `query`: the one moment this runs is
+      // the moment the cached `matches` stops being true.
+      still = prefersReducedMotion();
+      if (still) {
+        unwireDrag();
+        driver.stop();
+      } else {
+        wireDrag();
+        if (hostWants) {
+          lastNow = 0;
+          driver.start();
+        }
+      }
+    };
+    query.addEventListener('change', onMotionChange);
+    unwatchMotion = () => query.removeEventListener('change', onMotionChange);
+  }
 
   readShading();
   surface.resize();
   rebuild();
   shade();
+  wireDrag();
   if (!still) driver.start();
 
   return {
     canvas,
     start() {
+      hostWants = true;
       if (still) return;
       lastNow = 0;
       driver.start();
     },
     stop() {
+      hostWants = false;
       driver.stop();
       lastNow = 0;
     },
@@ -246,8 +295,15 @@ export function mountBackground(
     },
     destroy() {
       driver.destroy();
-      stopDragging?.();
+      unwatchMotion?.();
+      unwireDrag();
       spec.destroy?.();
+    },
+    get running() {
+      return driver.running;
+    },
+    get still() {
+      return still;
     },
   };
 }
@@ -307,4 +363,50 @@ export function createAgeingList<T extends Ageing>(max: number, lifetime: number
  */
 export function aspectOf(field: { w: number; h: number }): number {
   return field.h > 0 ? field.w / field.h : 1;
+}
+
+/**
+ * The distance between adjacent cell centres of a field, per axis, in the unit
+ * square the field effects position things in - `[0, aspect] x [0, 1]`.
+ *
+ * Guarded for a single-cell axis, which would otherwise divide by zero; a zero
+ * span is the callers' cue to take a whole axis rather than compute a range.
+ * The guards are the subtle part, which is why this exists once rather than
+ * being re-derived next to each render loop.
+ */
+export function cellSpansOf(field: { w: number; h: number }): [number, number] {
+  const aspect = aspectOf(field);
+  return [field.w > 1 ? aspect / (field.w - 1) : 0, field.h > 1 ? 1 / (field.h - 1) : 0];
+}
+
+/**
+ * Moves `current` towards `target` the way a first-order lag does, sized to
+ * `dt` so the ease's speed does not depend on the frame rate: two half-steps
+ * land exactly where one whole step does. `rate` is the time constant, roughly
+ * the seconds a step takes to cover its first 63%.
+ *
+ * The naive `current + (target - current) * (dt / rate)` is not this - its
+ * speed varies with how `dt` happens to be chopped up, and it snaps rather
+ * than eases the moment `dt` outgrows `rate`.
+ */
+export function approach(current: number, target: number, dt: number, rate: number): number {
+  if (dt <= 0) return current;
+  if (rate <= 0) return target;
+  return current + (target - current) * (1 - Math.exp(-dt / rate));
+}
+
+/**
+ * The strength, 0..1, of an expanding Gaussian ring at `distance` from its
+ * centre: a band about the radius the ring has grown to by `age`, thinning as
+ * the square of remaining life so it dies away rather than stopping abruptly.
+ *
+ * This is the one disturbance shape the pointer leaves behind - the plasma's
+ * ripples and the rain's lens distortions are both it - and each effect keeps
+ * only its own coordinate space and strength scaling around this.
+ */
+export function ringPulse(distance: number, age: number, speed: number, width: number, lifetime: number): number {
+  if (age < 0 || age >= lifetime) return 0;
+  const offset = (distance - age * speed) / width;
+  const fade = 1 - age / lifetime;
+  return Math.exp(-offset * offset) * fade * fade;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { makeRandom } from './noise';
+import { makeRandom } from './noise.js';
 import {
   RAIN_DEFAULTS,
   createRain,
@@ -11,7 +11,7 @@ import {
   type Distortion,
   type Rain,
   type RainLane,
-} from './rain';
+} from './rain.js';
 
 const W = 40;
 const H = 30;
@@ -420,6 +420,29 @@ describe('distortField', () => {
     expect(farSide).toBeGreaterThan(0);
   });
 
+  it('pushes symmetrically when the ring outgrows a narrow field', () => {
+    // At this age the bounding box is wider than the field, so every column
+    // falls inside it more than once. Each output column must be written
+    // exactly once, from the nearest image of the centre - a last-write-wins
+    // overlap hands cells the far ring's push instead of their own, and that
+    // shows up as a left/right asymmetry about the centre column.
+    const rain = patterned();
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        // Mirror-symmetric about column 20 even across the wrap, and varying
+        // on both axes so displacement in any direction is detectable.
+        rain.field[y * W + x] = 0.5 + 0.5 * Math.cos(((x - 20) / W) * 2 * Math.PI) * Math.cos((y / H) * 2 * Math.PI);
+      }
+    }
+
+    const out = distortField(rain, [spot({ x: 20, y: 15, age: 0.3 })], params);
+    for (let y = 0; y < H; y++) {
+      for (let k = 1; k < W / 2; k++) {
+        expect(out[y * W + 20 + k]).toBeCloseTo(out[y * W + 20 - k], 5);
+      }
+    }
+  });
+
   it('clamps vertically rather than wrapping, unlike the smoke', () => {
     // Rain has a top it falls from and a bottom it retires at. Wrapping y would
     // drag the bottom of the screen back up into the top.
@@ -430,6 +453,26 @@ describe('distortField', () => {
     const out = distortField(rain, [spot({ x: 20, y: 1, age: 0.2 })], params);
     // Nothing from the bright bottom row should appear near the top.
     for (let x = 0; x < W; x++) expect(out[x]).toBeLessThan(0.5);
+  });
+
+  it('holds the edge row when a read lands past the top or bottom', () => {
+    // A distortion centred just off an edge pushes the edge row's reads out of
+    // the field. Those reads must land on the edge row itself: a partial clamp
+    // that pins the row indices but leaves the blend fraction live mixes the
+    // edge row with its neighbour, dimming it for no physical reason. The age
+    // puts the ring's peak exactly on the edge cell, so the read overshoots by
+    // several rows.
+    const age = 5 / RAIN_DEFAULTS.distortSpeed;
+
+    const top = patterned();
+    top.field.fill(0);
+    for (let x = 0; x < W; x++) top.field[x] = 1;
+    expect(distortField(top, [spot({ x: 20, y: -5, age })], params)[20]).toBeCloseTo(1, 6);
+
+    const bottom = patterned();
+    bottom.field.fill(0);
+    for (let x = 0; x < W; x++) bottom.field[(H - 1) * W + x] = 1;
+    expect(distortField(bottom, [spot({ x: 20, y: H - 1 + 5, age })], params)[(H - 1) * W + 20]).toBeCloseTo(1, 6);
   });
 
   it('adds several distortions together', () => {
@@ -445,5 +488,14 @@ describe('distortField', () => {
       const out = distortField(rain, [d], params);
       for (const v of out) expect(Number.isFinite(v)).toBe(true);
     }
+  });
+
+  it('skips the pass entirely when a live ring cannot reach any row', () => {
+    // Rows clamp rather than wrap, so a ring far enough above or below the
+    // field touches nothing - and the untouched case must return `field`
+    // itself, not pay for a copy into the warped buffer.
+    const rain = patterned();
+    expect(distortField(rain, [spot({ y: -100 })], params)).toBe(rain.field);
+    expect(distortField(rain, [spot({ y: H + 100 })], params)).toBe(rain.field);
   });
 });

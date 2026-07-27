@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { withDefaults } from './options';
+import { withDefaults } from './options.js';
 
 const DEFAULTS = { gamma: 1, levels: 5, label: 'smoke', flag: true };
 

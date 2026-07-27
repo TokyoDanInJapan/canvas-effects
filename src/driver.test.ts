@@ -10,7 +10,13 @@
 // `stop()` both depend on.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDragSource, createDriver, prefersReducedMotion, type DragOptions, type DriverOptions } from './driver';
+import {
+  createDragSource,
+  createDriver,
+  prefersReducedMotion,
+  type DragOptions,
+  type DriverOptions,
+} from './driver.js';
 
 type Listener = (event?: unknown) => void;
 
@@ -217,6 +223,34 @@ describe('createDriver', () => {
     expect(drawn).toBe(1);
     expect(driver.running).toBe(true);
     dom.advance(1200);
+    expect(drawn).toBe(2);
+  });
+
+  it('averages the target rate on a refresh rate it does not divide', () => {
+    const dom = stubDom();
+    let drawn = 0;
+    const driver = createDriver(canvas, options({ fps: 24, onFrame: () => drawn++ }));
+
+    driver.start();
+    // Two seconds of 60Hz timestamps, which 24fps does not divide: the naive
+    // throttle - snap `lastDrawn` to `now` - rounds every gap up to a whole
+    // display frame and lands on exactly 20fps here. Carrying the remainder
+    // keeps the average at the target.
+    for (let i = 0; i <= 120; i++) dom.advance(1000 + (i * 1000) / 60);
+    expect(drawn).toBeGreaterThanOrEqual(47);
+    expect(drawn).toBeLessThanOrEqual(50);
+  });
+
+  it('treats a non-positive fps as one frame a second rather than none', () => {
+    const dom = stubDom();
+    let drawn = 0;
+    const driver = createDriver(canvas, options({ fps: 0, onFrame: () => drawn++ }));
+
+    driver.start();
+    dom.advance(1000);
+    dom.advance(1500);
+    expect(drawn).toBe(1);
+    dom.advance(2000);
     expect(drawn).toBe(2);
   });
 
@@ -440,8 +474,10 @@ describe('createDragSource', () => {
     return { emissions, stop, releases: () => releases };
   }
 
-  const down = (x: number, y: number) => ({ clientX: x, clientY: y, buttons: 1 }) as PointerEvent;
-  const move = (x: number, y: number, buttons = 1) => ({ clientX: x, clientY: y, buttons }) as PointerEvent;
+  const down = (x: number, y: number) => ({ clientX: x, clientY: y, buttons: 1, pointerId: 1 }) as PointerEvent;
+  const move = (x: number, y: number, buttons = 1) =>
+    ({ clientX: x, clientY: y, buttons, pointerId: 1 }) as PointerEvent;
+  const up = () => ({ pointerId: 1 }) as PointerEvent;
 
   it('emits on press, normalised to the canvas box', () => {
     const dom = stubDom();
@@ -612,13 +648,80 @@ describe('createDragSource', () => {
     });
   });
 
+  describe('the canvas box', () => {
+    it('ignores a press outside it', () => {
+      // The listener is on the window, so a canvas smaller than the viewport
+      // sees every press on the page; only ones on the canvas should count.
+      const dom = stubDom();
+      const drag = source(boxed(1000, 500));
+
+      dom.fire('window', 'pointerdown', down(1200, 250));
+      dom.fire('window', 'pointerdown', down(500, -40));
+      expect(drag.emissions).toHaveLength(0);
+      expect(drag.releases()).toBe(0);
+
+      // Presses on the box still work afterwards.
+      dom.fire('window', 'pointerdown', down(500, 250));
+      expect(drag.emissions).toHaveLength(1);
+    });
+
+    it('clamps a drag that wanders off the edge', () => {
+      const dom = stubDom();
+      const drag = source(boxed(1000, 500));
+
+      dom.fire('window', 'pointerdown', down(900, 250));
+      dom.fire('window', 'pointermove', move(1300, 250));
+
+      expect(drag.emissions.length).toBeGreaterThan(1);
+      for (const emission of drag.emissions) {
+        expect(emission.u).toBeGreaterThanOrEqual(0);
+        expect(emission.u).toBeLessThanOrEqual(1);
+        expect(emission.v).toBeGreaterThanOrEqual(0);
+        expect(emission.v).toBeLessThanOrEqual(1);
+      }
+    });
+  });
+
+  describe('a second pointer', () => {
+    const second = (x: number, y: number) => ({ clientX: x, clientY: y, buttons: 1, pointerId: 2 }) as PointerEvent;
+
+    it('does not re-anchor a drag in progress', () => {
+      const dom = stubDom();
+      const drag = source(boxed(1000, 500));
+
+      dom.fire('window', 'pointerdown', down(0, 250));
+      dom.fire('window', 'pointerdown', second(1000, 250));
+      // Moves from the second finger would zigzag the stroke; they are not its.
+      dom.fire('window', 'pointermove', second(800, 250));
+      const before = drag.emissions.length;
+
+      // The first finger carries on from where *it* was, not from the second.
+      dom.fire('window', 'pointermove', move(100, 250));
+      const walked = drag.emissions.slice(before);
+      expect(walked.length).toBeGreaterThan(0);
+      for (const emission of walked) expect(emission.u).toBeLessThanOrEqual(0.1);
+    });
+
+    it('does not end the drag when it lifts', () => {
+      const dom = stubDom();
+      const drag = source(boxed(1000, 500));
+
+      dom.fire('window', 'pointerdown', down(500, 250));
+      dom.fire('window', 'pointerup', { pointerId: 2 });
+      expect(drag.releases()).toBe(0);
+
+      dom.fire('window', 'pointerup', up());
+      expect(drag.releases()).toBe(1);
+    });
+  });
+
   describe('release', () => {
     it('reports a pointer being lifted', () => {
       const dom = stubDom();
       const drag = source(boxed());
 
       dom.fire('window', 'pointerdown', down(500, 250));
-      dom.fire('window', 'pointerup');
+      dom.fire('window', 'pointerup', up());
       expect(drag.releases()).toBe(1);
     });
 
@@ -627,7 +730,7 @@ describe('createDragSource', () => {
       for (const type of ['pointercancel', 'blur']) {
         const drag = source(boxed());
         dom.fire('window', 'pointerdown', down(500, 250));
-        dom.fire('window', type);
+        dom.fire('window', type, up());
         expect(drag.releases()).toBe(1);
       }
     });
@@ -636,7 +739,7 @@ describe('createDragSource', () => {
       const dom = stubDom();
       const drag = source(boxed());
 
-      dom.fire('window', 'pointerup');
+      dom.fire('window', 'pointerup', up());
       dom.fire('window', 'blur');
       expect(drag.releases()).toBe(0);
     });
@@ -646,8 +749,8 @@ describe('createDragSource', () => {
       const drag = source(boxed());
 
       dom.fire('window', 'pointerdown', down(500, 250));
-      dom.fire('window', 'pointerup');
-      dom.fire('window', 'pointercancel');
+      dom.fire('window', 'pointerup', up());
+      dom.fire('window', 'pointercancel', up());
       dom.fire('window', 'blur');
       expect(drag.releases()).toBe(1);
     });

@@ -31,7 +31,7 @@ export function withDefaults<T extends object>(defaults: T, options: Partial<T>)
 
   for (const key of Object.keys(options) as Array<keyof T>) {
     const value = options[key];
-    if (value !== undefined) merged[key] = value as T[keyof T];
+    if (value !== undefined) merged[key] = value;
   }
 
   return merged;

@@ -102,10 +102,16 @@ handle.start(); // resume the loop
 handle.stop(); // pause it, keep the state
 handle.refresh(); // re-read shading and repaint
 handle.destroy(); // stop and remove every listener
+handle.running; // true while it is actually drawing
+handle.still; // true while reduced motion holds it to one frame
 handle.canvas; // the canvas it is mounted on
 ```
 
 `destroy()` removes everything it added, so mounting and unmounting in a single-page app does not leak.
+
+`running` and `still` are what a play/pause control wants: `running` is false while the tab is hidden or the loop is
+stopped, and `still` says _why_ `start()` may be refusing - the visitor has asked for less motion. The preference is
+watched, not sampled once, so a visitor who changes their mind mid-visit gets the moving version without a reload.
 
 ## Shading
 

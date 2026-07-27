@@ -10,9 +10,15 @@
 // A smooth field, so it takes the renderer's interpolation and runs at half
 // output resolution - like the plasma, and unlike the line-art effects.
 
-import { COMMON_BACKGROUND_DEFAULTS, aspectOf, mountBackground, type CommonBackgroundOptions } from './background';
-import { withDefaults } from './options';
-import { type BackgroundHandle } from './render';
+import {
+  COMMON_BACKGROUND_DEFAULTS,
+  approach,
+  aspectOf,
+  mountBackground,
+  type CommonBackgroundOptions,
+} from './background.js';
+import { withDefaults } from './options.js';
+import { type BackgroundHandle } from './render.js';
 import {
   METABALL_DEFAULTS,
   advanceThrow,
@@ -24,7 +30,7 @@ import {
   type MetaballParams,
   type Metaballs,
   type Throw,
-} from './metaballs';
+} from './metaballs.js';
 
 export interface MetaballsBackgroundOptions extends CommonBackgroundOptions {
   /** Ceiling on field cells. */
@@ -88,10 +94,19 @@ export function createMetaballsBackground(
   // The coast after letting go. Null while held or once settled.
   let flight: Throw | null = null;
 
+  // One object, refreshed rather than rebuilt: `override` runs every frame for
+  // as long as anything is held or settling, and a fresh object each time is
+  // steady garbage for no gain.
+  const hold: BallOverride = { index: -1, x: 0, y: 0, weight: 0 };
+
   /** The current hold, or null when there is nothing to apply. */
   function override(): BallOverride | null {
     if (heldIndex < 0 || weight <= 0) return null;
-    return { index: heldIndex, x: holdX, y: holdY, weight };
+    hold.index = heldIndex;
+    hold.x = holdX;
+    hold.y = holdY;
+    hold.weight = weight;
+    return hold;
   }
 
   return mountBackground(canvas, config, {
@@ -100,14 +115,19 @@ export function createMetaballsBackground(
     timestep: 'clock',
 
     rebuild(fieldW, fieldH) {
-      // The arrangement is rerolled on resize, but `elapsed` carries over so the
-      // motion does not jump back to the start on a window drag. A hold does not
-      // survive it: the ball it referred to no longer exists.
+      // A resize rebuilds the field but keeps `elapsed`, so the motion does not
+      // jump back to the start on a window drag - and the arrangement, which is
+      // resolution-independent, is carried over the same way so the blobs stay
+      // where they were instead of teleporting into a fresh roll. Only the
+      // first build randomizes. A hold does not survive it: positions are in
+      // field-height units, and a resize changes what those mean on screen.
+      const state = metaballs?.state;
       heldIndex = -1;
       holding = false;
       weight = 0;
       flight = null;
       metaballs = createMetaballs(fieldW, fieldH, config.random, params);
+      if (state) metaballs.state = state;
       renderMetaballs(metaballs, params, elapsed);
     },
 
@@ -119,9 +139,7 @@ export function createMetaballsBackground(
       // Real seconds, unscaled by `speed`: picking a blob up should not take
       // four times as long because the arrangement happens to be drifting slowly.
       if (heldIndex >= 0) {
-        const towards = holding ? 1 : 0;
-        const rate = holding ? params.grabEase : params.releaseEase;
-        weight += (towards - weight) * (rate > 0 ? Math.min(1, dt / rate) : 1);
+        weight = approach(weight, holding ? 1 : 0, dt, holding ? params.grabEase : params.releaseEase);
 
         // Let go: the ball coasts on in the direction it was thrown while the
         // blend reels it back, so the two together read as an elastic tether
@@ -167,15 +185,20 @@ export function createMetaballsBackground(
         holdX = nextX;
         holdY = nextY;
 
-        // Only the first emission of a drag chooses a ball; the rest move
-        // whichever one was picked up, or nothing if the press missed.
+        // Nothing takes hold until a press actually lands on a ball: a miss
+        // must not leave `holding` set with nothing held, or the release would
+        // manufacture a throw that nothing ever advances. A missed press keeps
+        // trying as the drag moves, so sweeping through a blob still catches it.
         if (!holding) {
-          holding = true;
-          heldIndex = nearestBall(metaballs.balls, holdX, holdY, params.grabReach);
-          weight = 0;
-          velocityX = 0;
-          velocityY = 0;
-          flight = null;
+          const grabbed = nearestBall(metaballs.balls, holdX, holdY, params.grabReach);
+          if (grabbed >= 0) {
+            holding = true;
+            heldIndex = grabbed;
+            weight = 0;
+            velocityX = 0;
+            velocityY = 0;
+            flight = null;
+          }
         }
       },
 
@@ -184,8 +207,12 @@ export function createMetaballsBackground(
         holding = false;
         lastMoveAt = 0;
         // Hand the drag's velocity over, so the ball carries on rather than being
-        // pulled straight back to its path.
-        flight = startThrow(holdX, holdY, velocityX, velocityY, params);
+        // pulled straight back to its path - but only when something was held,
+        // because a throw with no ball behind it would never be advanced or
+        // cleared.
+        if (heldIndex >= 0) {
+          flight = startThrow(holdX, holdY, velocityX, velocityY, params);
+        }
       },
     },
 

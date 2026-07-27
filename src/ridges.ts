@@ -31,7 +31,7 @@
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // ridges-background.ts.
 
-import { fbm, hash2 } from './noise';
+import { fbm, hash2 } from './noise.js';
 
 export interface RidgeParams {
   /** How many profiles are on screen at once. */
@@ -400,6 +400,26 @@ export interface Ridges {
   state: RidgeState;
   /** How far we have flown, in rows. */
   travel: number;
+  /**
+   * Terrain profiles of the live rows, one per `worldZ`.
+   *
+   * A row's terrain depends only on things that hold still for its whole life -
+   * its integer `worldZ`, the field width, the terrain params and the seed -
+   * yet it used to be resampled through a multi-octave fbm for every column of
+   * every frame, which was the dominant cost of the effect. Sampling each row
+   * once and replaying the array cuts that to the occasional new row entering
+   * at the top. Rows that have left the live range are dropped every frame, so
+   * this never holds more than `rows + overscan + 1` arrays.
+   */
+  profiles: Map<number, Float32Array>;
+  /**
+   * What the cached profiles were sampled from. The params arrive per render
+   * call and the state can be swapped wholesale by a caller, so the cache
+   * cannot simply trust its entries - this is compared every frame and the
+   * whole map dropped on any change, because a re-rolled landscape or altered
+   * terrain must never be drawn from another's profiles.
+   */
+  profileKey: string;
 }
 
 export function createRidges(w: number, h: number, rand: () => number = Math.random): Ridges {
@@ -412,7 +432,39 @@ export function createRidges(w: number, h: number, rand: () => number = Math.ran
     previous: new Float32Array(w * h),
     state: randomizeRidges(rand),
     travel: 0,
+    profiles: new Map(),
+    profileKey: '',
   };
+}
+
+/**
+ * Everything a cached profile was sampled from, flattened for a cheap per-frame
+ * equality check. Width is in here because profiles are sampled per column; the
+ * rest are exactly the inputs `ridgeHeight` reads.
+ */
+function profileKeyFor(w: number, params: RidgeParams, state: RidgeState): string {
+  const { xScale, zScale, octaves, sharpness, focus } = params;
+  return `${w};${state.seed};${state.offsetX};${state.offsetZ};${xScale};${zScale};${octaves};${sharpness};${focus}`;
+}
+
+/**
+ * The terrain profile for one row, sampled on first sight and replayed for the
+ * rest of the row's life. Wobbles are deliberately not part of this: they are
+ * added to the curve after the profile is read, so interaction stays live per
+ * frame while the terrain underneath it is computed once.
+ */
+function profileFor(ridges: Ridges, worldZ: number, params: RidgeParams): Float32Array {
+  const cached = ridges.profiles.get(worldZ);
+  if (cached) return cached;
+
+  const { w, state } = ridges;
+  const profile = new Float32Array(w);
+  for (let x = 0; x < w; x++) {
+    const u = w > 1 ? x / (w - 1) : 0.5;
+    profile[x] = ridgeHeight(u, worldZ, params, state);
+  }
+  ridges.profiles.set(worldZ, profile);
+  return profile;
 }
 
 /**
@@ -438,7 +490,20 @@ export function renderRidges(ridges: Ridges, params: RidgeParams, wobbles: reado
   // Nothing drawn yet, so the horizon starts below the bottom of the screen.
   horizon.fill(h);
 
+  const key = profileKeyFor(w, params, state);
+  if (ridges.profileKey !== key) {
+    ridges.profiles.clear();
+    ridges.profileKey = key;
+  }
+
   const first = Math.ceil(travel);
+
+  // Profiles for rows outside the live range are dropped here, so the cache
+  // stays bounded however long the flight runs. A row wound back into range -
+  // travel can be set directly - is merely resampled.
+  for (const z of ridges.profiles.keys()) {
+    if (z < first - params.overscan || z >= first + rows) ridges.profiles.delete(z);
+  }
 
   // Nearest first, starting below the bottom edge. The floating horizon only
   // works front to back, and `depth` is negative for the overscan rows.
@@ -460,12 +525,16 @@ export function renderRidges(ridges: Ridges, params: RidgeParams, wobbles: reado
     const fillBase = params.fillRandom ? fillShadeFor(worldZ, state) : brightness;
     const fillShade = fillBase * params.fillLevel;
 
+    const profile = profileFor(ridges, worldZ, params);
     for (let x = 0; x < w; x++) {
-      const u = w > 1 ? x / (w - 1) : 0.5;
-      ys[x] = base - ridgeHeight(u, worldZ, params, state) * amp;
+      ys[x] = base - profile[x] * amp;
       // Applied to the curve before anything is drawn, so the fill and the
-      // occlusion follow the wobbled line rather than the flat one.
-      if (wobbles.length > 0) ys[x] += wobbleOffset(u, worldZ, wobbles, params, h);
+      // occlusion follow the wobbled line rather than the flat one - and after
+      // the cached profile is read, so interaction never touches the cache.
+      if (wobbles.length > 0) {
+        const u = w > 1 ? x / (w - 1) : 0.5;
+        ys[x] += wobbleOffset(u, worldZ, wobbles, params, h);
+      }
     }
 
     let previousY = ys[0];
@@ -496,13 +565,16 @@ export function renderRidges(ridges: Ridges, params: RidgeParams, wobbles: reado
         }
       }
 
-      previousY = y;
-    }
+      // The horizon takes the top of what this column actually inked - `lo`,
+      // which reaches back along the segment to the previous sample - not the
+      // bare sample. A steep flank lays ink well above `ys[x]`, and recording
+      // only the sample would let a farther row's fill, which under
+      // `fillRandom` can be brighter than a mid-depth line, punch straight
+      // through the flank hiding it. Written only after the draw, from the
+      // `limit` captured above, so the row never clips against itself.
+      if (lo < horizon[x]) horizon[x] = lo;
 
-    // Only now, so the row could draw at its own height rather than clipping
-    // against itself.
-    for (let x = 0; x < w; x++) {
-      if (ys[x] < horizon[x]) horizon[x] = ys[x];
+      previousY = y;
     }
   }
 

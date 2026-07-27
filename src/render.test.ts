@@ -8,7 +8,7 @@ import {
   sameShading,
   type Shading,
   type SurfaceOptions,
-} from './render';
+} from './render.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -80,6 +80,14 @@ describe('planSurface', () => {
     it('keeps the aspect ratio roughly intact when it shrinks the field', () => {
       const plan = planSurface(2560, 1440, options({ maxFieldCells: 4_000 }));
       expect(plan.fieldW / plan.fieldH).toBeCloseTo(2560 / 1440, 1);
+    });
+
+    it('holds even when rounding would nudge both axes back over it', () => {
+      // 100x100 against a ceiling of 9,800: the shrink is 1.0102, and rounding
+      // 98.995 up on both axes gives 99 x 99 = 9,801 - over the ceiling the
+      // doc comment promises. Flooring cannot do that.
+      const plan = planSurface(100, 100, options({ pixelSize: 1, fieldScale: 1, maxFieldCells: 9_800 }));
+      expect(plan.fieldW * plan.fieldH).toBeLessThanOrEqual(9_800);
     });
   });
 });
@@ -483,6 +491,43 @@ describe('createSurface', () => {
       const darkened = pixel(dom.painted()!, 0)[0];
 
       expect(darkened).toBeLessThan(plain);
+    });
+
+    it('applies gamma indistinguishably from computing it per pixel', () => {
+      // The table stands in for `Math.pow`; after the five-or-so-level
+      // quantise, its error must never move a pixel to a different level. The
+      // endpoints are exact by construction, so black stays black.
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, options({ dither: false, levels: 9 }));
+      surface.resize();
+
+      for (const value of [0, 0.2, 0.5, 0.8, 1]) {
+        surface.shade(flat(surface, value), { base: 0, amplitude: 255 }, 2.2);
+        const tabled = pixel(dom.painted()!, 0)[0];
+
+        // The same field with the gamma already applied, through the untabled
+        // gamma-of-1 path.
+        surface.shade(flat(surface, Math.pow(value, 2.2)), { base: 0, amplitude: 255 }, 1);
+        const direct = pixel(dom.painted()!, 0)[0];
+
+        expect(tabled).toBe(direct);
+      }
+    });
+
+    it('notices a shading mutated in place rather than replaced', () => {
+      // The palette is cached against the last shading; a host that mutates one
+      // object and repaints must not be handed yesterday's palette back.
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, options({ dither: false }));
+      surface.resize();
+
+      const shading: Shading = { base: 0, amplitude: 255 };
+      surface.shade(flat(surface, 1), shading, 1);
+      expect(pixel(dom.painted()!, 0)[0]).toBe(255);
+
+      shading.amplitude = 100;
+      surface.shade(flat(surface, 1), shading, 1);
+      expect(pixel(dom.painted()!, 0)[0]).toBe(100);
     });
 
     it('interpolates the coarse field up rather than blocking it', () => {
