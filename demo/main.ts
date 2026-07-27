@@ -777,6 +777,22 @@ textButton.addEventListener('click', () => {
   textButton.classList.toggle('active', showText);
 });
 
+// Collapses the panel to a single button in the same corner, for looking at an
+// effect with nothing else on screen at all. The panel is hidden, not rebuilt,
+// so every dial keeps its position and reopening puts things back as they were.
+const collapseButton = document.getElementById('collapse') as HTMLButtonElement;
+const revealButton = document.getElementById('reveal') as HTMLButtonElement;
+
+collapseButton.addEventListener('click', () => {
+  panel.hidden = true;
+  revealButton.hidden = false;
+});
+
+revealButton.addEventListener('click', () => {
+  panel.hidden = false;
+  revealButton.hidden = true;
+});
+
 ditherButton.addEventListener('click', () => {
   dithering = !dithering;
   ditherButton.textContent = `Dither: ${dithering ? 'on' : 'off'}`;

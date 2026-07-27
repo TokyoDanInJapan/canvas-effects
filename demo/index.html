@@ -28,6 +28,7 @@
         <button type="button" id="reseed">Reseed</button>
         <button type="button" id="dither" class="active">Dither: on</button>
         <button type="button" id="text" class="active">Text: on</button>
+        <button type="button" id="collapse">Hide</button>
       </div>
       <label class="pick">
         <span>palette <b id="ramp-name">greyscale</b></span>
@@ -36,6 +37,9 @@
       <div id="dials"></div>
       <p class="fps"><span id="fps">-</span> fps drawn</p>
     </aside>
+
+    <!-- Takes the panel's corner while it is collapsed, and brings it back. -->
+    <button type="button" id="reveal" hidden>Dials</button>
 
     <script type="module" src="./main.ts"></script>
   </body>
