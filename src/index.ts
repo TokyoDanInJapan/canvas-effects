@@ -179,6 +179,7 @@ export {
   stepMandelbrot,
   type Mandelbrot,
   type MandelbrotParams,
+  type MandelbrotPhase,
   type MandelbrotState,
 } from './mandelbrot.js';
 

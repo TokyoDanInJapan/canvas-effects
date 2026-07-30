@@ -368,34 +368,77 @@ describe('stepMandelbrot', () => {
     const state = randomizeMandelbrot(makeRandom(2), params);
     expect(state.span).toBe(params.homeSpan);
     expect(state.cx).toBe(params.homeX);
-    expect(state.direction).toBe(-1);
+    expect(state.phase).toBe('in');
+    // From rest, so the opening descent accelerates in like every other one.
+    expect(state.rate).toBe(0);
   });
 
-  it('magnifies at the rate it says it does', () => {
+  it('magnifies at the rate it says it does once it is up to speed', () => {
     const m = seeded();
-    // One second at half a doubling a second is a factor of the square root of
-    // two, whatever the frame rate chops it into.
-    fly(m, 1);
-    expect(params.homeSpan / m.state.span).toBeCloseTo(Math.SQRT2, 2);
+    // Three seconds to leave the acceleration behind - the rate is eased, not
+    // switched - and then two seconds at half a doubling a second is a factor
+    // of two, whatever the frame rate chops it into.
+    fly(m, 3);
+    const before = m.state.span;
+    fly(m, 2);
+    expect(before / m.state.span).toBeCloseTo(2, 1);
+  });
+
+  it('eases the rate rather than switching it', () => {
+    // The lurch this replaced: reversing at the floor used to swap half a
+    // doubling a second inwards for two outwards in a single frame.
+    const m = seeded();
+    fly(m, 3);
+    const cruising = m.state.rate;
+    expect(cruising).toBeCloseTo(-params.speed, 2);
+
+    const fast = { ...params, speed: 20, dwell: 0 };
+    const q = seeded(4, fast);
+    until(q, fast, () => q.state.phase !== 'in');
+    // Whatever it does next, it does not do it in one frame.
+    let worst = 0;
+    let previous = q.state.rate;
+    for (let i = 0; i < 200; i++) {
+      stepMandelbrot(q, fast, 1 / 24);
+      worst = Math.max(worst, Math.abs(q.state.rate - previous));
+      previous = q.state.rate;
+    }
+    // A switched rate would show the whole 20-to-80 swing in a single step.
+    expect(worst).toBeLessThan(20);
   });
 
   it('turns round at the precision floor rather than past it', () => {
     // Past `minSpan` neighbouring cells land on the same double and the picture
     // goes blocky, so this is a limit of the arithmetic and not of taste.
-    const fast = { ...params, speed: 20 };
+    // Fast, but not so fast that the coast is capped - the turn is taken early
+    // by exactly what the deceleration covers, and the point here is that it
+    // lands on the floor rather than being caught by the clamp.
+    const fast = { ...params, speed: 4 };
     const m = seeded(4, fast);
-    until(m, fast, () => m.state.direction > 0);
-    expect(m.state.span).toBeGreaterThanOrEqual(params.minSpan);
+    let deepest = params.homeSpan;
+    for (let i = 0; i < 24 * 20; i++) {
+      stepMandelbrot(m, fast, 1 / 24);
+      deepest = Math.min(deepest, m.state.span);
+      if (m.state.phase === 'out') break;
+    }
+    expect(deepest).toBeGreaterThanOrEqual(params.minSpan);
+    expect(deepest / params.minSpan).toBeLessThan(1.2);
   });
 
-  it('comes back to the home view exactly, framed and centred', () => {
+  it('comes back framed and centred on the whole set', () => {
+    // Not to the exact number any more, and that is the coast: the pull-out
+    // decelerates onto the home span rather than hitting it, so it arrives
+    // asymptotically. `frame` ties the centre to the span, so being within 2%
+    // of home on one is being within 2% on the other - which is why nothing
+    // has to steer the framing.
     const fast = { ...params, speed: 20, dwell: 0 };
     const m = seeded(4, fast);
-    until(m, fast, () => m.state.direction > 0);
-    until(m, fast, () => m.state.direction < 0);
-    expect(m.state.span).toBe(params.homeSpan);
-    expect(m.state.cx).toBe(params.homeX);
-    expect(m.state.cy).toBe(params.homeY);
+    until(m, fast, () => m.state.phase !== 'in');
+    until(m, fast, () => m.state.phase === 'in');
+    expect(m.state.span / params.homeSpan).toBeGreaterThan(0.97);
+    expect(m.state.span).toBeLessThanOrEqual(params.homeSpan);
+    expect(m.state.cx).toBeCloseTo(params.homeX, 1);
+    expect(m.state.cy).toBeCloseTo(params.homeY, 1);
   });
 
   it('does not jump when it turns', () => {
@@ -404,7 +447,7 @@ describe('stepMandelbrot', () => {
     // at the moment it turns round.
     const fast = { ...params, speed: 20, dwell: 0 };
     const m = seeded(4, fast);
-    until(m, fast, () => m.state.direction > 0);
+    until(m, fast, () => m.state.phase !== 'in');
     const [wasX, wasY] = [m.state.cx, m.state.cy];
     stepMandelbrot(m, fast, 1 / 24);
     // A step of the pull-out moves the centre by a fraction of the span it is
@@ -413,30 +456,50 @@ describe('stepMandelbrot', () => {
   });
 
   it('keeps the point it left at a fixed place on screen while it pulls out', () => {
-    // What stops the pull-out reading as an enormous sideways pan. The deep
-    // point sits still in screen units for all but the last instant of it.
-    const fast = { ...params, speed: 20, dwell: 0 };
+    // What stops the pull-out reading as an enormous sideways pan.
+    //
+    // It starts at nothing rather than at the fixed offset, and has to: at the
+    // turn the deep point *is* the centre, so an offset there would be a jump.
+    // It reaches its asymptote within a couple of doublings and holds it for
+    // the rest of the climb, which is the whole visible part.
+    // Not the 20x of the other tests: at that speed a single frame is most of a
+    // doubling, and the transient at the turn is over before the first one lands.
+    const fast = { ...params, speed: 4, dwell: 0 };
     const m = seeded(4, fast);
-    until(m, fast, () => m.state.direction > 0);
+    const at = () => Math.hypot(m.state.deepX - m.state.cx, m.state.deepY - m.state.cy) / m.state.span;
+
+    until(m, fast, () => m.state.phase === 'holdDeep');
+    expect(at()).toBe(0);
+
+    // Away from the turn: a hundredfold in span is well past the transient.
+    const settled = m.state.deepSpan * 100;
+    until(m, fast, () => m.state.span > settled || m.state.phase === 'holdHome');
 
     const offsets: number[] = [];
-    for (let i = 0; i < 20 && m.state.direction > 0; i++) {
+    for (let i = 0; i < 20 && m.state.phase === 'out'; i++) {
       stepMandelbrot(m, fast, 1 / 24);
-      if (m.state.direction < 0) break;
-      offsets.push(Math.hypot(m.state.deepX - m.state.cx, m.state.deepY - m.state.cy) / m.state.span);
+      if (m.state.phase !== 'out') break;
+      offsets.push(at());
     }
     expect(offsets.length).toBeGreaterThan(4);
     expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(0.02);
   });
 
-  it('holds still at each end of the cycle', () => {
-    const fast = { ...params, speed: 20 };
+  it('coasts to a stop at each end of the cycle', () => {
+    // Not "holds still" - the rate is still dying away through the hold, and it
+    // is that coast which lets the descent land on the floor instead of past it.
+    // A dwell long enough to watch the whole coast, so this measures the ease
+    // rather than the pull-out already building up on the other side of it.
+    const fast = { ...params, speed: 20, dwell: 3 };
     const m = seeded(4, fast);
-    until(m, fast, () => m.state.direction > 0);
+    until(m, fast, () => m.state.phase === 'holdDeep');
     expect(m.state.held).toBeGreaterThan(0);
-    const span = m.state.span;
-    stepMandelbrot(m, fast, 1 / 24);
-    expect(m.state.span).toBe(span);
+
+    const entering = Math.abs(m.state.rate);
+    // One second is over two time constants, which leaves a ninth of it.
+    for (let i = 0; i < 24; i++) stepMandelbrot(m, fast, 1 / 24);
+    expect(m.state.phase).toBe('holdDeep');
+    expect(Math.abs(m.state.rate)).toBeLessThan(entering * 0.2);
   });
 
   it('heads somewhere different on each pass', () => {
@@ -446,8 +509,8 @@ describe('stepMandelbrot', () => {
     const fast = { ...params, speed: 20, dwell: 0 };
     const m = seeded(4, fast);
     const before = m.state.biasAngle;
-    until(m, fast, () => m.state.direction > 0);
-    until(m, fast, () => m.state.direction < 0);
+    until(m, fast, () => m.state.phase !== 'in');
+    until(m, fast, () => m.state.phase === 'in');
     expect(m.state.biasAngle).not.toBe(before);
   });
 
@@ -470,7 +533,7 @@ describe('stepMandelbrot', () => {
     let empty = 0;
     let frames = 0;
 
-    for (let i = 0; i < 5 * 50 && m.state.direction < 0; i++) {
+    for (let i = 0; i < 5 * 50 && m.state.phase === 'in'; i++) {
       stepMandelbrot(m, p, 1 / 5);
       renderMandelbrot(m, p);
       frames++;
@@ -510,11 +573,11 @@ describe('stepMandelbrot', () => {
     expect(solidFraction(m)).toBe(1);
 
     stepMandelbrot(m, p, 1 / 2400);
-    expect(m.state.direction).toBe(-1);
+    expect(m.state.phase).toBe('in');
     stepMandelbrot(m, p, 1 / 2400);
-    expect(m.state.direction).toBe(-1);
+    expect(m.state.phase).toBe('in');
     stepMandelbrot(m, p, 1 / 2400);
-    expect(m.state.direction).toBe(1);
+    expect(m.state.phase).toBe('holdDeep');
   });
 
   it('follows a pointer, and lands on something rather than where it was told', () => {
@@ -523,7 +586,9 @@ describe('stepMandelbrot', () => {
     const m = seeded();
     stepMandelbrot(m, params, 1 / 24, [0.9, 0.9]);
     const towardsCorner = m.state.cx;
-    expect(escapeAt(m.state.aimX, m.state.aimY, params.iterations)).not.toBe(Infinity);
+    // The goal, not the aim: the aim is the goal smoothed, so one frame after a
+    // press it has barely left where it started.
+    expect(escapeAt(m.state.goalX, m.state.goalY, params.iterations)).not.toBe(Infinity);
 
     const other = seeded();
     stepMandelbrot(other, params, 1 / 24, [0.1, 0.1]);
@@ -538,6 +603,80 @@ describe('stepMandelbrot', () => {
     // Same frame, same field; the steered one has moved further because
     // `steerEase` is shorter than `aimEase`.
     expect(Math.abs(held.state.cx - params.homeX)).toBeGreaterThan(Math.abs(m.state.cx - params.homeX));
+  });
+
+  it('moves the picture by an even amount for the time each frame is on screen', () => {
+    // The judder test, and it is the reason for three of the decisions in here:
+    // the eased rate, the smoothed aim, and `frame` measuring from the span the
+    // descent stopped at.
+    //
+    // Driven the way a browser drives it - 24fps throttled onto a 60Hz refresh,
+    // so frames are on screen for 33ms and 50ms alternately - and handed the
+    // real elapsed time, which is what `timestep: 'clock'` gives the mount.
+    // Every integration here is closed form, so a varying step is exact; what
+    // is measured is whether the picture's apparent motion follows it.
+    const REFRESH = 1000 / 60;
+    const INTERVAL = 1000 / 24;
+
+    /** Where nine sample points move to on screen, in field heights. */
+    const motion = (from: number[], to: number[]) => {
+      const [x0, y0, s0] = from;
+      const [x1, y1, s1] = to;
+      const out: number[] = [];
+      for (const px of [-0.6, 0, 0.6]) {
+        for (const py of [-0.4, 0, 0.4]) {
+          out.push((x0 + px * s0 - x1) / s1 - px, (y0 + py * s0 - y1) / s1 - py);
+        }
+      }
+      return out;
+    };
+    const size = (v: number[]) => Math.sqrt(v.reduce((a, b) => a + b * b, 0));
+
+    // A coarse field and a small budget: what is under test is the camera, and
+    // seventy-five seconds of it at full resolution is most of a second of test.
+    const p = { ...params, maxIterations: 150 };
+    const m = createMandelbrot(64, 40, makeRandom(99), p);
+    renderMandelbrot(m, p);
+    const view = () => [m.state.cx, m.state.cy, m.state.span];
+    let previous = view();
+    let velocity: number[] | null = null;
+    let lastDrawn = 0;
+    let lastNow = 0;
+    let lastTime = 0;
+    const speeds: number[] = [];
+    const jumps: number[] = [];
+
+    // Long enough to cover a descent, both turns and a pull-out.
+    for (let t = 0; t <= 75_000; t += REFRESH) {
+      if (t - lastDrawn < INTERVAL) continue;
+      lastDrawn = t - ((t - lastDrawn) % INTERVAL);
+      const dt = (lastNow ? Math.min(t - lastNow, 100) : 0) * 0.001;
+      lastNow = t;
+      stepMandelbrot(m, p, dt);
+      renderMandelbrot(m, p);
+
+      const now = view();
+      if (lastTime > 0) {
+        const speed = motion(previous, now).map((v) => v / (t - lastTime));
+        speeds.push(size(speed));
+        if (velocity) jumps.push(size(speed.map((v, i) => v - velocity![i])));
+        velocity = speed;
+      }
+      previous = now;
+      lastTime = t;
+    }
+
+    // Against the run's own cruise speed, not the local one: near a reversal the
+    // local speed passes through zero and dividing by it turns an imperceptible
+    // wobble into a headline figure.
+    const cruise = speeds.sort((a, b) => a - b)[speeds.length >> 1];
+    const mean = jumps.reduce((a, b) => a + b, 0) / jumps.length;
+
+    // A fixed timestep measures 48% here, because 24 does not divide 60 - the
+    // picture moves in equal steps shown for unequal times. A switched rate and
+    // a `frame` measured from `minSpan` each put the worst frame near 400%.
+    expect(mean / cruise).toBeLessThan(0.05);
+    expect(Math.max(...jumps) / cruise).toBeLessThan(1);
   });
 
   it('is reproducible from a seeded generator', () => {
