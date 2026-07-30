@@ -1,10 +1,10 @@
 # canvas-effects
 
-Six animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so they
-modulate the page colour rather than becoming a picture, and they are quiet enough that a reader should not consciously
-notice them.
+Seven animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**, so
+they modulate the page colour rather than becoming a picture, and they are quiet enough that a reader should not
+consciously notice them.
 
-No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All six together are 12.1 kB
+No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All seven together are 13.6 kB
 minified and gzipped.
 
 The `canvas-effects` name on the npm registry belongs to an unrelated package, so this one installs from GitHub - npm
@@ -16,7 +16,7 @@ npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.3.0
 
 ## The effects
 
-Each takes a canvas and returns a handle. All six respond to the pointer.
+Each takes a canvas and returns a handle. All seven respond to the pointer.
 
 ![Smoke](docs/screens/smoke.png)
 
@@ -54,6 +54,15 @@ code knows about necks. _Press and drag to pick a blob up and throw it._
 `(angle, depth / radius)` and that reciprocal _is_ the perspective - no camera, no matrix, no depth buffer. The corridor
 winds and the view banks into the turn, which costs one extra pass of a fixed-point iteration. _Press and drag to steer
 it._
+
+![Mandelbrot](docs/screens/mandelbrot.png)
+
+**Mandelbrot** - `createMandelbrotBackground`. A zoomer, and the interesting part is how you draw one in five greys at a
+hundred and twenty cells across. Escape-time colouring cannot: the bands crowd together without limit at the boundary and
+alias into noise exactly where the detail is. So it shades on a **distance estimate** taken for free from the picture's
+own gradient - the smooth escape count _is_ the exterior potential on a log scale, so `1 / (ln2 * |grad mu|)` is the
+distance to the set, and a finite difference over a field already computed gives it. It steers itself, because a target
+picked in advance is empty space twenty doublings later. _Press and drag to aim it._
 
 ## Quick start
 
@@ -172,14 +181,15 @@ screen; the ramp decides which. `buildPalette(shading, levels)` is exported if y
 
 ## Interaction
 
-| Effect    | Press or drag                                                           |
-| --------- | ----------------------------------------------------------------------- |
-| Smoke     | Stirs the fluid along the drag. Idle movement is ignored.               |
-| Plasma    | Sends ripples out; a drag leaves a wake.                                |
-| Rain      | Sends lens-like distortions through it.                                 |
-| Ridges    | Sets wobbles running through the stack.                                 |
-| Metaballs | Picks the nearest blob up, carries it, and throws it when you let go.   |
-| Tunnel    | Steers the vanishing point towards the pointer, easing back on release. |
+| Effect     | Press or drag                                                           |
+| ---------- | ----------------------------------------------------------------------- |
+| Smoke      | Stirs the fluid along the drag. Idle movement is ignored.               |
+| Plasma     | Sends ripples out; a drag leaves a wake.                                |
+| Rain       | Sends lens-like distortions through it.                                 |
+| Ridges     | Sets wobbles running through the stack.                                 |
+| Metaballs  | Picks the nearest blob up, carries it, and throws it when you let go.   |
+| Tunnel     | Steers the vanishing point towards the pointer, easing back on release. |
+| Mandelbrot | Aims the zoom at the nearest filigree to the pointer, on the way in.    |
 
 `interactive: false` turns any of them off. Emissions are spaced by _distance_ along the drag rather than throttled by
 time, so a slow careful drag lays down as densely as a fast one. Each effect caps how many disturbances run at once and
@@ -213,23 +223,26 @@ Every effect takes the same shape of options object. These are shared:
 
 Three of those differ per effect, and the reasons are worth knowing:
 
-| Effect    | `fieldScale` | `pixelSize` | `gamma` |
-| --------- | ------------ | ----------- | ------- |
-| Smoke     | 2            | 6           | 1.6     |
-| Plasma    | 2            | 6           | 1.18    |
-| Metaballs | 2            | 6           | 1       |
-| Rain      | **1**        | 6           | 1       |
-| Ridges    | **1**        | **4**       | 1       |
-| Tunnel    | **1**        | 6           | 1       |
+| Effect     | `fieldScale` | `pixelSize` | `gamma` |
+| ---------- | ------------ | ----------- | ------- |
+| Smoke      | 2            | 6           | 1.6     |
+| Plasma     | 2            | 6           | 1.18    |
+| Metaballs  | 2            | 6           | 1       |
+| Mandelbrot | 2            | **4**       | 1       |
+| Rain       | **1**        | 6           | 1       |
+| Ridges     | **1**        | **4**       | 1       |
+| Tunnel     | **1**        | 6           | 1       |
 
 `fieldScale: 1` wherever interpolating between cells would blur line art or smooth away fine structure - for the
-tunnel that is the difference between visible rings and flat mottle. `gamma` above 1 weights the field towards its
-dark end; below 1 brightens it, which nothing here currently wants but is there if your field sits too dark.
-[How it works](docs/how-it-works.md) has the measurements behind each.
+tunnel that is the difference between visible rings and flat mottle. The Mandelbrot spends its `pixelSize` instead: it is
+the one effect here whose subject has detail at every scale, so the dither grid is worth paying for. `gamma` above 1
+weights the field towards its dark end; below 1 brightens it, which nothing here currently wants but is there if your
+field sits too dark. [How it works](docs/how-it-works.md) has the measurements behind each.
 
-Each effect also has its own parameter group - `simulation`, `warp`, `rain`, `ridges`, `metaballs`, `tunnel` - merged
-over that effect's defaults. Every parameter is documented where it is declared, with a note on what it does and where its
-default came from: `SmokeParams`, `PlasmaWarpConfig`, `RainParams`, `RidgeParams`, `MetaballParams`, `TunnelParams`.
+Each effect also has its own parameter group - `simulation`, `warp`, `rain`, `ridges`, `metaballs`, `tunnel`,
+`mandelbrot` - merged over that effect's defaults. Every parameter is documented where it is declared, with a note on
+what it does and where its default came from: `SmokeParams`, `PlasmaWarpConfig`, `RainParams`, `RidgeParams`,
+`MetaballParams`, `TunnelParams`, `MandelbrotParams`.
 
 `undefined` is ignored rather than overriding a default, so forwarding your own optional config is safe:
 
@@ -239,20 +252,23 @@ createSmokeBackground(canvas, { gamma: config.gamma }); // fine when config.gamm
 
 ## Performance
 
-All six draw at `fps` - 24 by default - rather than the refresh rate, and stop entirely when the tab is hidden.
+All seven draw at `fps` - 24 by default - rather than the refresh rate, and stop entirely when the tab is hidden.
 
 What makes them cheap is that they render at **two resolutions**: the expensive field is computed coarsely and
 interpolated up, then ordered-dithered per output pixel, which is a few multiply-adds and a table lookup. `maxPixels`
 raises `pixelSize` on large windows, so 2560×1440 renders 147,000 pixels rather than 409,000.
 
 For the smoke, `maxSimCells` is the number to reach for first, not `maxPixels`: the solver touches every cell a dozen or
-more times a frame where the shading touches each output pixel once.
+more times a frame where the shading touches each output pixel once. The Mandelbrot's `maxFieldCells` is the same dial
+and matters more still, since it touches each cell a couple of hundred times - which is why its default is 10,000 where
+the tunnel's is 160,000.
 
 ## Accessibility
 
 - The canvas is decoration. Mark it `aria-hidden="true"`.
-- With `prefers-reduced-motion: reduce` all six draw a single frame and stop, and pointer interaction is disabled. The
-  stateful ones settle themselves first, so the still frame is smoke or mid-storm rain rather than an empty field.
+- With `prefers-reduced-motion: reduce` all seven draw a single frame and stop, and pointer interaction is disabled. The
+  stateful ones settle themselves first, so the still frame is smoke or mid-storm rain rather than an empty field; the
+  Mandelbrot's is the whole set, which needs no settling to be worth looking at.
 - With JavaScript off nothing is painted and the page keeps its ordinary background - the other reason `base` has to match
   your page colour.
 - `amplitude` is the contrast dial. Keep it low enough that text over the background clears whatever contrast ratio you
@@ -267,10 +283,10 @@ more times a frame where the shading touches each output pixel once.
 - **[`demo/`](demo)** - the live tuning page, every dial as a slider. `npm run dev`.
 
 Everything is exported, and the maths is DOM-free so it can be used and tested outside a browser - the fluid solver, the
-warp, the falling lanes, the terrain, the implicit surface and the tunnel projection are all usable on
-their own.
+warp, the falling lanes, the terrain, the implicit surface, the tunnel projection and the set with the camera that flies
+it are all usable on their own.
 
-Writing a seventh is `mountBackground`, which is what the six above are: hand it a `rebuild`, a `field` and a `step` and
+Writing an eighth is `mountBackground`, which is what the seven above are: hand it a `rebuild`, a `field` and a `step` and
 it does the canvas, the sizing, the dithered shading, the frame loop, the theme watching and the teardown. `createSurface`
 is the layer under that, if you would rather drive the loop yourself.
 
@@ -292,6 +308,7 @@ range. The canvas and loop code is exercised by the demo page.
 
 MIT - see [LICENSE](LICENSE).
 
-All six implement published techniques: Jos Stam's _Stable Fluids_, domain-warped fbm, Wyvill's falloff for the
-metaballs, the demoscene reciprocal tunnel, and ordered dithering on a Bayer matrix throughout. Where a well-known constant is used it is
+All seven implement published techniques: Jos Stam's _Stable Fluids_, domain-warped fbm, Wyvill's falloff for the
+metaballs, the demoscene reciprocal tunnel, the Douady-Hubbard potential and the distance estimate that follows from it,
+and ordered dithering on a Bayer matrix throughout. Where a well-known constant is used it is
 credited at the point of use - MurmurHash3's public-domain finalisers in `hash2`, and the classic 4×4 Bayer matrix.

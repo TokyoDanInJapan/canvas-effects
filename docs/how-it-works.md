@@ -13,7 +13,7 @@ what it does and where its default came from.
 
 ## The shared half: two resolutions and a dither
 
-All six render at two scales at once, and this is what makes them cheap enough to leave running:
+All seven render at two scales at once, and this is what makes them cheap enough to leave running:
 
 - The **field** - the expensive part, whatever generates it - is computed at `pixelSize × fieldScale` CSS pixels per
   cell. The smoke and plasma fields are soft and low-frequency and gain nothing from more samples, so they run at half
@@ -457,6 +457,157 @@ The dark centroid of the whole field is **not** a way to measure this, which cos
 dark bands are spread over the entire frame and swamp the vignette, so the centroid sits within 0.002 of the middle
 whatever the steer is doing. Comparing mean brightness in a small disc at the pointer against the same disc at the
 geometric centre does show it.
+
+## Mandelbrot: the picture is its own derivative
+
+`src/mandelbrot.ts`. Everyone has written a Mandelbrot. The interesting question here is not the set - it is how you draw
+one in **five greys at a hundred and twenty cells across**, and the usual answer does not survive that at all.
+
+### Escape time cannot be shaded directly
+
+Colour by iteration count and the bands crowd together without limit as you approach the boundary. However fine the
+field, there is always a region where consecutive cells are more than a band apart - and it is not some corner of the
+picture, it is precisely where all the detail is. Posterising that to five levels makes it worse, not better: the aliased
+bands land on different levels from one frame to the next and the boundary boils.
+
+### The distance estimate, and why it is free
+
+Write the smooth escape count in the usual way:
+
+```
+mu = n + 1 - log2(log|z|)
+```
+
+Now notice what that actually is. The exterior potential of the set - the Douady-Hubbard potential, the Green's function
+of the complement - is `G = log|z_n| / 2^n`. So `log2 G = log2 log|z_n| - n`, and therefore
+
+```
+mu = 1 - log2 G      exactly
+```
+
+mu is not an approximate iteration number. It **is** the potential, on a log scale. And the distance from a point to the
+set is `d = G / |grad G|`, which in terms of mu is
+
+```
+d = 1 / (ln2 * |grad mu|)
+```
+
+`grad mu` is a finite difference over a field that has just been computed. So the distance estimate costs one extra pass
+over the grid and nothing per iteration - no derivative carried through the orbit, no second pass over it. The picture is
+its own derivative.
+
+There is a test pinning this down as an arithmetic fact rather than a claim: render the same view on a grid and on one
+twice as fine, so that cell `(2i, 2j)` samples exactly the complex point cell `(i, j)` did. The cell is half as wide, so
+the distance reported in cells should be twice. Median ratio over the field: **2.004**.
+
+### It antialiases itself, which is the part that makes it viable
+
+A filament thinner than a cell is never sampled. The finite difference therefore under-reads the true gradient and
+reports a distance of about one cell rather than zero - and the filament arrives as a soft grey line instead of falling
+between two samples and vanishing. Sub-cell structure fades out rather than flickering, which is exactly what you want
+from a picture that is about to be posterised.
+
+An analytic distance estimate, carried through the iteration, would not do this. It would report the true distance, the
+filament would be black, and it would strobe as the zoom moved it across the sampling grid.
+
+### Brightness is a function of distance in cells
+
+Which is what makes it a zoomer rather than a still. A cell shrinks as the view descends, so shading on a distance
+measured in cells cannot get busier or emptier with depth. Measured: the field spans **0.994 to 0.998** of the full 0..1
+range at the home view, eight doublings down and sixteen doublings down alike.
+
+The set itself is drawn dark and the boundary is what glows, rather than the other way round. That is a background
+decision, not an aesthetic one: black-set-on-a-blaze-of-colour is a picture, and this has to be a page.
+
+`glow` is **4 cells**, which is far wider than "enough to see the boundary" and is chosen for what happens *after* this
+field is drawn. The output interpolates between field cells before dithering, so a rim one cell wide is averaged against
+its neighbours and most of it is gone by the time it reaches the screen. At 1.2 the set came out as a flat silhouette
+with no light on it at all. Past about 6, neighbouring filaments' mantles merge into a wash and the filigree stops
+reading as filigree.
+
+The exterior contours are faded out by how resolvable they are rather than by taste. They repeat every `bandWidth`
+iterations and mu changes by `1 / (ln2 * d)` per cell, so they need `d` of at least `2 / (bandWidth * ln2)` cells to
+survive sampling. Below that they are aliasing, and that is exactly where the glow is taking over anyway.
+
+### The autopilot aims at a filament, not at a lake
+
+A target picked in advance is empty space twenty doublings later - whatever was interesting at 1× is a featureless
+interior or a featureless exterior by the time you get there. So the target is re-chosen from the frame on screen every
+`aimInterval` seconds, and it can only ever be somewhere the current picture has something.
+
+**What it picks matters as much as that it re-picks, and the obvious score is wrong.** So a candidate is scored by the
+**patch around it** rather than by the cell itself, which is the right question: the autopilot is choosing what to
+magnify, not where to stand. What wins is the most varied patch - filigree, and magnifying filigree gives filigree - but
+only among patches that clear three refusals first.
+
+Three, and not as belt and braces. A frame can be worthless in three different ways, and taking out any one of them
+walks the autopilot straight into another. Each figure below is over five seeded runs of a full descent, sampled twice a
+second:
+
+| Refused          | What it is                                    | Cost of leaving it out           |
+| ---------------- | --------------------------------------------- | -------------------------------- |
+| more than 30% interior | the edge of a lake                      | **77-93% interior** for stretches of ten seconds |
+| mean brightness over 0.65 | hair finer than the sampling         | **36%** of frames a flat grey wash |
+| less than 10% interior | open exterior, the set out of shot      | **85%** of frames with nothing in them |
+
+The first is the one everybody thinks of: the edge of a lake is a smooth analytic curve, so magnify it and you have a
+straight line dividing dark from light, for ever.
+
+The second is subtler. Brightness runs with nearness to the set, so a patch bright nearly everywhere is one where every
+filament is thinner than a cell - the distance estimate quite correctly reports "within a cell of the set" for the whole
+neighbourhood, and the frame comes out a flat mid-grey with stray dark cells where a filament happened to land on a
+sample. **Those stray cells are the trap**: they sit at the far end of the range from everything around them, so the
+patch holding one scores a *high* spread, so the autopilot aims at it - and arriving there is more of the same. It is a
+feedback loop, and more depth did not clear it.
+
+The third is what the first two leave. With no floor on the interior fraction the safest patch is always the one
+furthest from the set, and the run ends up in open exterior: soft grey blobs, no filigree, nothing to recognise.
+
+All three together: **2%** of frames in any of those states. There is also a counter, because one empty scan is a moment
+and not a verdict - three in a row abandons the descent, one does not. Turning round on the first made a small canvas,
+where the patch window is a large fraction of the frame and harder to satisfy, descend for four seconds at a time and
+spend the rest of its life pulling out again.
+
+### Why it turns round, and why the pull-out needed no animating
+
+A double holds about 16 significant digits and the coordinates are of order 1, so the plane runs out at about 1e-16 - and
+a view has to be far wider than that or neighbouring cells land on the same number. `minSpan` is 1.5e-7, about 24
+doublings below home, which is well short of that limit and set by iterations rather than by precision: each doubling
+costs budget on every cell of every frame.
+
+Coming back out is a pure function of the span rather than an animation of its own:
+
+```
+centre(span) = deep + (home - deep) * (span - minSpan) / (homeSpan - minSpan)
+```
+
+It is exactly `deep` at the moment of the turn, so there is no jump, and exactly `home` when the span is home, so the
+pull-out lands framed on the whole set without anything having to steer it there. In between, the screen offset of the
+point it left is `(deep - centre) / span`, which is constant for all but the last instant - so the view magnifies about
+that point and never appears to pan. A first-order ease towards home would have done the opposite: exponential in time
+against a span that is also exponential in time, it reads as an enormous sideways slide while still deep.
+
+### The cost, which is the real constraint
+
+Cost is cells times iterations and it is the only effect here where both ends have to be capped. Measured on a 133×75
+field with a budget rising from 90 iterations at home to 300 at the floor: **0.4 ms** a frame at the home view and
+**4.3 ms** at the deepest, so 1% and 10% of one core at 24fps. Nearly all of the deep figure is interior cells, which are
+the ones that spend the whole budget.
+
+Two things that did **not** work, both worth knowing before trying them again:
+
+- **Cycle detection.** An interior point's orbit falls onto an attracting cycle, so keeping a reference point and
+  doubling the interval before replacing it should find it and cut the budget short. Measured on the larger field and
+  budget in use at the time, it made deep frames **55% slower** - 6.0 ms to 9.4 ms - and classified not one cell
+  differently, because the expensive cells at depth are not periodic. They are exterior points that need more iterations
+  than the budget allows and get called interior when it runs out.
+- **More depth.** The false-solid fraction - cells the budget calls interior that a 20,000-iteration reference says
+  escape - sits at 5% to 20% at these budgets and is driven by how much boundary is in frame rather than by depth. It is
+  visible as filigree that is slightly too thick, which is a graceful failure; `iterationsPerDoubling` is the dial for it
+  and the per-cell cost is linear in it.
+
+The two ceilings pull against each other and the trade is real: half the cells buys twice the iterations, which is a
+thinner, truer boundary in a coarser picture. 10,000 cells is where both are still just about right.
 
 ## Tuning
 
