@@ -44,6 +44,12 @@ export {
   type TunnelBackgroundOptions,
 } from './tunnel-background.js';
 
+export {
+  createMandelbrotBackground,
+  MANDELBROT_BACKGROUND_DEFAULTS,
+  type MandelbrotBackgroundOptions,
+} from './mandelbrot-background.js';
+
 // The mount harness the six above are built on, for writing a seventh.
 export {
   mountBackground,
@@ -157,6 +163,24 @@ export {
   type TunnelParams,
   type TunnelState,
 } from './tunnel.js';
+
+// The set, and the camera that flies it.
+export {
+  MANDELBROT_DEFAULTS,
+  aimAt,
+  brightnessAt,
+  cellToComplex,
+  createMandelbrot,
+  escapeAt,
+  iterationsFor,
+  patchAt,
+  randomizeMandelbrot,
+  renderMandelbrot,
+  stepMandelbrot,
+  type Mandelbrot,
+  type MandelbrotParams,
+  type MandelbrotState,
+} from './mandelbrot.js';
 
 export { withDefaults } from './options.js';
 

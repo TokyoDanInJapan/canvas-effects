@@ -56,6 +56,39 @@ export const COPY: Record<string, Copy> = {
     ],
   },
 
+  mandelbrot: {
+    heading: 'Mandelbrot',
+    paragraphs: [
+      'A zoomer, and the interesting question is not the set - it is how you draw one in five greys at a hundred and ' +
+        'twenty cells across. Escape-time colouring cannot: the bands crowd together without limit as you approach the ' +
+        'boundary, so they alias into noise exactly where all the detail is.',
+      'So the shading is a <strong>distance estimate</strong>, and here it comes for nothing. The smooth escape count ' +
+        '<code>mu = n + 1 - log2(log|z|)</code> is not an approximate iteration number, it is the exterior potential on ' +
+        'a log scale - exactly <code>1 - log2 G</code> - and the distance to the set is <code>G / |grad G|</code>. In ' +
+        'terms of what is already on screen that is <code>1 / (ln2 * |grad mu|)</code>: a finite difference over a ' +
+        'field that has just been computed. The picture is its own derivative.',
+      'It antialiases itself as a side effect. A filament thinner than a cell is never sampled, so the difference ' +
+        'under-reads the gradient and reports a distance of about one cell instead of zero - and the filament arrives ' +
+        'as a soft grey line rather than falling between two samples. Brightness is a function of distance measured in ' +
+        '<em>cells</em>, so the picture cannot get busier or emptier however far down it goes.',
+      'Where it goes is decided from the frame in front of it, every second or so, because a point chosen in advance ' +
+        'is empty space twenty doublings later. Candidates are scored by the patch around them rather than by the cell ' +
+        'itself - the autopilot is choosing what to <em>magnify</em>, not where to stand.',
+      'A patch has to clear <strong>three</strong> refusals, and that is not belt and braces: a frame can be worthless ' +
+        'in three ways and removing any one of them walks the autopilot into another. Too much interior is the edge of ' +
+        'a lake, which magnifies into a straight line for ever. Too bright is hair finer than the sampling, where every ' +
+        'cell is correctly within a cell of the set and the frame is a flat grey - and the few stray dark cells in it ' +
+        'score a <em>high</em> spread, so it is a feedback loop. Too little interior is open exterior with the set out ' +
+        'of shot, which is exactly where removing the first two sends it.',
+      'It turns round at about 1e-7 because a double runs out - past that, neighbouring cells land on the same number. ' +
+        'The pull-out is a function of the span rather than an animation, so it leaves exactly where it was and ' +
+        'arrives exactly framed on the whole set, with the point it left holding still on screen the whole way.',
+      '<strong>Press and drag to aim it.</strong> The pointer chooses roughly and the autopilot chooses exactly, so ' +
+        'parking it over the middle of a lake steers to the nearest filigree instead of into the dark.',
+      SHARED,
+    ],
+  },
+
   plasma: {
     heading: 'Plasma',
     paragraphs: [

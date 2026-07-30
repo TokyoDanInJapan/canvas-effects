@@ -3,6 +3,8 @@
 // of this.
 
 import {
+  MANDELBROT_BACKGROUND_DEFAULTS,
+  MANDELBROT_DEFAULTS,
   PLASMA_BACKGROUND_DEFAULTS,
   METABALLS_BACKGROUND_DEFAULTS,
   METABALL_DEFAULTS,
@@ -14,6 +16,7 @@ import {
   TUNNEL_BACKGROUND_DEFAULTS,
   TUNNEL_DEFAULTS,
   createPlasmaBackground,
+  createMandelbrotBackground,
   createMetaballsBackground,
   createRainBackground,
   createRidgesBackground,
@@ -67,7 +70,7 @@ const ditherButton = document.getElementById('dither') as HTMLButtonElement;
 const textButton = document.getElementById('text') as HTMLButtonElement;
 const prose = document.querySelector('main') as HTMLElement;
 
-type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'metaballs' | 'tunnel';
+type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'metaballs' | 'tunnel' | 'mandelbrot';
 
 type Stops = ReadonlyArray<readonly [number, number, number]>;
 
@@ -514,6 +517,118 @@ const TUNNEL_DIALS: Dial[] = [
   { key: 'steerEase', label: 'steerEase', min: 0.05, max: 3, step: 0.05, value: 0.5, note: 'drag to steer it' },
 ];
 
+const MANDELBROT_DIALS: Dial[] = [
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 255, step: 1, value: 40, note: 'the readability dial' },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 12,
+    step: 1,
+    value: MANDELBROT_BACKGROUND_DEFAULTS.levels,
+    note: 'colours in the palette',
+  },
+  {
+    key: 'pixelSize',
+    label: 'pixelSize',
+    min: 2,
+    max: 16,
+    step: 1,
+    value: MANDELBROT_BACKGROUND_DEFAULTS.pixelSize,
+  },
+  {
+    key: 'fieldScale',
+    label: 'fieldScale',
+    min: 1,
+    max: 4,
+    step: 1,
+    value: MANDELBROT_BACKGROUND_DEFAULTS.fieldScale,
+  },
+  {
+    key: 'maxFieldCells',
+    label: 'maxFieldCells',
+    min: 2000,
+    max: 40000,
+    step: 1000,
+    value: MANDELBROT_BACKGROUND_DEFAULTS.maxFieldCells,
+    note: 'the cost dial - watch the fps',
+  },
+  { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: MANDELBROT_BACKGROUND_DEFAULTS.fps },
+  { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: MANDELBROT_BACKGROUND_DEFAULTS.gamma },
+  {
+    key: 'speed',
+    label: 'speed',
+    min: 0.05,
+    max: 3,
+    step: 0.05,
+    value: MANDELBROT_DEFAULTS.speed,
+    note: 'doublings a second',
+  },
+  { key: 'returnSpeed', label: 'returnSpeed', min: 1, max: 12, step: 0.5, value: MANDELBROT_DEFAULTS.returnSpeed },
+  {
+    key: 'minSpanLog',
+    label: 'depth',
+    min: 4,
+    max: 13,
+    step: 0.25,
+    // Decades, because the useful range spans seven orders of magnitude and a
+    // linear slider cannot hold it. 7.25 is `MANDELBROT_DEFAULTS.minSpan`.
+    value: Math.round(Math.log10(MANDELBROT_DEFAULTS.homeSpan / MANDELBROT_DEFAULTS.minSpan) * 4) / 4,
+    note: 'decades below home - past ~13 a double gives out',
+  },
+  { key: 'iterations', label: 'iterations', min: 30, max: 400, step: 10, value: MANDELBROT_DEFAULTS.iterations },
+  {
+    key: 'iterationsPerDoubling',
+    label: 'iterPerDoubling',
+    min: 0,
+    max: 40,
+    step: 1,
+    value: MANDELBROT_DEFAULTS.iterationsPerDoubling,
+  },
+  {
+    key: 'maxIterations',
+    label: 'maxIterations',
+    min: 60,
+    max: 1200,
+    step: 20,
+    value: MANDELBROT_DEFAULTS.maxIterations,
+    note: 'too few and the filigree fills in solid',
+  },
+  {
+    key: 'glow',
+    label: 'glow',
+    min: 0.5,
+    max: 12,
+    step: 0.5,
+    value: MANDELBROT_DEFAULTS.glow,
+    note: 'boundary mantle, in cells',
+  },
+  { key: 'bands', label: 'bands', min: 0, max: 1, step: 0.05, value: MANDELBROT_DEFAULTS.bands },
+  { key: 'bandWidth', label: 'bandWidth', min: 2, max: 40, step: 1, value: MANDELBROT_DEFAULTS.bandWidth },
+  {
+    key: 'aimInterval',
+    label: 'aimInterval',
+    min: 0.1,
+    max: 5,
+    step: 0.1,
+    value: MANDELBROT_DEFAULTS.aimInterval,
+    note: 'how often it re-picks a target',
+  },
+  { key: 'aimEase', label: 'aimEase', min: 0.1, max: 5, step: 0.1, value: MANDELBROT_DEFAULTS.aimEase },
+  { key: 'aimReach', label: 'aimReach', min: 0.05, max: 1, step: 0.05, value: MANDELBROT_DEFAULTS.aimReach },
+  { key: 'aimBias', label: 'aimBias', min: 0, max: 0.5, step: 0.01, value: MANDELBROT_DEFAULTS.aimBias },
+  {
+    key: 'steerEase',
+    label: 'steerEase',
+    min: 0.05,
+    max: 3,
+    step: 0.05,
+    value: MANDELBROT_DEFAULTS.steerEase,
+    note: 'drag to aim it',
+  },
+  { key: 'dwell', label: 'dwell', min: 0, max: 5, step: 0.1, value: MANDELBROT_DEFAULTS.dwell },
+];
+
 const DIALS: Record<Effect, Dial[]> = {
   smoke: SMOKE_DIALS,
   plasma: PLASMA_DIALS,
@@ -521,6 +636,7 @@ const DIALS: Record<Effect, Dial[]> = {
   ridges: RIDGE_DIALS,
   metaballs: METABALL_DIALS,
   tunnel: TUNNEL_DIALS,
+  mandelbrot: MANDELBROT_DIALS,
 };
 
 let effect: Effect = 'smoke';
@@ -547,6 +663,35 @@ function mount() {
     fps: Math.round(values.fps),
     random,
   };
+
+  if (effect === 'mandelbrot') {
+    handle = createMandelbrotBackground(canvas, {
+      ...common,
+      fieldScale: Math.round(values.fieldScale),
+      maxFieldCells: Math.round(values.maxFieldCells),
+      mandelbrot: {
+        speed: values.speed,
+        returnSpeed: values.returnSpeed,
+        // The dial is decades below the home view, because the useful range
+        // spans seven orders of magnitude and a linear slider cannot hold it.
+        minSpan: MANDELBROT_DEFAULTS.homeSpan / Math.pow(10, values.minSpanLog),
+        iterations: Math.round(values.iterations),
+        iterationsPerDoubling: Math.round(values.iterationsPerDoubling),
+        maxIterations: Math.round(values.maxIterations),
+        glow: values.glow,
+        bands: values.bands,
+        bandWidth: values.bandWidth,
+        aimInterval: values.aimInterval,
+        aimEase: values.aimEase,
+        aimReach: values.aimReach,
+        aimBias: values.aimBias,
+        steerEase: values.steerEase,
+        dwell: values.dwell,
+      },
+    });
+    if (!handle) fpsOut.textContent = 'no 2D context';
+    return;
+  }
 
   if (effect === 'tunnel') {
     handle = createTunnelBackground(canvas, {

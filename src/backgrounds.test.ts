@@ -1,17 +1,18 @@
 // Every effect, mounted for real.
 //
-// The six mount files are thin now - each is its options, its defaults and a spec
+// The seven mount files are thin now - each is its options, its defaults and a spec
 // handed to `background.ts` - but thin is not the same as right, and a spec that
 // returns the wrong field or never renders would still typecheck. So this mounts
 // each of them against a stubbed canvas and checks the bytes that come out.
 //
-// What it is really for: these six are the entry points the README documents, and
+// What it is really for: these seven are the entry points the README documents, and
 // until now nothing exercised them at all. A wiring mistake in any of them - a
 // field that is never filled, a `rebuild` that forgets to render, an interaction
 // wired to the wrong axis - reaches the page and nothing else here would notice.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeRandom } from './noise.js';
+import { createMandelbrotBackground } from './mandelbrot-background.js';
 import { createMetaballsBackground } from './metaballs-background.js';
 import { createPlasmaBackground } from './plasma-background.js';
 import { createRainBackground } from './rain-background.js';
@@ -185,6 +186,17 @@ const EFFECTS = [
     name: 'tunnel',
     mount: (canvas: HTMLCanvasElement, random: () => number) =>
       createTunnelBackground(canvas, { random, shading: { base: 18, amplitude: 60 } }),
+  },
+  {
+    name: 'mandelbrot',
+    mount: (canvas: HTMLCanvasElement, random: () => number) =>
+      // A coarse field on purpose: this is the one effect whose per-cell cost is
+      // hundreds of iterations, and the wiring is what is under test here.
+      createMandelbrotBackground(canvas, {
+        random,
+        shading: { base: 18, amplitude: 60 },
+        maxFieldCells: 1200,
+      }),
   },
 ];
 
@@ -380,7 +392,7 @@ describe.each(EFFECTS)('$name', ({ mount }) => {
   });
 });
 
-// The shared suite above covers what all six have in common. These are the parts
+// The shared suite above covers what all seven have in common. These are the parts
 // that are particular to one effect, and that a generic test cannot reach: the
 // branches behind an interaction being held, released and settling back.
 describe('effect specifics', () => {

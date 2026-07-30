@@ -18,6 +18,7 @@ import * as index from './index.js';
 import * as background from './background.js';
 import * as dither from './dither.js';
 import * as driver from './driver.js';
+import * as mandelbrot from './mandelbrot.js';
 import * as metaballs from './metaballs.js';
 import * as noise from './noise.js';
 import * as options from './options.js';
@@ -28,6 +29,7 @@ import * as ridges from './ridges.js';
 import * as smoke from './smoke.js';
 import * as tunnel from './tunnel.js';
 
+import * as mandelbrotBackground from './mandelbrot-background.js';
 import * as metaballsBackground from './metaballs-background.js';
 import * as plasmaBackground from './plasma-background.js';
 import * as rainBackground from './rain-background.js';
@@ -44,6 +46,8 @@ const MODULES: Array<{ name: string; module: Record<string, unknown> }> = [
   { name: 'background', module: background },
   { name: 'dither', module: dither },
   { name: 'driver', module: driver },
+  { name: 'mandelbrot', module: mandelbrot },
+  { name: 'mandelbrot-background', module: mandelbrotBackground },
   { name: 'metaballs', module: metaballs },
   { name: 'metaballs-background', module: metaballsBackground },
   { name: 'noise', module: noise },
@@ -80,7 +84,7 @@ describe('index', () => {
     expect(missing).toEqual([]);
   });
 
-  it('exports the six mounts and their defaults', () => {
+  it('exports the seven mounts and their defaults', () => {
     // The documented entry points, spelled out rather than derived: this is the
     // list the README promises.
     for (const name of [
@@ -90,6 +94,7 @@ describe('index', () => {
       'createRidgesBackground',
       'createMetaballsBackground',
       'createTunnelBackground',
+      'createMandelbrotBackground',
     ]) {
       expect(typeof index[name as keyof typeof index]).toBe('function');
     }
@@ -101,6 +106,7 @@ describe('index', () => {
       'RIDGES_BACKGROUND_DEFAULTS',
       'METABALLS_BACKGROUND_DEFAULTS',
       'TUNNEL_BACKGROUND_DEFAULTS',
+      'MANDELBROT_BACKGROUND_DEFAULTS',
     ]) {
       expect(index[name as keyof typeof index]).toBeTypeOf('object');
     }
@@ -122,6 +128,7 @@ describe('index', () => {
     expect(index.nearestBall).toBeTypeOf('function');
     expect(index.startThrow).toBeTypeOf('function');
     expect(index.advanceThrow).toBeTypeOf('function');
+    expect(index.aimAt).toBeTypeOf('function');
   });
 
   it('names nothing it cannot deliver', () => {
