@@ -67,6 +67,12 @@ export const COPY: Record<string, Copy> = {
         'a log scale - exactly <code>1 - log2 G</code> - and the distance to the set is <code>G / |grad G|</code>. In ' +
         'terms of what is already on screen that is <code>1 / (ln2 * |grad mu|)</code>: a finite difference over a ' +
         'field that has just been computed. The picture is its own derivative.',
+      'The interior goes through that same estimate rather than being drawn flat black, and that is what stops ' +
+        'individual cells flickering. Forced to zero, an interior cell sat next to a boundary cell at full brightness - ' +
+        'and a cell on the line between them changes classification whenever the view shifts by less than its own ' +
+        'width, so it alternated between the two ends of the palette every frame. Lit by the same estimate as ' +
+        'everything else it is black deep inside, where the neighbourhood is flat, and bright against the boundary, ' +
+        'which is what its neighbour is too.',
       'It antialiases itself as a side effect. A filament thinner than a cell is never sampled, so the difference ' +
         'under-reads the gradient and reports a distance of about one cell instead of zero - and the filament arrives ' +
         'as a soft grey line rather than falling between two samples. Brightness is a function of distance measured in ' +
