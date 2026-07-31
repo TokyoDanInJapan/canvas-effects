@@ -17,7 +17,7 @@ All seven render at two scales at once, and this is what makes them cheap enough
 
 - The **field** - the expensive part, whatever generates it - is computed at `pixelSize × fieldScale` CSS pixels per
   cell. The smoke and plasma fields are soft and low-frequency and gain nothing from more samples, so they run at half
-  the output resolution; the rain runs at 1:1 for a reason of its own, below. This is where all the real work happens.
+  the output resolution. The rain runs at 1:1 for a reason of its own, below. This is where all the real work happens.
 - The **output** is `pixelSize` CSS pixels per pixel, bilinearly interpolated up from that field and then dithered. Per
   pixel that is a handful of multiply-adds and a table lookup.
 
@@ -39,7 +39,7 @@ README for the cost, which is considerable.
 **Seeing it for yourself.** `dither: false` posterises flat instead. The palette is identical either way - only the
 distribution changes - so it is the cleanest demonstration of what the Bayer threshold is doing. Measured on the demo,
 switching it off takes the proportion of horizontally adjacent pixels that differ from 47.5% to 10.4% on the smoke and
-from 53.1% to 4.7% on the plasma: texture becomes plateaus. It is not a performance dial; both paths quantise once per
+from 53.1% to 4.7% on the plasma: texture becomes plateaus. It is not a performance dial. Both paths quantise once per
 pixel and the dither adds an array lookup and an add.
 
 The Bayer matrix is normalised to `(m + 0.5) / 16`, which averages to **exactly 0.5**. That is the property the whole
@@ -109,8 +109,8 @@ which is why both distort the smoke by the same amount.
 
 The point is momentum, not smoke: it drives the fluid hard enough to shove what is already there aside, and the hole it
 opens and the vortices rolling off its edges are the effect. The velocity is _driven towards_ the jet's rather than
-added to it, so the nozzle behaves like an inflow boundary and holds a fixed speed however hard the surrounding fluid
-and the drag push back - adding would make its strength depend on the frame rate and on how long it had been running.
+added to it, so the nozzle behaves like an inflow boundary. It holds a fixed speed however hard the surrounding fluid
+and the drag push back. Adding would make its strength depend on the frame rate and on how long it had been running.
 
 Two things this got wrong on the way, both instructive. A jet is not a puff: the first version dropped a blob of
 _density_ in, which barely showed, because density added to an already-dense field is mostly clamped away and adds no
@@ -140,17 +140,17 @@ position, the second is evaluated at that displaced position, and the result is 
 from. Folding it twice is what turns plain cloudy noise into something with filaments and swirls in it.
 
 Time enters twice, and it needs to. `drift` slides the whole domain, which on its own would look like a photograph being
-panned; `churn` moves the inner fields against each other, which is what makes it evolve in place.
+panned. `churn` moves the inner fields against each other, which is what makes it evolve in place.
 
 The warp is evaluated on a coarse 36×28 grid and interpolated per pixel, so the noise runs ~1,000 times a frame instead
-of once per pixel. That grid is rectangular because the domain it samples is: x is stretched by 4/3 so the field does
-not look squashed on a wide window, and the grid has to be wider by the same factor or each cell covers a third more
-domain in x than in y and the warp reads as smeared sideways. 36×28 puts the cells within 2.8% of square, where a 32×32
+of once per pixel. That grid is rectangular because the domain it samples is. x is stretched by 4/3 so the field does
+not look squashed on a wide window, and the grid has to be wider by the same factor. Otherwise each cell covers a third
+more domain in x than in y, and the warp reads as smeared sideways. 36×28 puts the cells within 2.8% of square, where a 32×32
 grid at the same cost would be 33% out. The two are a pair - change one and the other has to follow. The tile it samples has every frequency at an integer number of cycles across it, which is what makes
 it wrap without a seam - and it has to wrap, because warped coordinates wander a long way outside `[0, 1]`.
 
 Domain warping is a well-known technique. The layers under it are an integer hash, value noise on the hash, and fbm on
-the noise; the hash mixes with MurmurHash3's public-domain finalising constants, credited in the source.
+the noise. The hash mixes with MurmurHash3's public-domain finalising constants, credited in the source.
 
 **Click to ripple.** A click sends a ring of radial displacement out from where it landed, added to the finished warp
 coordinate. Two details make it behave:
@@ -158,7 +158,7 @@ coordinate. Two details make it behave:
 - It is anchored in **screen** space, not the warp's domain. The domain drifts, so a ripple placed in domain coordinates
   would slide across the page and not stay where it was clicked.
 - Its age runs on a **real-time** clock, deliberately not on animation time. Animation time is scaled by `speed`, so
-  ageing a ripple on it would make one last four times as long at quarter speed - the disturbance would slow down along
+  ageing a ripple on it would make one last four times as long at quarter speed. The disturbance would slow down along
   with the field it is disturbing, which is not how a splash behaves.
 
 The ring is a Gaussian band about an expanding radius, so the disturbance travels outward rather than the whole disc
@@ -166,7 +166,7 @@ heaving at once, and distances are aspect-corrected so it stays circular on a wi
 changing per 250ms goes from 508 idle to 2147 just after a click, and back to 471 once the lifetime elapses.
 
 Listened for on `window` rather than the canvas, for the same reason the smoke's stirring is - a background canvas is
-`pointer-events: none`, so it never sees a pointer itself. `interactive: false` turns it off; `maxRipples` bounds how many
+`pointer-events: none`, so it never sees a pointer itself. `interactive: false` turns it off, and `maxRipples` bounds how many
 run at once, and a click over that is dropped rather than queued, so a burst does not leave a backlog rippling after the
 reader has stopped.
 
@@ -180,10 +180,10 @@ _before_ the blur, so successive frames agree with each other.
 active head moves down its lane and writes brightness into the cells it crossed. That is the entire simulation.
 
 **The trail is a consequence, not a drawing.** The obvious implementation draws a gradient of length `L` behind each
-head - which needs `L` as a parameter, recomputes the gradient every frame, and breaks when a head moves more than one
-cell per frame, because the tail either detaches or has to be stitched back on. Decaying the whole field instead costs
-one multiply per cell, handles any speed without a special case, and gets two things right for free: a fast head leaves
-a **longer** streak than a slow one, because its brightness has had less time to fade over the same distance; and a
+head. That needs `L` as a parameter, recomputes the gradient every frame, and breaks when a head moves more than one
+cell per frame - the tail either detaches or has to be stitched back on. Decaying the whole field instead costs
+one multiply per cell, and handles any speed without a special case. It gets two things right for free. A fast head
+leaves a **longer** streak than a slow one, because its brightness has had less time to fade over the same distance. And a
 head retiring at the bottom leaves its trail to fade in place rather than vanishing with it.
 
 Trail length is therefore not a parameter but a ratio. A streak reaches `speed × ln(1 / brightness) / fade` cells
@@ -213,7 +213,7 @@ untouched when nothing is running, so an idle page pays nothing, not even a copy
 are recomputed.
 
 Sampling wraps sideways and clamps vertically. Wrapping in x matches the lanes, so a ring near an edge pulls streaks
-round from the far side; clamping in y is right for exactly the reason it would be wrong in the smoke - rain has a top it
+round from the far side. Clamping in y is right for exactly the reason it would be wrong in the smoke. Rain has a top it
 falls from and a bottom it retires at, and wrapping would drag the bottom of the screen back up into the top.
 
 **It is subtler than the plasma's ripple, and structurally so.** The plasma is a dense continuous field, so a
@@ -226,7 +226,7 @@ discontinuity. `distortStrength` is the dial if you want more of it.
 
 This is the falling-light half of the Matrix look, not the glyphs. The renderer takes a scalar field and posterises it
 to five greys through a 4×4 Bayer matrix on a 6px cell - at that size a character is about three cells tall and reads
-as noise. Streaks survive the palette; letterforms do not. Glyphs would need their own renderer and would not share the
+as noise. Streaks survive the palette, and letterforms do not. Glyphs would need their own renderer and would not share the
 dither at all, which is a different library rather than a fourth effect in this one.
 
 ## Ridges: a landscape flown over
@@ -238,10 +238,10 @@ and the characteristic bitten-out look where a near crest eats into the rows abo
 draw from nearest to farthest, keep the highest point covered so far per column, and skip anything at or below it. One
 pass, no z-buffer, no sorting - `rows × width` work for a whole frame.
 
-**Rows roll off the bottom rather than being deleted at it.** `overscan` keeps rows alive past the near edge, because a
-crest stays visible long after its baseline has left the screen and its silhouette must keep occluding what is behind
-it. Without it the nearest row crept down to `bottomMargin`, popped out of existence the moment `travel` crossed the
-next whole number, and nothing was ever drawn below `bottomMargin` at all.
+**Rows roll off the bottom rather than being deleted at it.** `overscan` keeps rows alive past the near edge. A crest stays
+visible long after its baseline has left the screen, and its silhouette must keep occluding what is behind it. Without
+it the nearest row crept down to `bottomMargin`, popped out of existence the moment `travel` crossed the next whole
+number, and nothing was ever drawn below `bottomMargin` at all.
 
 One subtlety that came with it: `rowAmplitude` freezes a row's size once it passes the near edge. Strict perspective
 would keep enlarging it - you are flying into it - and a row barely past the edge would loom several screen heights
@@ -250,22 +250,22 @@ qualify as fully below the screen and would never leave. Freezing the size lets 
 are entirely below the edge are skipped, so `overscan` is a bound rather than a workload.
 
 **Filling and trails**, both off by default. `fill` turns the stack from a pile of lines into a pile of solid
-silhouettes, and it costs nothing to work out where: the floating horizon already knows the topmost point covered by
-nearer rows, so the fill runs from a row's own curve down to that - exactly the region belonging to it. `fillLevel`
+silhouettes, and it costs nothing to work out where. The floating horizon already knows the topmost point covered by
+nearer rows, so the fill runs from a row's own curve down to that. It is exactly the region belonging to that row. `fillLevel`
 keeps it dimmer than the line so the crest still reads against its own body. Measured: filling takes the lit fraction of
 the screen from 24% to 85%.
 
 `fillLevel` is a ceiling on fill brightness and scales both kinds. Without `fillRandom` it wants to stay below 1, or
 the silhouettes go flat and the ridgelines vanish into them. With `fillRandom` it darkens the whole set without
-flattening it: at the default 0.34 the fills still span every palette colour, they are simply dimmer - measured on an
-eight-level violet ramp, eight distinct colours at both 0.34 and 1.0, with mean channel value 58 against 106. That is
+flattening it. At the default 0.34 the fills still span every palette colour and are simply dimmer. Measured on an
+eight-level violet ramp: eight distinct colours at both 0.34 and 1.0, with mean channel value 58 against 106. That is
 what keeps it usable behind text.
 
 `fillRandom` gives every profile its own fill value instead, so each silhouette takes a different colour from the
 palette - pair it with a ramp. The value comes from hashing the row's `worldZ` rather than being rolled per frame, which
 is the whole trick: a row keeps its colour for its entire life as it descends, where a per-frame roll would make the
 stack strobe. It ignores depth on purpose, since fading the fills by distance would pull the colours back towards each
-other, though it does respect `fillLevel`. With dithering on each fill is a mix of two neighbouring palette colours; `dither: false` gives flat single ones.
+other, though it does respect `fillLevel`. With dithering on, each fill is a mix of two neighbouring palette colours. `dither: false` gives flat single ones.
 
 `trail` keeps a fraction of the previous frame, so a descending crest smears behind itself. It is faded and maxed rather
 than blended, like the rain's trails - a lerp towards the new frame would dim the lines, and full brightness has to stay
@@ -274,7 +274,7 @@ this effect otherwise is not. It needs no special handling against the occlusion
 above the line, on the side the horizon does not clip.
 
 **Rows are indexed by travel, not by screen position.** A profile is tied to a whole number of `travel`, so it keeps
-its own shape for its whole life and simply slides down as you fly past it; a new one enters at the top each time
+its own shape for its whole life and simply slides down as you fly past it. A new one enters at the top each time
 `travel` crosses an integer. Tying profiles to screen slots instead makes the terrain churn in place without ever
 arriving, which looks like morphing rather than flight.
 
@@ -310,7 +310,7 @@ Two decisions carry it:
   through it, which reads as a stationary distortion rather than as something you did to the landscape.
 - **Distance is measured in a space where a row counts as `wobbleRowSpacing` across.** That is what makes one front
   spread sideways along the struck line _and_ outward through its neighbours. It is the dial between a wobble that runs
-  along one line and one that crosses the stack; lower spreads across rows faster.
+  along one line and one that crosses the stack. Lower spreads across rows faster.
 
 Working out which profile was clicked needs `depthAtY`, the inverse of `rowY` - the rows are placed by a perspective
 curve, so it is not a division. The offset is applied to the curve before anything is drawn, so the fill and the
@@ -321,12 +321,12 @@ Measured with the flight slowed right down, so the wobble is the only thing movi
 
 ## Metaballs: an implicit surface
 
-`src/metaballs.ts`. Each ball adds a falloff to a shared scalar field; the field is then thresholded to a surface.
+`src/metaballs.ts`. Each ball adds a falloff to a shared scalar field, and the field is then thresholded to a surface.
 
 **The merging is not a drawing trick.** Two balls whose individual contributions both fall short of `iso` can cross it
-together, so a bridge appears between them before their outlines touch, thickens as they close, and thins away as they
-part. There is no special case for it anywhere - it is only what a sum does when two falloffs overlap. `metaballs.test.ts`
-pins exactly that: each ball alone below the threshold at the midpoint, the pair above it.
+together. A bridge appears between them before their outlines touch, thickens as they close, and thins away as they
+part. There is no special case for it anywhere. It is only what a sum does when two falloffs overlap, and
+`metaballs.test.ts` pins exactly that: each ball alone below the threshold at the midpoint, the pair above it.
 
 **Wyvill's falloff, not Blinn's exponential.** `exp(-b · r²)` never reaches zero, so every ball influences every cell
 and the cost is cells × balls. `(1 - r²/R²)³` is smooth to the second derivative, needs no transcendental, and is
@@ -341,27 +341,28 @@ a single draw with no settling run. A test checks that stepping to `t` in forty 
 one.
 
 **Positions live in height units.** `x` spans `0..aspect` and `y` spans `0..1`, so distance is isotropic and a ball is
-round on any window. Working in `0..1` on both axes would stretch every blob into an ellipse on a wide screen; a test
+round on any window. Working in `0..1` on both axes would stretch every blob into an ellipse on a wide screen. A test
 measures a lone blob's extent both ways and requires them equal.
 
 **Press and drag to carry a blob around.** A dragged ball is just another contribution to the sum, so it reaches for its
-neighbours exactly as the others do - run it into one and they fuse, pull away and the neck stretches and parts. It is the
-one interaction here that needs no emissions at all: the held ball simply _is_ wherever the pointer last was, so there is
-nothing to space out or interpolate, and it comes out smooth for free. Measured against the smoke, which is the yardstick
+neighbours exactly as the others do. Run it into one and they fuse. Pull away and the neck stretches and parts. It is
+the one interaction here that needs no emissions at all: the held ball simply _is_ wherever the pointer last was, so
+there is nothing to space out or interpolate, and it comes out smooth for free. Measured against the smoke, which is the yardstick
 for that: variability 0.16 against 0.11, with no stalled samples.
 
 **Letting go throws it.** The drag's velocity is handed over on release, so the ball coasts on in the direction it was
 moving and _then_ curves back onto its path. Without that it reads as losing momentum: the blend pulls it straight back,
-and a hard flick and a careful placement look identical. Damping is exponential so it behaves the same at 24fps and
-60fps, the handover speed is capped so a violent flick cannot fling the ball off the edge before the blend reels it in,
-and the position is held inside the field so a throw at an edge slides along it rather than vanishing and reappearing.
+and a hard flick and a careful placement look identical. Three details make it behave. Damping is exponential, so it works
+the same at 24fps and 60fps. The handover speed is capped, so a violent flick cannot fling the ball off the edge before
+the blend reels it in. And the position is held inside the field, so a throw at an edge slides along it rather than
+vanishing and reappearing.
 
 **Releasing has to be a blend, not a handover.** A ball's position is a closed-form function of the clock, so it never
-stopped moving while you held it - hand control straight back and it jumps from your cursor to wherever its orbit had got
+stopped moving while you held it. Hand control straight back and it jumps from your cursor to wherever its orbit had got
 to. `BallOverride.weight` eases from 1 to 0 instead, so the ball converges on a target that is itself still travelling.
 There is a test that walks the weight down and requires the gap to the free position to shrink monotonically to zero.
 
-`grabReach` bounds how near a press has to be; beyond it a press takes hold of nothing rather than yanking a blob in from
+`grabReach` bounds how near a press has to be. Beyond it a press takes hold of nothing rather than yanking a blob in from
 across the screen. `grabEase` and `releaseEase` are both in real seconds, unscaled by `speed`, so picking a blob up does
 not take four times as long because the arrangement happens to be drifting slowly.
 
@@ -378,11 +379,12 @@ texture at `(angle, depth / radius)`. That reciprocal is the entire perspective:
 projects to a screen radius inversely proportional to how far down the cylinder it sits, so sampling at `depth / radius`
 _is_ the projection. No camera, no matrix, no depth buffer.
 
-Adding to that coordinate walks the viewer forward. Because the far wall is compressed into the middle, features do not
+Adding to that coordinate walks the viewer forwards. Because the far wall is compressed into the middle, features do not
 translate outward at a constant rate - they **stretch**, moving further the further out they already are. Measured over
 1.4 s at the defaults, a feature at radius 0.15 moves 0.007 while one at 0.5 moves 0.091 - twelve times as far. That is
-the acceleration you feel, and it also means no single cross-correlation shift fits a ray: the first test written for the forward motion
-reported zero displacement while the effect was working perfectly, and had to be rewritten against the projection itself.
+the acceleration you feel. It also means no single cross-correlation shift fits a ray. The first test written for the
+forward motion reported zero displacement while the effect was working perfectly, and had to be rewritten against the
+projection itself.
 
 ### It winds, which is most of the motion
 
@@ -390,8 +392,8 @@ A straight cylinder with a drifting vanishing point reads as the camera wobbling
 corridor whose _axis_ winds reads as flight, because the near wall sweeps past while the far end holds still. That is
 `bend`, and it is exact rather than faked.
 
-Put the wall at radius 1 about an axis at `(X(z), Y(z))` and project through a pinhole: a wall point at depth `z`, angle
-`t`, lands at `R · (X(z) + cos t, Y(z) + sin t)`, where `R = f / z` is the radius the wall appears at. Read that
+Put the wall at radius 1 about an axis at `(X(z), Y(z))` and project through a pinhole. A wall point at depth `z` and
+angle `t` lands at `R · (X(z) + cos t, Y(z) + sin t)`, where `R = f / z` is the radius the wall appears at. Read that
 backwards - which is what sampling the field does - and the screen offset to undo is `R · X(z)`, with `R` the
 **corrected** radius rather than the raw one. So the exact answer is a fixed point, and one pass of it is enough: solve
 the straight tunnel, look up the axis at the depth that gives, subtract, solve again. One extra square root, and no extra
@@ -411,7 +413,7 @@ Two things fell out of building it:
   horizon, in effect, and a bent corridor really is blocked by its own wall beyond some depth.
 - **The axis is tabulated, not evaluated.** Two sines per cell measured 3.8 ms a frame on a 160,000-cell field, as much
   again as the rest of the effect together. The axis depends on nothing but depth, and one frame only ever sees depths
-  between its furthest corner and the edge of the vignette - so a few hundred samples across that span replace every one
+  between its furthest corner and the edge of the vignette. So a few hundred samples across that span replace every one
   of those sines with a lerp, for a third off the bend's cost. The same trick as the wall tile, and a test pins the table
   against the exact function.
 
@@ -422,7 +424,7 @@ counter-rotating against its own bend.
 ### The wall is built, not sampled from noise
 
 It has to wrap seamlessly around the circumference or a seam runs the length of the tunnel. fbm only wraps when the
-angular span happens to land on an integer lattice boundary, which is a constraint on two parameters at once and
+angular span happens to land on an integer lattice boundary. That is a constraint on two parameters at once, and it
 quietly breaks when either moves. A tile of sinusoids at whole-number frequencies is periodic by construction, so it
 wraps whatever the parameters do - the same reason the plasma builds one.
 
@@ -434,7 +436,7 @@ worked.
 ### The undersampling, which is what the vignette is really for
 
 `depth / radius` is not a uniform mapping, so evenly spaced cells do not sample it evenly. The coordinate moves by about
-`depth × cell / radius²` between neighbours, which grows without bound towards the middle - so however fine the field,
+`depth × cell / radius²` between neighbours, which grows without bound towards the middle. So however fine the field,
 there is an inner disc where consecutive cells land more than half a ring apart and the rings become noise. Two things
 follow, and neither was visible in any aggregate metric:
 
@@ -449,20 +451,20 @@ follow, and neither was visible in any aggregate metric:
 boundary outward as its square root. At the original 0.34 the whole visible annulus spanned 0.47 of a tile - 1.4 rings  - 
 which is why it read as mottle rather than as depth. At 1 it spans 2.3 tiles, or seven rings.
 
-Cost is an `atan2`, a square root and a reciprocal per cell, plus the bend's second square root and table lookup: on a
-full 160,000-cell field, 3.9 ms a frame straight and 6.2 ms bent, or 9% and 15% of one core at 24 fps. Between the plasma
+Cost is an `atan2`, a square root and a reciprocal per cell, plus the bend's second square root and table lookup. On a
+full 160,000-cell field that is 3.9 ms a frame straight and 6.2 ms bent, or 9% and 15% of one core at 24 fps. Between the plasma
 and the fluid solver. That ceiling is only reached above about 3200×1800 - at 1280×800 the bend costs nothing measurable
 against the frame clock's own quantisation.
 
 ### Drag to steer it
 
 A press pulls the vanishing point towards the pointer and a release eases it back to its own drift. The blend is carried
-between frames - the one piece of state in an effect that is otherwise a pure function of the clock - and it eases in
-real seconds rather than scaled ones, because taking hold of the tunnel should not take longer just because the flight is
-slow.
+between frames, and is the one piece of state in an effect that is otherwise a pure function of the clock. It eases in
+real seconds rather than scaled ones, because taking hold of the tunnel should not take longer just because the flight
+is slow.
 
-The dark centroid of the whole field is **not** a way to measure this, which cost a metric to find out: the wall's own
-dark bands are spread over the entire frame and swamp the vignette, so the centroid sits within 0.002 of the middle
+The dark centroid of the whole field is **not** a way to measure this, which cost a metric to find out. The wall's own
+dark bands are spread over the entire frame and swamp the vignette. The centroid sits within 0.002 of the middle
 whatever the steer is doing. Comparing mean brightness in a small disc at the pointer against the same disc at the
 geometric centre does show it.
 
@@ -504,7 +506,7 @@ d = 1 / (ln2 * |grad mu|)
 over the grid and nothing per iteration - no derivative carried through the orbit, no second pass over it. The picture is
 its own derivative.
 
-There is a test pinning this down as an arithmetic fact rather than a claim: render the same view on a grid and on one
+There is a test pinning this down as an arithmetic fact rather than a claim. Render the same view on a grid and on one
 twice as fine, so that cell `(2i, 2j)` samples exactly the complex point cell `(i, j)` did. The cell is half as wide, so
 the distance reported in cells should be twice. Median ratio over the field: **2.004**.
 
@@ -547,8 +549,8 @@ interior or a featureless exterior by the time you get there. So the target is r
 `aimInterval` seconds, and it can only ever be somewhere the current picture has something.
 
 **What it picks matters as much as that it re-picks, and the obvious score is wrong.** So a candidate is scored by the
-**patch around it** rather than by the cell itself, which is the right question: the autopilot is choosing what to
-magnify, not where to stand. What wins is the most varied patch - filigree, and magnifying filigree gives filigree - but
+**patch around it** rather than by the cell itself. That is the right question, because the autopilot is choosing what
+to magnify, not where to stand. What wins is the most varied patch - filigree, and magnifying filigree gives filigree - but
 only among patches that clear three refusals first.
 
 Three, and not as belt and braces. A frame can be worthless in three different ways, and taking out any one of them
@@ -565,31 +567,31 @@ The first is the one everybody thinks of: the edge of a lake is a smooth analyti
 straight line dividing dark from light, for ever.
 
 The second is subtler. Brightness runs with nearness to the set, so a patch bright nearly everywhere is one where every
-filament is thinner than a cell - the distance estimate quite correctly reports "within a cell of the set" for the whole
-neighbourhood, and the frame comes out a flat mid-grey with stray dark cells where a filament happened to land on a
-sample. **Those stray cells are the trap**: they sit at the far end of the range from everything around them, so the
-patch holding one scores a *high* spread, so the autopilot aims at it - and arriving there is more of the same. It is a
+filament is thinner than a cell. The distance estimate quite correctly reports "within a cell of the set" for the whole
+neighbourhood, and the frame comes out a flat mid-grey - with stray dark cells where a filament happened to land on a
+sample. **Those stray cells are the trap.** They sit at the far end of the range from everything around them, so the
+patch holding one scores a *high* spread and the autopilot aims at it. Arriving there is more of the same. It is a
 feedback loop, and more depth did not clear it.
 
 The third is what the first two leave. With no floor on the interior fraction the safest patch is always the one
 furthest from the set, and the run ends up in open exterior: soft grey blobs, no filigree, nothing to recognise.
 
 All three together: **2%** of frames in any of those states. There is also a counter, because one empty scan is a moment
-and not a verdict - three in a row abandons the descent, one does not. Turning round on the first made a small canvas,
-where the patch window is a large fraction of the frame and harder to satisfy, descend for four seconds at a time and
-spend the rest of its life pulling out again.
+and not a verdict: three in a row abandons the descent, one does not. Turning round on the first made a small canvas
+descend for four seconds at a time, then spend the rest of its life pulling out again - the patch window is a large
+fraction of a small frame, and harder to satisfy.
 
 ### Why it turns round, and why the pull-out needed no animating
 
-A double holds about 16 significant digits and the coordinates are of order 1, so the plane runs out at about 1e-16 - and
-a view has to be far wider than that or neighbouring cells land on the same number. `minSpan` is **1e-11**, about 38
+A double holds about 16 significant digits and the coordinates are of order 1, so the plane runs out at about 1e-16.
+A view has to be far wider than that, or neighbouring cells land on the same number. `minSpan` is **1e-11**, about 38
 doublings below home, and precision is the only thing that sets it.
 
 It was 1.5e-7 - fourteen doublings and a factor of fifteen thousand shallower - on the reasoning that depth costs
 iterations on every cell of every frame. **That reasoning was wrong.** The budget a frame needs does not grow with depth:
 it is set by how much boundary is in shot, not by magnification. Holding the false-solid fraction under 5% took between
-2,000 and 3,200 iterations at 24 doublings, at 36 and at 48 alike, and flying the autopilot to each of those floors and
-measuring what it renders says the same - cost 3.4-3.9 ms, false-solid 18-26%, contrast 0.30-0.35, flat all the way
+2,000 and 3,200 iterations at 24 doublings, at 36 and at 48 alike. Flying the autopilot to each of those floors and
+measuring what it renders says the same: cost 3.4-3.9 ms, false-solid 18-26%, contrast 0.30-0.35, flat all the way
 down.
 
 The useful measure of the precision that *does* bind is **how many representable doubles fit across one field cell**. The
@@ -607,8 +609,8 @@ distance estimate is a finite difference between cells, so it needs sub-cell roo
 Rendering the floor at 44 doublings gives a soft-edged blob with no filigree in it anywhere. 38 leaves real room.
 
 **Two metrics missed this, and it is worth knowing which.** Counting adjacent cells that land on bit-identical escape
-counts reads 15% at 42 doublings and only reaches 79% at 51 - far too blunt, because exact equality is the last symptom,
-long after sub-cell structure has gone. The field's standard deviation is no better: it reads **0.337** at the
+counts reads 15% at 42 doublings and only reaches 79% at 51. That is far too blunt: exact equality is the last symptom,
+long after sub-cell structure has gone. The field's standard deviation is no better. It reads **0.337** at the
 44-doubling floor, because a large dark region beside a large light one has plenty of contrast and no structure
 whatever. It was rendering the frame and looking at it that settled the number.
 
@@ -642,7 +644,7 @@ a full cycle with a 24fps loop throttled onto a 60Hz refresh the way `driver.ts`
 | all four fixed | **1.7%** | **45%** |
 
 **The timestep was the fixed one**, and that is 48% of the 48%. A fixed step hands over `1 / fps` however long the frame
-took, which the smoke needs - its advection is only stable over a bounded step, so a slow frame has to make the fluid
+took, which the smoke needs. Its advection is only stable over a bounded step, so a slow frame has to make the fluid
 drift slower rather than further. Nothing here is like that: the span is `2^(rate * dt)` and the eases are `approach`,
 both exact for any step. And a constant step is *actively wrong* when the frame rate does not divide the refresh rate.
 At 24fps on 60Hz the driver draws every second or third refresh, so frames are on screen for 33ms and 50ms alternately
@@ -671,8 +673,8 @@ picture up to 2.4 times as far as their neighbours. A second lag in front of the
 interval - makes the position smooth in its first derivative too, so a re-aim is a curve.
 
 **And one real bug, which only a deep zoom could show.** The pull-out's `frame` was measured from `minSpan`, but the
-descent stops a little above it, at whatever the coast covered. The difference is nothing in complex units and is then
-divided by a span of about 1e-7 to reach the screen: it put the view an eighth of a screen from where the descent left
+descent stops a little above it, at whatever the coast covered. The difference is nothing in complex units, and is then
+divided by a span of about 1e-7 to reach the screen. It put the view an eighth of a screen from where the descent left
 it, in one frame, measuring as a ten-fold jump. Measuring from the span the descent actually stopped at makes it exact
 at both ends - `deep` at the turn, `home` at the top.
 
@@ -688,17 +690,17 @@ the view's own motion does not count: **8.5%** of consecutive frames at a sample
 movement.
 
 Nothing had to be added to fix it, only taken away. An interior cell already carries the iteration budget as its escape
-count, so the difference against its neighbours means something - flat in the deep interior, so the distance comes out
-enormous and the cell is black, and steep next to the boundary, so it is bright, which is what its exterior neighbour is
-too. The classification stops being a cliff and the flip stops mattering. The contours are the one exception: an interior
+count, so the difference against its neighbours means something. It is flat in the deep interior, so the distance comes
+out enormous and the cell is black. It is steep next to the boundary, so the cell is bright - which is what its exterior
+neighbour is too. The classification stops being a cliff and the flip stops mattering. The contours are the one exception: an interior
 escape count is the same synthetic number everywhere, so banding it would lay a flat tone across the whole set, and they
 fade out as the distance goes to nothing anyway.
 
 That left a tail, at 2.4%, from a blind spot rather than a cliff. **A central difference cannot see a feature one cell
-wide**: with exterior on both sides of a single interior cell the two halves cancel, the estimate reports the set as
-nowhere near, and a one-cell filament got a dark speck down the middle of its own glow. The classification knows what the
-arithmetic cannot - a cell with a neighbour on the other side of the line is *on* the boundary, whatever its
-surroundings make of it - so its distance is capped at half a cell. Worst disagreement across the line went from 0.626 to
+wide.** With exterior on both sides of a single interior cell the two halves cancel, so the estimate reports the set as
+nowhere near, and a one-cell filament got a dark speck down the middle of its own glow. The classification knows what
+the arithmetic cannot. A cell with a neighbour on the other side of the line is *on* the boundary, whatever its
+surroundings make of it, so its distance is capped at half a cell. Worst disagreement across the line went from 0.626 to
 0.104, with a median of 0.002.
 
 | | flicker |
@@ -723,20 +725,22 @@ much.
 
 Two changes, both about the fact that a zoom is one coherent motion the eye tracks.
 
-**The camera carries momentum**, and it is sprung onto the pull-out's framing as well as onto the aim - assigning that
-position directly dropped whatever lateral velocity the descent had in a single frame, and every one of the worst frames
-for smoothness over a whole cycle was one of those transitions. It is a critically damped spring with velocity as state, worked entirely in screen
-units - the offset is divided by the span going in and multiplied by it coming out - so both the spring and the
-momentum behind it mean the same thing at every magnification. A velocity in complex units would be a hundred-thousand
+**The camera carries momentum**, and it is sprung onto the pull-out's framing as well as onto the aim. Assigning that
+position directly dropped whatever lateral velocity the descent had, in a single frame. Every one of the worst frames
+for smoothness over a whole cycle was one of those transitions.
+
+It is a critically damped spring with velocity as state, worked entirely in screen units. The offset is divided by the
+span going in and multiplied by it coming out, so both the spring and the momentum behind it mean the same thing at
+every magnification. A velocity in complex units would be a hundred-thousand
 times faster by the bottom of a descent. Critically damped on purpose: it is the fastest approach that never
 overshoots, and an overshoot in a background reads as a wobble rather than as weight.
 
 **The goal walks instead of jumping.** It used to be replaced every `aimInterval` by whatever `aimAt` picked, which is
 a corner in the motion however well it is filtered afterwards. Now it moves every frame, under two influences at once:
 
-- **Towards the picker.** `aimAt` still runs on the interval and still chooses well; the goal is *eased* towards its
+- **Towards the picker.** `aimAt` still runs on the interval and still chooses well, and the goal is *eased* towards its
   choice rather than teleported to it. This is the half that keeps the picture good.
-- **Along the boundary.** The field's gradient points towards the set, so its perpendicular is a contour - and since
+- **Along the boundary.** The field's gradient points towards the set, so its perpendicular is a contour. And since
   brightness is a function of distance in cells, a contour of equal brightness is a curve at a fixed distance from the
   set. Running along it traces the filigree. This is the half that explores.
 
@@ -747,9 +751,9 @@ Both are continuous, so neither shows as a jump. Getting there took two wrong tu
   deviation, which is what separates a crisp frame from a mushy one: **0.237** against **0.334** for views seated the
   way `aimAt` seats them, and the frames looked it. With the pull it is **0.354** - better than either.
 - **The keep test must be looser than the pick test.** Asking every three quarters of a second whether the goal is
-  still somewhere `aimAt` *would* choose threw it away about once a second, and every one of those is the jump the walk
-  exists to avoid. Worse, it asked the wrong question: the walk deliberately sits a cell and a half off the boundary,
-  so its patch is bright and nearly empty of interior by construction - 24% of the time it fell under the interior
+  still somewhere `aimAt` *would* choose threw it away about once a second. Every one of those is the jump the walk
+  exists to avoid. Worse, it asked the wrong question. The walk deliberately sits a cell and a half off the boundary,
+  so its patch is bright and nearly empty of interior by construction. 24% of the time it fell under the interior
   floor and 25% over the brightness ceiling. What matters once a goal is chosen is only whether it is still on screen
   and still near the boundary.
 
@@ -759,7 +763,7 @@ Magnifying about the middle of the screen multiplies any screen offset by the zo
 already dead centre is being pushed outwards at `2^speed` a second - 1.41 at the default - while the spring closes on it
 at about `1 / aimEase`, which is 1.11. **The zoom wins.** Measured over four descents, the view sat a median of 0.21
 screen heights from its target and a 95th percentile of 0.46, which is most of the way to the edge. It was not lagging
-behind on the way to arriving; it was never going to arrive.
+behind on the way to arriving. It was never going to arrive.
 
 Holding the aim still under the zoom takes the exponential out of the problem and leaves the spring to converge on what
 remains. It is also the smoother motion - the picture then magnifies about a fixed point rather than magnifying and
@@ -768,9 +772,9 @@ translating at once - and measurably so: flicker came down as well, since less c
 Two more things were pulling the target off centre, both in the picker:
 
 - **`aimBias` never stopped.** It is what sends one run somewhere different from the last, and it does that by
-  preferring a target off to one side - which is right at the start of a descent and wrong for the rest of it, because
-  an off-centre target is one the zoom is permanently pulling away from. It decides the heading now and then fades over
-  about six seconds.
+  preferring a target off to one side. That is right at the start of a descent and wrong for the rest of it, because an
+  off-centre target is one the zoom is permanently pulling away from. It decides the heading now, then fades over about
+  six seconds.
 - **The picker had no hysteresis.** Nothing stopped it hopping between two candidates it scored almost equally, and
   each hop is both a jolt and a target that was never reached. Half the preference is now where it last pointed, which
   settles it without ever refusing a better cell - the preference only breaks ties.
@@ -800,22 +804,22 @@ The same two moves double as the recovery when a frame stops being worth looking
 - A **dim** frame is the opposite, nothing near enough to be lit, and there backing out only makes it emptier. That one
   stops instead and lets the walk carry the view to something.
 
-Backing out of a *lake* was the first thing tried and was much worse than either: a rescue that gives up two and a half
-doublings re-descends into the same place, and four of eight seeded runs spent 62% of their time retreating and never
+Backing out of a *lake* was the first thing tried, and was much worse than either. A rescue that gives up two and a
+half doublings re-descends into the same place. Four of eight seeded runs spent 62% of their time retreating, and never
 got more than five doublings down at all.
 
 ### One measurement that was wrong, and what it cost
 
 For a while this steered on the fraction of the frame that is interior, on the obvious reading that a frame full of set
 is a black rectangle. It is not. The set is drawn dark and only its boundary glows, so a frame that is 85% interior is
-85% *silhouette* - and rendering the frames the metric was calling failures showed one of the better things this draws,
-a lit spike of exterior driven into a dark mass. Steering away from those spent a third of the cycle rescuing frames
+85% *silhouette*. Rendering the frames the metric was calling failures showed one of the better things this draws: a lit
+spike of exterior driven into a dark mass. Steering away from those spent a third of the cycle rescuing frames
 that needed no rescue.
 
 What replaced it is three numbers off one pass over the field, in `frameTone`: how much of the frame is lit, how bright
 it is on average, and how much of it is interior. The lit fraction is "is there anything to see" - it never once fell
 below 0.107 over 1,276 frames. The mean catches the wash, which the lit fraction cannot, since both a wash and a good
-frame reach 1.0 lit; the mean separates them at 0.75 against a 95th percentile of 0.72. And the interior share is not a
+frame reach 1.0 lit. The mean separates them at 0.75 against a 95th percentile of 0.72. And the interior share is not a
 quality measure at all, except at zero, which is the set out of shot.
 
 ### The cost, which is the real constraint
@@ -835,8 +839,8 @@ Two things that did **not** work, both worth knowing before trying them again:
   than the budget allows and get called interior when it runs out.
 - **More depth.** The false-solid fraction - cells the budget calls interior that a 20,000-iteration reference says
   escape - sits at 5% to 20% at these budgets and is driven by how much boundary is in frame rather than by depth. It is
-  visible as filigree that is slightly too thick, which is a graceful failure; `iterationsPerDoubling` is the dial for it
-  and the per-cell cost is linear in it.
+  visible as filigree that is slightly too thick, which is a graceful failure. `iterationsPerDoubling` is the dial for
+  it, and the per-cell cost is linear in it.
 
 The two ceilings pull against each other and the trade is real: half the cells buys twice the iterations, which is a
 thinner, truer boundary in a coarser picture. 10,000 cells is where both are still just about right.
@@ -854,11 +858,11 @@ long paragraph before committing.
 the balance between the greys rather than the greys themselves.
 
 Both defaults were solved **offline across several seeds, not measured in the browser**. A single page load rolls one
-noise field, and an fbm field can be locally dark or light, so one load measures that seed rather than the effect - the
+noise field, and an fbm field can be locally dark or light, so one load measures that seed rather than the effect. The
 browser numbers came out non-monotonic in gamma before this was noticed.
 
-- Plasma: with no bias 19.9% of the background sits in the lower half of the palette; `1.18` raises that to 30.1%.
-- Smoke: at `1.0` the darkest grey covered 11%; `1.6` takes it to 23% while leaving 9% at the brightest, so the
+- Plasma: with no bias 19.9% of the background sits in the lower half of the palette. `1.18` raises that to 30.1%.
+- Smoke: at `1.0` the darkest grey covered 11%. `1.6` takes it to 23% while leaving 9% at the brightest, so the
   highlights that make it read as smoke survive. Further, if wanted: `2.0` gives 30%, `2.5` gives 38%.
 
 The smoke settles at a mean density of ~0.36, which is where the reference (`geisswerks.com/smoke`) sits. It needs no
