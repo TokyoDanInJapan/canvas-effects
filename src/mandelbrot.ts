@@ -83,6 +83,30 @@
 // measured, each is written down at the constants, and together they take the
 // wasted frames of a descent from around half to about one in fifty.
 //
+// NOTHING IS SWITCHED, BECAUSE A ZOOM IS ONE COHERENT MOTION
+// ----------------------------------------------------------
+// The six effects beside this one move diffusely - a fluid churns, rain falls
+// in independent lanes - and the eye does not track any of it. A zoom is a
+// single motion of the entire frame, the eye locks onto it, and every
+// discontinuity in it is visible. Measured as the frame-to-frame change in the
+// picture's apparent speed, against the speed it is cruising at, over a full
+// cycle on a 60Hz display: this started at 48% on average with single frames
+// near 400%, and it is 1.7% and 45% now. Four things were wrong and each is
+// noted where it is fixed:
+//
+//   • The timestep was the fixed one. That belongs to the effects whose
+//     integration is only stable over a bounded step; here it just meant equal
+//     steps of animation shown for unequal lengths of time. See the note in
+//     mandelbrot-background.ts - it was 48% of the 48% on its own.
+//   • The rate was switched. Reversing at the floor swapped half a doubling a
+//     second inwards for two outwards in one frame. See `turnEase`.
+//   • The aim jumped. A single lag chasing a target that moves in steps has a
+//     continuous position and a discontinuous velocity, which is a corner every
+//     time the autopilot re-aims. See `aimSmooth`.
+//   • `frame` was measured from `minSpan` rather than from the span the descent
+//     actually stopped at. Nothing in complex units, an eighth of a screen once
+//     divided by a span of 1e-7. See `frame`.
+//
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // mandelbrot-background.ts.
 
@@ -143,6 +167,20 @@ export interface MandelbrotParams {
   bandWidth: number;
   /** Seconds between the autopilot re-aiming. */
   aimInterval: number;
+  /**
+   * Seconds of smoothing between the point the autopilot picks and the point
+   * the view is drawn towards.
+   *
+   * A second lag, in front of `aimEase`, and it is there to make the *velocity*
+   * continuous rather than just the position. The chosen point jumps - it is a
+   * different cell every `aimInterval` - and a single lag chasing a jumping
+   * target changes direction in one frame when the target does. Measured
+   * against the cruise speed of the zoom, those frames moved the picture up to
+   * 2.4 times as far as their neighbours, several times a cycle, which is the
+   * wobble you actually see. Two lags in series make the position smooth in its
+   * first derivative too, so a re-aim is a curve rather than a corner.
+   */
+  aimSmooth: number;
   /** Seconds for the view to reach where it is aimed, on its own. */
   aimEase: number;
   /** Seconds for the view to reach where a drag is aiming it. Shorter: it is being steered. */
@@ -151,7 +189,23 @@ export interface MandelbrotParams {
   aimReach: number;
   /** How far off centre the autopilot prefers to aim, in field heights. */
   aimBias: number;
-  /** Seconds held still at each end of the cycle. */
+  /**
+   * Seconds for the magnification rate to build up or die away.
+   *
+   * The rate is eased rather than switched, and this is the time constant of
+   * it. Every discontinuity this effect had was a switched rate: reversing at
+   * the floor swapped half a doubling a second inwards for two outwards in a
+   * single frame, which measured as a 2.7x jump in the picture's apparent
+   * speed - a visible lurch, twice a cycle.
+   *
+   * Both turns are then taken *early*, by exactly the distance the
+   * deceleration will coast through - `rate * turnEase` doublings - so the
+   * descent still asymptotes onto `minSpan` and the pull-out onto `homeSpan`
+   * rather than overshooting either. Zero restores the old switched behaviour,
+   * and the turn distances collapse to the limits themselves.
+   */
+  turnEase: number;
+  /** Seconds held at each end of the cycle, once the rate has died away. */
   dwell: number;
 }
 
@@ -191,25 +245,56 @@ export const MANDELBROT_DEFAULTS: MandelbrotParams = {
   bands: 0.35,
   bandWidth: 9,
   aimInterval: 0.8,
-  aimEase: 1.2,
+  // Half the re-aim interval, so a jump is spread over most of the gap before
+  // the next one without lagging far enough behind to stop tracking. `aimEase`
+  // comes down to 0.9 to pay for the extra stage, which keeps the total
+  // settling time about where it was.
+  aimSmooth: 0.4,
+  aimEase: 0.9,
   steerEase: 0.35,
   aimReach: 0.3,
   aimBias: 0.15,
+  // Under half a second, which is a gentle second or so of visible
+  // deceleration. Longer costs depth: the coast is `rate * turnEase`
+  // doublings, and at the pull-out's two doublings a second every extra tenth
+  // is another fifth of a doubling spent slowing down.
+  turnEase: 0.45,
   dwell: 1.2,
 };
 
-/** Where the view is, where it is going, and which way through the cycle it is. */
+/**
+ * The cycle: descend, hold at the bottom, pull out, hold framed on the whole
+ * set, descend somewhere else.
+ *
+ * The two holds are phases of their own rather than a flag on the other two,
+ * because the rate is still dying away through them - the view is not
+ * motionless, it is coasting to a stop, and it is the coast that lets the
+ * descent land on `minSpan` and the pull-out land framed on home.
+ */
+export type MandelbrotPhase = 'in' | 'holdDeep' | 'out' | 'holdHome';
+
+/** Where the view is, where it is going, and where in the cycle it is. */
 export interface MandelbrotState {
   /** Centre of the view, in the complex plane. Doubles, and they have to be. */
   cx: number;
   cy: number;
   /** Height of the view, in complex units. */
   span: number;
-  /** Where the view is being drawn towards. */
+  /** The point the autopilot last picked. Jumps; nothing follows it directly. */
+  goalX: number;
+  goalY: number;
+  /** Where the view is being drawn towards - the goal, smoothed. */
   aimX: number;
   aimY: number;
-  /** -1 zooming in, +1 coming back out. */
-  direction: number;
+  /** Which part of the cycle the view is in. */
+  phase: MandelbrotPhase;
+  /**
+   * Magnification rate, in doublings per second, negative going in.
+   *
+   * State rather than a constant because it is eased towards whatever the
+   * phase wants rather than set to it. See `turnEase`.
+   */
+  rate: number;
   /** Seconds until the next re-aim. */
   nextAim: number;
   /** Seconds left of the pause at the end of a run. */
@@ -225,9 +310,10 @@ export interface MandelbrotState {
    * out again.
    */
   blind: number;
-  /** Where the view had got to when it turned round. */
+  /** Where the view had got to when it turned round, and at what span. */
   deepX: number;
   deepY: number;
+  deepSpan: number;
   /**
    * Which way off centre the autopilot leans this run.
    *
@@ -259,13 +345,19 @@ export function randomizeMandelbrot(
     cx: params.homeX,
     cy: params.homeY,
     span: params.homeSpan,
+    goalX: params.homeX,
+    goalY: params.homeY,
     aimX: params.homeX,
     aimY: params.homeY,
-    direction: -1,
+    phase: 'in',
+    // From rest, so the opening descent accelerates in like every other one
+    // rather than starting at full speed.
+    rate: 0,
     nextAim: 0,
     held: 0,
     deepX: params.homeX,
     deepY: params.homeY,
+    deepSpan: params.minSpan,
     blind: 0,
     biasAngle: rand() * TAU,
   };
@@ -643,84 +735,156 @@ export function stepMandelbrot(
 ): void {
   const s = m.state;
 
-  if (s.held > 0) {
-    s.held -= dt;
-    return;
+  // The rate is eased towards what the phase wants, never switched to it. See
+  // `turnEase` - this one line is most of what makes the cycle smooth.
+  const wanted = s.phase === 'in' ? -params.speed : s.phase === 'out' ? params.speed * params.returnSpeed : 0;
+  s.rate = approach(s.rate, wanted, dt, params.turnEase);
+  if (s.held > 0) s.held -= dt;
+
+  s.span *= Math.pow(2, s.rate * dt);
+  // Belt and braces on the precision floor and the framing. The turns are taken
+  // early by exactly what the coast covers, so neither of these should ever
+  // bite; if `turnEase` is raised past what the cycle has room for, they do.
+  if (s.span < params.minSpan) s.span = params.minSpan;
+  else if (s.span > params.homeSpan) s.span = params.homeSpan;
+
+  switch (s.phase) {
+    case 'in':
+      if (s.span <= turnSpan(params, -params.speed) * params.minSpan) {
+        endDescent(s, params);
+        break;
+      }
+      steer(m, params, dt, pointer);
+      break;
+
+    case 'holdDeep':
+      // The span is still falling here, onto `minSpan`. `frame` is a function of
+      // it and reads as `deep` throughout, so this looks like a view coming to
+      // rest rather than one being held by force.
+      frame(s, params);
+      if (s.held <= 0) s.phase = 'out';
+      break;
+
+    case 'out':
+      frame(s, params);
+      if (s.span >= params.homeSpan / turnSpan(params, params.speed * params.returnSpeed)) {
+        s.phase = 'holdHome';
+        s.held = params.dwell;
+      }
+      break;
+
+    case 'holdHome':
+      frame(s, params);
+      // Stopped, and actually framed on the whole set rather than merely out of
+      // time: the coast is asymptotic, so waiting on the clock alone would
+      // start the next descent from a view still visibly cropped.
+      if (s.held <= 0 && s.span >= params.homeSpan * HOME_ENOUGH) {
+        s.phase = 'in';
+        s.goalX = s.cx;
+        s.goalY = s.cy;
+        s.aimX = s.cx;
+        s.aimY = s.cy;
+        s.nextAim = 0;
+        s.blind = 0;
+        s.biasAngle += GOLDEN_ANGLE;
+      }
+      break;
   }
+}
 
-  if (s.direction < 0) {
-    s.span *= Math.pow(2, -params.speed * dt);
+/**
+ * The factor a turn is taken early by: what the deceleration from `rate` will
+ * coast through, in span.
+ *
+ * A first-order ease from `rate` to nothing covers exactly `rate * turnEase`
+ * doublings, however long it takes to get there - so turning this far out lands
+ * the coast on the limit instead of past it.
+ *
+ * Capped at a third of the cycle's whole range, which is not tidiness. The
+ * uncapped distance grows with `speed`, and past about a third of the range the
+ * two turns meet in the middle: the pull-out reaches its own turn before it has
+ * built up any rate, its target goes to nothing, and the cycle stalls at the
+ * bottom for ever. At the defaults the coast is a fifth of a doubling going in
+ * and nine tenths coming out, against a range of twenty-four, so this only
+ * comes into play for a caller who has turned `speed` or `turnEase` well up -
+ * and there it costs a clamped, slightly abrupt turn rather than a dead one.
+ */
+function turnSpan(params: MandelbrotParams, rate: number): number {
+  const range = Math.log2(params.homeSpan / params.minSpan);
+  return Math.pow(2, Math.min(Math.abs(rate) * params.turnEase, range / 3));
+}
 
-    if (s.span <= params.minSpan) {
-      s.span = params.minSpan;
-      turn(s, params);
+/** How close to the home span counts as framed on the whole set. */
+const HOME_ENOUGH = 0.98;
+
+/** Re-aims if it is time to, and draws the view towards wherever it is aimed. */
+function steer(m: Mandelbrot, params: MandelbrotParams, dt: number, pointer: readonly [number, number] | null): void {
+  const s = m.state;
+  s.nextAim -= dt;
+
+  if (pointer || s.nextAim <= 0) {
+    s.nextAim = params.aimInterval;
+
+    const bias = pointer ? 0 : params.aimBias * m.h;
+    const prefI = pointer ? pointer[0] * (m.w - 1) : (m.w - 1) / 2 + Math.cos(s.biasAngle) * bias;
+    const prefJ = pointer ? pointer[1] * (m.h - 1) : (m.h - 1) / 2 + Math.sin(s.biasAngle) * bias;
+
+    if (aimAt(m, params, prefI, prefJ)) {
+      s.blind = 0;
+      s.goalX = m.aim[0];
+      s.goalY = m.aim[1];
+    } else if (pointer) {
+      // Not counted while a drag has hold. A pointer re-aims every frame rather
+      // than every `aimInterval`, so counting here would abandon a descent an
+      // eighth of a second after a drag crossed a lake - and yanking the view
+      // into a pull-out mid-drag is the last thing wanted. The last aim stands
+      // until the pointer finds something.
+      s.blind = 0;
+    } else if (++s.blind >= BLIND_LIMIT) {
+      // Nothing left to look at, and not just for a moment.
+      endDescent(s, params);
       return;
     }
-
-    s.nextAim -= dt;
-    if (pointer || s.nextAim <= 0) {
-      s.nextAim = params.aimInterval;
-
-      const bias = pointer ? 0 : params.aimBias * m.h;
-      const prefI = pointer ? pointer[0] * (m.w - 1) : (m.w - 1) / 2 + Math.cos(s.biasAngle) * bias;
-      const prefJ = pointer ? pointer[1] * (m.h - 1) : (m.h - 1) / 2 + Math.sin(s.biasAngle) * bias;
-
-      if (aimAt(m, params, prefI, prefJ)) {
-        s.blind = 0;
-        s.aimX = m.aim[0];
-        s.aimY = m.aim[1];
-      } else if (pointer) {
-        // Not counted while a drag has hold. A pointer re-aims every frame
-        // rather than every `aimInterval`, so counting here would abandon a
-        // descent an eighth of a second after a drag crossed a lake - and
-        // yanking the view into a pull-out mid-drag is the last thing wanted.
-        // The last aim stands until the pointer finds something.
-        s.blind = 0;
-      } else if (++s.blind >= BLIND_LIMIT) {
-        // Nothing left to look at, and not just for a moment. Turning round
-        // beats magnifying a void.
-        turn(s, params);
-        return;
-      }
-    }
-
-    const ease = pointer ? params.steerEase : params.aimEase;
-    s.cx = approach(s.cx, s.aimX, dt, ease);
-    s.cy = approach(s.cy, s.aimY, dt, ease);
-    return;
   }
 
-  s.span *= Math.pow(2, params.speed * params.returnSpeed * dt);
+  // Two lags in series: the goal jumps, the aim smooths it, the view follows
+  // the aim. A drag skips most of the smoothing - a pointer moves continuously,
+  // so there is little to smooth and every bit of it is lag you can feel.
+  const smooth = pointer ? params.aimSmooth * 0.25 : params.aimSmooth;
+  s.aimX = approach(s.aimX, s.goalX, dt, smooth);
+  s.aimY = approach(s.aimY, s.goalY, dt, smooth);
 
-  if (s.span >= params.homeSpan) {
-    s.span = params.homeSpan;
-    s.cx = params.homeX;
-    s.cy = params.homeY;
-    s.aimX = params.homeX;
-    s.aimY = params.homeY;
-    s.direction = -1;
-    s.nextAim = 0;
-    s.held = params.dwell;
-    s.blind = 0;
-    s.biasAngle += GOLDEN_ANGLE;
-    return;
-  }
+  const ease = pointer ? params.steerEase : params.aimEase;
+  s.cx = approach(s.cx, s.aimX, dt, ease);
+  s.cy = approach(s.cy, s.aimY, dt, ease);
+}
 
-  // The centre is a function of the span on the way out, not something being
-  // eased - see the note at the top. Exactly `deep` at the turn and exactly
-  // `home` at the top, with the point it left holding a fixed screen position
-  // in between.
-  const floor = params.minSpan / params.homeSpan;
-  const t = (s.span / params.homeSpan - floor) / (1 - floor);
+/**
+ * Where the view sits for a given span once it has stopped descending, which is
+ * a function of the span and not something being eased - see the note at the
+ * top. Effectively `deep` at the bottom and exactly `home` at the top, with the
+ * point it left holding a fixed screen position in between.
+ */
+function frame(s: MandelbrotState, params: MandelbrotParams): void {
+  // Measured from the span the descent actually stopped at, not from `minSpan`,
+  // and the difference is not a nicety. The two differ by whatever the coast
+  // covered, and while that is nothing in complex units it is divided by a span
+  // of about 1e-7 to reach the screen: parameterising from `minSpan` put the
+  // view an eighth of a screen away from where the descent left it, in one
+  // frame, which measured as a ten-fold jump in apparent speed. From here it is
+  // exactly `deep` at the turn and exactly `home` at the top.
+  const range = params.homeSpan - s.deepSpan;
+  const t = range > 0 ? (s.span - s.deepSpan) / range : 0;
   s.cx = s.deepX + (params.homeX - s.deepX) * t;
   s.cy = s.deepY + (params.homeY - s.deepY) * t;
 }
 
-/** Ends a run in: remembers where it got to, pauses, and starts back out. */
-function turn(s: MandelbrotState, params: MandelbrotParams): void {
+/** Ends a descent: remembers where it got to and starts coasting to a stop. */
+function endDescent(s: MandelbrotState, params: MandelbrotParams): void {
   s.deepX = s.cx;
   s.deepY = s.cy;
-  s.direction = 1;
+  s.deepSpan = s.span;
+  s.phase = 'holdDeep';
   s.held = params.dwell;
   s.blind = 0;
 }

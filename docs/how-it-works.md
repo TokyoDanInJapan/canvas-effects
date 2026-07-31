@@ -587,6 +587,44 @@ point it left is `(deep - centre) / span`, which is constant for all but the las
 that point and never appears to pan. A first-order ease towards home would have done the opposite: exponential in time
 against a span that is also exponential in time, it reads as an enormous sideways slide while still deep.
 
+### Nothing is switched, because a zoom is one coherent motion
+
+The other six move diffusely - a fluid churns, rain falls in independent lanes - and the eye does not track any of it.
+A zoom is a single motion of the whole frame, the eye locks onto it, and every discontinuity in it is visible. This
+juddered, and it took four fixes.
+
+The measurement is the frame-to-frame change in the picture's apparent motion, against the speed it is cruising at, over
+a full cycle with a 24fps loop throttled onto a 60Hz refresh the way `driver.ts` actually does it:
+
+| | mean | worst single frame |
+| --- | --- | --- |
+| as first written | 48% | 386% |
+| all four fixed | **1.7%** | **45%** |
+
+**The timestep was the fixed one**, and that is 48% of the 48%. A fixed step hands over `1 / fps` however long the frame
+took, which the smoke needs - its advection is only stable over a bounded step, so a slow frame has to make the fluid
+drift slower rather than further. Nothing here is like that: the span is `2^(rate * dt)` and the eases are `approach`,
+both exact for any step. And a constant step is *actively wrong* when the frame rate does not divide the refresh rate.
+At 24fps on 60Hz the driver draws every second or third refresh, so frames are on screen for 33ms and 50ms alternately
+while the animation advances the same 41.7ms for each - equal steps of motion shown for unequal times. The same effect
+measured 1.0% on a 144Hz display, where 24 does divide the refresh, which is what pinned the cause down.
+
+**The rate was switched.** Reversing at the floor swapped half a doubling a second inwards for two outwards in a single
+frame. It is eased now, and both turns are taken *early* by exactly the distance the deceleration coasts through -
+`rate * turnEase` doublings, which is what a first-order ease covers - so the descent still asymptotes onto `minSpan`
+and the pull-out onto `homeSpan` instead of overshooting.
+
+**The aim jumped.** The autopilot picks a different cell every `aimInterval`, and a single lag chasing a target that
+moves in steps has a continuous position and a discontinuous velocity: a corner at every re-aim. Those frames moved the
+picture up to 2.4 times as far as their neighbours. A second lag in front of the first - `aimSmooth`, half the re-aim
+interval - makes the position smooth in its first derivative too, so a re-aim is a curve.
+
+**And one real bug, which only a deep zoom could show.** The pull-out's `frame` was measured from `minSpan`, but the
+descent stops a little above it, at whatever the coast covered. The difference is nothing in complex units and is then
+divided by a span of about 1e-7 to reach the screen: it put the view an eighth of a screen from where the descent left
+it, in one frame, measuring as a ten-fold jump. Measuring from the span the descent actually stopped at makes it exact
+at both ends - `deep` at the turn, `home` at the top.
+
 ### The cost, which is the real constraint
 
 Cost is cells times iterations and it is the only effect here where both ends have to be capped. Measured on a 133×75
