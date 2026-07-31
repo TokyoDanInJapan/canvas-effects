@@ -525,7 +525,10 @@ measured in cells cannot get busier or emptier with depth. Measured: the field s
 range at the home view, eight doublings down and sixteen doublings down alike.
 
 The set itself is drawn dark and the boundary is what glows, rather than the other way round. That is a background
-decision, not an aesthetic one: black-set-on-a-blaze-of-colour is a picture, and this has to be a page.
+decision, not an aesthetic one: black-set-on-a-blaze-of-colour is a picture, and this has to be a page. The interior goes
+through the same distance estimate as everything else rather than being forced flat - dark where the neighbourhood is
+flat, lit where it is against the boundary - which is what stops the picture flickering. See "The classification must not
+be a cliff" below.
 
 `glow` is **4 cells**, which is far wider than "enough to see the boundary" and is chosen for what happens *after* this
 field is drawn. The output interpolates between field cells before dithering, so a rim one cell wide is averaged against
@@ -817,10 +820,11 @@ quality measure at all, except at zero, which is the set out of shot.
 
 ### The cost, which is the real constraint
 
-Cost is cells times iterations and it is the only effect here where both ends have to be capped. Measured on a 133×75
-field with a budget rising from 90 iterations at home to 300 at the floor: **0.4 ms** a frame at the home view and
-**4.3 ms** at the deepest, so 1% and 10% of one core at 24fps. Nearly all of the deep figure is interior cells, which are
-the ones that spend the whole budget.
+Cost is cells times iterations and it is the only effect here where both ends have to be capped. A 1280×800 window gives
+a 126×79 field - 9,954 cells, just under the 10,000 ceiling - with a budget rising from 90 iterations at home to 300.
+A frame is **0.48 ms** at the home view, **4.5 ms** at the floor, and **3.2 ms** median across a whole descent, which is
+the figure that matters now that most of a descent is spent at the ceiling. That is 8% of one core at 24fps. Nearly all
+of it is interior cells, which are the ones that spend the whole budget.
 
 Two things that did **not** work, both worth knowing before trying them again:
 
