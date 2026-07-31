@@ -303,6 +303,21 @@ describe('patchAt', () => {
   });
 });
 
+describe('patchAt', () => {
+  it('reports nothing usable for a cell off the field', () => {
+    // The guard exists because this takes any cell, not only ones on the field.
+    // Nothing in the library asks for one off it; a caller can, and what comes
+    // back has to be something the pick rules reject rather than a NaN - both
+    // ends of their window are failed at once.
+    const m = seeded();
+    const out = new Float64Array(3);
+    patchAt(m, -50, -50, out);
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBe(1);
+    expect(out[2]).toBe(1);
+  });
+});
+
 describe('aimAt', () => {
   it('lands somewhere the picture has something', () => {
     const m = seeded();
@@ -767,6 +782,34 @@ describe('stepMandelbrot', () => {
     expect(m.state.phase).toBe('in');
     expect(m.state.span).toBeGreaterThan(from);
     expect(m.state.span).toBeLessThan(params.homeSpan);
+  });
+
+  it('backs out of a frame that has washed out rather than magnifying it', () => {
+    // Dense hair, where every filament is finer than a cell: the distance
+    // estimate quite correctly reports "within a cell of the set" everywhere
+    // and the picture is a flat mid-grey. Under-resolution is the one failure
+    // that backing out fixes, and re-seating cannot - `aimAt` refuses bright
+    // patches, so when the whole frame is bright it finds nowhere to go.
+    const p = { ...params, aimInterval: 0 };
+    const m = seeded(4, p);
+    m.state.cx = -1.002741053886546;
+    m.state.cy = -0.2891053940938287;
+    m.state.span = 1.98e-5;
+    renderMandelbrot(m, p);
+
+    const tone = new Float64Array(3);
+    frameTone(m, tone);
+    expect(tone[1]).toBeGreaterThan(0.78);
+
+    const span = m.state.span;
+    stepMandelbrot(m, p, 1 / 24);
+
+    expect(m.state.phase).toBe('retreat');
+    expect(m.state.retreatTo).toBeGreaterThan(span);
+    expect(m.state.retreatTo).toBeLessThanOrEqual(params.homeSpan);
+    // And the walk is sent outwards at the same time, since the way out of hair
+    // is away from the set.
+    expect(m.state.openUp).toBe(1);
   });
 
   it('is reproducible from a seeded generator', () => {
