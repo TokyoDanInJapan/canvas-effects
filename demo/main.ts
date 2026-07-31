@@ -235,7 +235,7 @@ const SMOKE_DIALS: Dial[] = [
     value: SMOKE_BACKGROUND_DEFAULTS.levels,
     note: 'colours in the palette',
   },
-  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: SMOKE_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'pixelSize', label: 'pixelSize', min: 1, max: 16, step: 1, value: SMOKE_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: SMOKE_BACKGROUND_DEFAULTS.fps },
   { key: 'drag', label: 'drag', min: 0.1, max: 3, step: 0.05, value: 0.9, note: 'sets how fast it mixes to fog' },
   { key: 'buoyancy', label: 'buoyancy', min: 0, max: 40, step: 1, value: 14 },
@@ -259,7 +259,7 @@ const PLASMA_DIALS: Dial[] = [
     value: PLASMA_BACKGROUND_DEFAULTS.levels,
     note: 'colours in the palette',
   },
-  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: PLASMA_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'pixelSize', label: 'pixelSize', min: 1, max: 16, step: 1, value: PLASMA_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: PLASMA_BACKGROUND_DEFAULTS.fps },
   { key: 'speed', label: 'speed', min: 0.05, max: 3, step: 0.05, value: PLASMA_BACKGROUND_DEFAULTS.speed },
   { key: 'blend', label: 'blend', min: 0, max: 0.95, step: 0.01, value: PLASMA_BACKGROUND_DEFAULTS.blend },
@@ -292,7 +292,7 @@ const RAIN_DIALS: Dial[] = [
     value: RAIN_BACKGROUND_DEFAULTS.levels,
     note: 'colours in the palette',
   },
-  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: RAIN_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'pixelSize', label: 'pixelSize', min: 1, max: 16, step: 1, value: RAIN_BACKGROUND_DEFAULTS.pixelSize },
   {
     key: 'fieldScale',
     label: 'fieldScale',
@@ -335,7 +335,7 @@ const RIDGE_DIALS: Dial[] = [
     value: RIDGES_BACKGROUND_DEFAULTS.levels,
     note: 'colours in the palette',
   },
-  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 12, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'pixelSize', label: 'pixelSize', min: 1, max: 12, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: RIDGES_BACKGROUND_DEFAULTS.fps },
   { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: RIDGES_BACKGROUND_DEFAULTS.gamma },
   { key: 'rows', label: 'rows', min: 8, max: 90, step: 1, value: RIDGE_DEFAULTS.rows },
@@ -434,7 +434,7 @@ const METABALL_DIALS: Dial[] = [
     value: METABALLS_BACKGROUND_DEFAULTS.levels,
     note: 'colours in the palette',
   },
-  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'pixelSize', label: 'pixelSize', min: 1, max: 16, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fieldScale', label: 'fieldScale', min: 1, max: 4, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.fieldScale },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: METABALLS_BACKGROUND_DEFAULTS.fps },
   { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: METABALLS_BACKGROUND_DEFAULTS.gamma },
@@ -475,7 +475,7 @@ const TUNNEL_DIALS: Dial[] = [
     value: TUNNEL_BACKGROUND_DEFAULTS.levels,
     note: 'colours in the palette',
   },
-  { key: 'pixelSize', label: 'pixelSize', min: 2, max: 16, step: 1, value: TUNNEL_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'pixelSize', label: 'pixelSize', min: 1, max: 16, step: 1, value: TUNNEL_BACKGROUND_DEFAULTS.pixelSize },
   { key: 'fieldScale', label: 'fieldScale', min: 1, max: 4, step: 1, value: TUNNEL_BACKGROUND_DEFAULTS.fieldScale },
   { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: TUNNEL_BACKGROUND_DEFAULTS.fps },
   { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: TUNNEL_BACKGROUND_DEFAULTS.gamma },
@@ -531,7 +531,7 @@ const MANDELBROT_DIALS: Dial[] = [
   {
     key: 'pixelSize',
     label: 'pixelSize',
-    min: 2,
+    min: 1,
     max: 16,
     step: 1,
     value: MANDELBROT_BACKGROUND_DEFAULTS.pixelSize,
@@ -717,12 +717,22 @@ function mount() {
     return seed / 4294967296;
   };
 
+  // At one CSS pixel a cell the library's own `maxPixels` would coarsen it
+  // straight back - it exists so a 4K window is not four times a 1080p one -
+  // so asking for one here means opting out of that and paying for it. The fps
+  // readout is the point: a 1280x800 window is a million pixels a frame.
+  const pixelSize = Math.round(values.pixelSize);
+  const native = pixelSize <= 1;
+
   const common = {
     shading,
-    dither: dithering,
+    // `'auto'` rather than `true`, so that one CSS pixel a cell turns the
+    // dither off by itself - which is what the button is demonstrating.
+    dither: dithering ? ('auto' as const) : false,
     gamma: values.gamma,
     levels: Math.round(values.levels),
-    pixelSize: Math.round(values.pixelSize),
+    pixelSize,
+    maxPixels: native ? window.innerWidth * window.innerHeight : undefined,
     fps: Math.round(values.fps),
     random,
   };

@@ -509,6 +509,35 @@ describe('createSurface', () => {
       expect(seen.size).toBeGreaterThan(1);
     });
 
+    it("takes 'auto' to mean dither above one CSS pixel a cell and not at one", () => {
+      // The size the surface *settled* at, not the one asked for. A 1200-wide
+      // canvas at one pixel a cell is 1200 cells, so the dither goes off; the
+      // same request under a `maxPixels` that cannot afford it comes back
+      // coarser than one and the dither stays on.
+      const mid = 0.375;
+      const levels = (dither: SurfaceOptions['dither'], pixelSize: number, maxPixels: number) => {
+        const dom = fake();
+        const surface = createSurface(dom.canvas, dom.ctx, options({ dither, pixelSize, maxPixels }));
+        surface.resize();
+        surface.shade(flat(surface, mid), { base: 0, amplitude: 255 }, 1);
+        const image = dom.painted()!;
+        const seen = new Set<number>();
+        for (let i = 0; i < image.data.length; i += 4) seen.add(image.data[i]);
+        return seen.size;
+      };
+
+      // One CSS pixel a cell, and affordable: no dither, one flat plateau.
+      expect(levels('auto', 1, 1_000_000)).toBe(1);
+      // Asked for one, given three by the pixel ceiling: dithered after all.
+      expect(levels('auto', 1, 160_000)).toBeGreaterThan(1);
+      // Six as usual: dithered.
+      expect(levels('auto', 6, 160_000)).toBeGreaterThan(1);
+      // And `true` still overrides it at one, which is the setting to reach for
+      // if you want smooth gradient at native resolution.
+      expect(levels(true, 1, 1_000_000)).toBeGreaterThan(1);
+      expect(levels(false, 6, 160_000)).toBe(1);
+    });
+
     it('posterises flat with the dither off', () => {
       // The same field as above, and the reason the dither exists: without it
       // every cell rounds the same way and the region is one flat plateau.

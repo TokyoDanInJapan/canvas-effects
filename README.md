@@ -204,22 +204,40 @@ the demo does.
 
 Every effect takes the same shape of options object. These are shared:
 
-| Option                 | Default       | Does                                                                |
-| ---------------------- | ------------- | ------------------------------------------------------------------- |
-| `pixelSize`            | `6`           | CSS pixels per rendered pixel - one dither cell. Bigger is cheaper. |
-| `fieldScale`           | varies        | How much coarser the field is than the output, per axis.            |
-| `maxPixels`            | `160000`      | Ceiling on rendered pixels; raises `pixelSize` on large windows.    |
-| `levels`               | `5`           | Palette size. Small on purpose - the dither makes it look smooth.   |
-| `dither`               | `true`        | Off posterises flat: same palette, visible bands.                   |
-| `gamma`                | varies        | Weights the field dark (above 1) or light (below).                  |
-| `fps`                  | `24`          | Redraw rate.                                                        |
-| `shading`              | auto          | The greys. See above.                                               |
-| `interactive`          | `true`        | Respond to the pointer.                                             |
-| `respectReducedMotion` | `true`        | Draw one frame and stop under `prefers-reduced-motion: reduce`.     |
-| `pauseWhenHidden`      | `true`        | Stop the loop while the tab is hidden.                              |
-| `watchThemeClass`      | `true`        | Re-read `shading` when the `class` on `<html>` changes.             |
-| `watchColorScheme`     | `true`        | Re-read `shading` when the OS colour scheme changes.                |
-| `random`               | `Math.random` | Pass a seeded generator for a repeatable background.                |
+| Option                 | Default       | Does                                                                                                     |
+| ---------------------- | ------------- | -------------------------------------------------------------------------------------------------------- |
+| `pixelSize`            | `6`           | CSS pixels per rendered pixel - one dither cell. Bigger is cheaper. `1` renders at native resolution.    |
+| `fieldScale`           | varies        | How much coarser the field is than the output, per axis.                                                 |
+| `maxPixels`            | `160000`      | Ceiling on rendered pixels; raises `pixelSize` on large windows.                                         |
+| `levels`               | `5`           | Palette size. Small on purpose - the dither makes it look smooth.                                        |
+| `dither`               | `'auto'`      | Off posterises flat: same palette, visible bands. `'auto'` is on above one CSS pixel a cell, off at one. |
+| `gamma`                | varies        | Weights the field dark (above 1) or light (below).                                                       |
+| `fps`                  | `24`          | Redraw rate.                                                                                             |
+| `shading`              | auto          | The greys. See above.                                                                                    |
+| `interactive`          | `true`        | Respond to the pointer.                                                                                  |
+| `respectReducedMotion` | `true`        | Draw one frame and stop under `prefers-reduced-motion: reduce`.                                          |
+| `pauseWhenHidden`      | `true`        | Stop the loop while the tab is hidden.                                                                   |
+| `watchThemeClass`      | `true`        | Re-read `shading` when the `class` on `<html>` changes.                                                  |
+| `watchColorScheme`     | `true`        | Re-read `shading` when the OS colour scheme changes.                                                     |
+| `random`               | `Math.random` | Pass a seeded generator for a repeatable background.                                                     |
+
+### Running at native resolution
+
+`pixelSize: 1` gives one rendered pixel per CSS pixel - no fat pixels, and no dither by default. Two things to know
+before reaching for it:
+
+- **`maxPixels` will quietly undo it.** It exists so a 4K window is not four times the work of a 1080p one, and at the
+  default of 160,000 a request for `1` on a 1280×800 window comes back as an effective `3`. Raise it to the window's own
+  pixel count if you mean it. The `'auto'` dither follows the size the surface _settled_ at, so a request that got
+  coarsened still dithers.
+- **It is not cheap.** The output pass is one pixel of work per CSS pixel: 1,024,000 a frame on a 1280×800 window
+  against 29,000 at the default `pixelSize: 6`. Measured at 18.7 ms a frame for the shading alone, before whatever
+  generates the field.
+
+Turning the dither off at that size is a choice about look, not a correction - the Bayer pattern is at the display's own
+pitch there, which is exactly where dithering works best, and it blends into a genuinely smooth gradient. What `'auto'`
+buys instead is crisp posterised regions with clean curved boundaries, which is unavailable at any coarser size where
+undithered output is just visible steps. `dither: true` keeps the smooth version at any size.
 
 Three of those differ per effect, and the reasons are worth knowing:
 

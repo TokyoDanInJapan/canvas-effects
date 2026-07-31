@@ -242,10 +242,30 @@ export interface SurfaceOptions {
    * handful of greys as hard bands with visible steps between them. That is what
    * the Bayer threshold is preventing.
    *
+   * `'auto'` is true above one CSS pixel a cell and false at one, and is the
+   * default. It is a choice about *look* rather than a correction, and worth
+   * being straight about, because the obvious reasoning for it is wrong: at one
+   * CSS pixel a cell the Bayer pattern is at the display's own pitch, which is
+   * where dithering works best, and rendering the same view both ways shows it
+   * blending into a genuinely smooth gradient.
+   *
+   * What turning it off buys at that size is the other look - crisp posterised
+   * regions with clean curved boundaries between them, which is a deliberate
+   * thing to want and is unavailable at any coarser size, where undithered
+   * output is just visible steps. Above one CSS pixel a cell the dither is
+   * doing the job it was written for and stays on.
+   *
+   * So this is the default and not a rule: `dither: true` keeps it at any size,
+   * and is the better setting if you want smooth gradient at native resolution.
+   *
+   * Resolved from the *effective* size rather than the requested one, because
+   * `maxPixels` raises it: asking for one on a large window and being given
+   * three should still dither, and does.
+   *
    * It is not a performance dial. Both paths quantise once per pixel; the dither
    * adds an array lookup and an add.
    */
-  dither: boolean;
+  dither: boolean | 'auto';
 }
 
 /** One axis of the output-to-field lookup. */
@@ -351,6 +371,10 @@ export function createSurface(
   let mapX: AxisMap = { i0: new Int32Array(0), i1: new Int32Array(0), t: new Float32Array(0) };
   let mapY: AxisMap = mapX;
 
+  // Resolved on resize rather than per frame, because it depends on the size
+  // the surface settled at. See `dither` in `SurfaceOptions`.
+  let dithering = options.dither !== false;
+
   // The palette only changes when the shading does - a handful of times in a
   // page's life - so rebuilding it per frame was the one steady-state allocation
   // in the frame path. Cached against a *copy* of the shading, because the
@@ -407,6 +431,8 @@ export function createSurface(
     height = plan.height;
     fieldW = plan.fieldW;
     fieldH = plan.fieldH;
+    // The size it actually settled at, which `maxPixels` may have coarsened.
+    dithering = options.dither === 'auto' ? cssWidth > width : options.dither;
 
     canvas.width = width;
     canvas.height = height;
@@ -431,7 +457,7 @@ export function createSurface(
     // which was asked for.
     const palette = paletteFor(shading, levels);
     const steps = levels > 1 ? levels - 1 : 1;
-    const dithering = options.dither;
+
     const gammaLut = gamma === 1 ? null : gammaTableFor(gamma);
 
     const x0s = mapX.i0;
