@@ -4,7 +4,7 @@ Seven animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are
 they modulate the page colour rather than becoming a picture, and they are quiet enough that a reader should not
 consciously notice them.
 
-No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All seven together are 13.6 kB
+No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All seven together are 15.6 kB
 minified and gzipped.
 
 The `canvas-effects` name on the npm registry belongs to an unrelated package, so this one installs from GitHub - npm
@@ -62,7 +62,9 @@ hundred and twenty cells across. Escape-time colouring cannot: the bands crowd t
 alias into noise exactly where the detail is. So it shades on a **distance estimate** taken for free from the picture's
 own gradient - the smooth escape count _is_ the exterior potential on a log scale, so `1 / (ln2 * |grad mu|)` is the
 distance to the set, and a finite difference over a field already computed gives it. It steers itself, because a target
-picked in advance is empty space twenty doublings later. _Press and drag to aim it._
+picked in advance is empty space twenty doublings later - and it does not simply fall: it pauses to trace sideways along
+the boundary at one magnification, and now and then gives up a couple of doublings for a wider look. It descends about
+38 doublings, which is where a double runs out rather than where the iterations do. _Press and drag to aim it._
 
 ## Quick start
 

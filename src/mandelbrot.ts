@@ -151,8 +151,16 @@ export interface MandelbrotParams {
    *
    * Too few and the filigree fills in solid: cells that have not escaped yet
    * are indistinguishable from cells that never will, so the boundary thickens
-   * into a blob as you descend. This is the dial that trades that against the
-   * per-cell cost, which is linear in it.
+   * into a blob. This is the dial that trades that against the per-cell cost,
+   * which is linear in it.
+   *
+   * The name overstates the model, and the measurement is at `minSpan`: what a
+   * frame needs is set by how much boundary is in shot rather than by how deep
+   * it is - holding the false-solid fraction under 5% took the same 2,000 to
+   * 3,200 iterations at 24 doublings, at 36 and at 48 alike. A ramp is still
+   * the right shape, because the home view genuinely needs less than a frame
+   * full of boundary does, but it reaches `maxIterations` at 17 doublings and
+   * the rest of the descent runs at the ceiling.
    */
   iterationsPerDoubling: number;
   /** Ceiling on the budget, whatever the depth. */
@@ -1595,8 +1603,8 @@ function steer(m: Mandelbrot, params: MandelbrotParams, dt: number, pointer: rea
         // new goal. Only that abandons a descent. A frame that merely looks bad
         // while the walk still has a thread to follow is handled below, by
         // stopping rather than by giving up - counting that as blindness cut
-        // two of eight runs off after five doublings of a twenty-four doubling
-        // descent.
+        // two of eight runs off after five doublings of what is now a
+        // thirty-eight doubling descent.
         endDescent(s, params);
         return;
       }

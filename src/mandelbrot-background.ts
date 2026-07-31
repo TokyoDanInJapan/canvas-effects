@@ -76,11 +76,13 @@ export interface MandelbrotBackgroundOptions extends CommonBackgroundOptions {
  * Cost is cells times iterations, and it is the one effect here where that
  * product is large enough to have to be capped at both ends.
  *
- * Measured at the ceilings below - a 133x75 field and a budget rising from 90
- * iterations at home to 300 at the floor - a frame is 0.4 ms at the home view
- * and 4.3 ms at the deepest: 1% and 10% of one core at 24fps, which is the
- * tunnel's range and for the same reason. Nearly all of the deep figure is
- * interior cells, which are the ones that spend the whole budget.
+ * At the ceilings below, a 1280x800 window gives a 126x79 field - 9,954 cells,
+ * just under the 10,000 - with a budget rising from 90 iterations at home to
+ * 300. A frame is 0.48 ms at the home view and 4.5 ms at the floor, and 3.2 ms
+ * median over a whole descent, which is the number that matters now that most
+ * of a descent is spent at the ceiling. That is 8% of one core at 24fps, in the
+ * tunnel's range and for the same reason: nearly all of it is interior cells,
+ * which are the ones that spend the whole budget.
  *
  * The two ceilings pull against each other and the trade is a real one. Half
  * the cells buys twice the iterations, which is a thinner, truer boundary -
