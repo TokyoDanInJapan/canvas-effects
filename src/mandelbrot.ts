@@ -388,6 +388,8 @@ export interface MandelbrotState {
   nextAim: number;
   /** Seconds of descending left before the next pause to look around. */
   nextExplore: number;
+  /** Seconds this descent has been going, for the bias to fade over. */
+  descended: number;
   /** The span a partial back-out is climbing to. */
   retreatTo: number;
   /** Which decision the schedule is on, and the seed it draws them from. */
@@ -465,6 +467,7 @@ export function randomizeMandelbrot(
     // one moment of the cycle every seed shared, and three runs side by side
     // paused together.
     nextExplore: params.exploreEvery * (0.6 + hash2(0, 2, seed) * 0.8),
+    descended: 0,
     retreatTo: params.homeSpan,
     events: 0,
     seed,
@@ -912,6 +915,7 @@ export function stepMandelbrot(
   // time. It did: a pull-out asked to arrive at the home span stopped at 97.4%
   // of it, under the 98% the next descent waits for, and the cycle deadlocked
   // there with nothing left to move it.
+  const before = s.span;
   s.span *= Math.pow(2, ((was + s.rate) / 2) * dt);
   // Belt and braces on the precision floor and the framing. The turns are taken
   // early by exactly what the coast covers, so neither of these should ever
@@ -919,12 +923,34 @@ export function stepMandelbrot(
   if (s.span < params.minSpan) s.span = params.minSpan;
   else if (s.span > params.homeSpan) s.span = params.homeSpan;
 
+  // Magnify about the aim, not about the middle of the screen, and this is the
+  // difference between a target the view reaches and one it never does.
+  //
+  // Zooming about the centre multiplies any screen offset by the zoom factor,
+  // so a target that is not already dead centre is being pushed outwards at
+  // 2^speed a second - 1.41 at the default - while the spring closes on it at
+  // about 1/aimEase, which is 1.11. The zoom wins. Measured over four descents
+  // the view sat a median of 0.21 screen heights from its target and a 95th
+  // percentile of 0.46, which is most of the way to the edge: it was not
+  // lagging behind on the way to arriving, it was never going to arrive.
+  //
+  // Holding the aim still under the zoom takes the exponential out of the
+  // problem entirely, and the spring converges on what is left. It also *is*
+  // the smoother motion: the picture then magnifies about a fixed point rather
+  // than magnifying and translating at once.
+  if (s.phase === 'in' || s.phase === 'cruise' || s.phase === 'retreat') {
+    const k = before > 0 ? s.span / before : 1;
+    s.cx = s.aimX - (s.aimX - s.cx) * k;
+    s.cy = s.aimY - (s.aimY - s.cy) * k;
+  }
+
   switch (s.phase) {
     case 'in':
       if (s.span <= turnSpan(params, -params.speed) * params.minSpan) {
         endDescent(s, params);
         break;
       }
+      s.descended += dt;
       steer(m, params, dt, pointer);
       // Only descending counts down to the next pause: an explore should be
       // separated from the next one by a stretch of actual descending, not by
@@ -951,12 +977,12 @@ export function stepMandelbrot(
       // The span is still falling here, onto `minSpan`. `frame` is a function of
       // it and reads as `deep` throughout, so this looks like a view coming to
       // rest rather than one being held by force.
-      frame(s, params);
+      frame(m, params, dt);
       if (s.held <= 0) s.phase = 'out';
       break;
 
     case 'out':
-      frame(s, params);
+      frame(m, params, dt);
       if (s.span >= params.homeSpan / turnSpan(params, params.speed * params.returnSpeed)) {
         s.phase = 'holdHome';
         s.held = params.dwell;
@@ -964,7 +990,7 @@ export function stepMandelbrot(
       break;
 
     case 'holdHome':
-      frame(s, params);
+      frame(m, params, dt);
       // Stopped, and actually framed on the whole set rather than merely out of
       // time: the coast is asymptotic, so waiting on the clock alone would
       // start the next descent from a view still visibly cropped.
@@ -981,6 +1007,7 @@ export function stepMandelbrot(
         s.blind = 0;
         s.vx = 0;
         s.vy = 0;
+        s.descended = 0;
         s.biasAngle += GOLDEN_ANGLE;
         resumeDescent(m, params);
       }
@@ -1293,12 +1320,45 @@ function reseat(m: Mandelbrot, params: MandelbrotParams, pointer: readonly [numb
   return true;
 }
 
+/**
+ * How much of the preference is where the picker last pointed, against where it
+ * would point with no history.
+ *
+ * Hysteresis, and it is for the aim what `KEEP_SLACK` is for the goal. Nothing
+ * stopped the picker hopping between two candidates it scored almost equally,
+ * and each hop is both a jolt in the motion and a target that was never
+ * arrived at. Preferring where it already pointed settles that without ever
+ * refusing a better cell - the preference only breaks ties.
+ */
+const PICK_HOLD = 0.5;
+
+/**
+ * Seconds of descending over which the lean off centre fades.
+ *
+ * `aimBias` is what sends one run somewhere different from the last, and it
+ * does that by preferring a target off to one side. That is right at the start
+ * of a descent and wrong for the rest of it: a target held off centre is a
+ * target the zoom is permanently pulling away from, since magnification moves
+ * anything off centre outwards. So it decides the heading and then gets out of
+ * the way.
+ */
+const BIAS_FADE = 6;
+
 /** Refreshes where the picker is pointing, without moving the goal to it. */
 function repick(m: Mandelbrot, params: MandelbrotParams): boolean {
   const s = m.state;
-  const bias = params.aimBias * m.h;
-  const prefI = (m.w - 1) / 2 + Math.cos(s.biasAngle) * bias;
-  const prefJ = (m.h - 1) / 2 + Math.sin(s.biasAngle) * bias;
+
+  const lean = Math.exp(-s.descended / BIAS_FADE) * params.aimBias * m.h;
+  let prefI = (m.w - 1) / 2 + Math.cos(s.biasAngle) * lean;
+  let prefJ = (m.h - 1) / 2 + Math.sin(s.biasAngle) * lean;
+
+  // Towards where it last pointed, if that is still on the frame.
+  cellOf(m, s.pickX, s.pickY, m.cell);
+  if (m.cell[0] >= 0 && m.cell[0] <= m.w - 1 && m.cell[1] >= 0 && m.cell[1] <= m.h - 1) {
+    prefI += (m.cell[0] - prefI) * PICK_HOLD;
+    prefJ += (m.cell[1] - prefJ) * PICK_HOLD;
+  }
+
   if (!aimAt(m, params, prefI, prefJ)) return false;
   s.pickX = m.aim[0];
   s.pickY = m.aim[1];
@@ -1550,7 +1610,8 @@ function follow(m: Mandelbrot, _params: MandelbrotParams, dt: number, ease: numb
  * top. Effectively `deep` at the bottom and exactly `home` at the top, with the
  * point it left holding a fixed screen position in between.
  */
-function frame(s: MandelbrotState, params: MandelbrotParams): void {
+function frame(m: Mandelbrot, params: MandelbrotParams, dt: number): void {
+  const s = m.state;
   // Measured from the span the descent actually stopped at, not from `minSpan`,
   // and the difference is not a nicety. The two differ by whatever the coast
   // covered, and while that is nothing in complex units it is divided by a span
@@ -1560,9 +1621,23 @@ function frame(s: MandelbrotState, params: MandelbrotParams): void {
   // exactly `deep` at the turn and exactly `home` at the top.
   const range = params.homeSpan - s.deepSpan;
   const t = range > 0 ? (s.span - s.deepSpan) / range : 0;
-  s.cx = s.deepX + (params.homeX - s.deepX) * t;
-  s.cy = s.deepY + (params.homeY - s.deepY) * t;
+
+  // Sprung onto rather than assigned, so the view carries its momentum across
+  // the turn. Assigning it dropped whatever lateral velocity the descent had in
+  // a single frame, and every one of the worst frames for smoothness over a
+  // whole cycle was one of these transitions.
+  //
+  // The lag this introduces is a lag onto a target that is itself a smooth
+  // function of the span, and `FRAME_EASE` is short against the twelve seconds
+  // a pull-out takes - so the framing arrives well before the top, which is
+  // where it has to be right.
+  s.aimX = s.deepX + (params.homeX - s.deepX) * t;
+  s.aimY = s.deepY + (params.homeY - s.deepY) * t;
+  follow(m, params, dt, FRAME_EASE);
 }
+
+/** Seconds for the view to settle onto the framing the pull-out asks for. */
+const FRAME_EASE = 0.5;
 
 /** Ends a descent: remembers where it got to and starts coasting to a stop. */
 function endDescent(s: MandelbrotState, params: MandelbrotParams): void {
