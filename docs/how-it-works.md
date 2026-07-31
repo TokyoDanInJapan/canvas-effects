@@ -640,8 +640,19 @@ measured 1.0% on a 144Hz display, where 24 does divide the refresh, which is wha
 
 **The rate was switched.** Reversing at the floor swapped half a doubling a second inwards for two outwards in a single
 frame. It is eased now, and both turns are taken *early* by exactly the distance the deceleration coasts through -
-`rate * turnEase` doublings, which is what a first-order ease covers - so the descent still asymptotes onto `minSpan`
-and the pull-out onto `homeSpan` instead of overshooting.
+`rate * turnEase` doublings - so the descent still asymptotes onto `minSpan` and the pull-out onto `homeSpan` instead of
+overshooting.
+
+The rate is **damped rather than lagged**, which is a second correction to the same thing. A first-order ease keeps the
+rate continuous but not its derivative: deceleration arrives at full strength on the very first frame after a phase
+changes and only decays from there, which is precisely what a sudden stop is. Entering a cruise, the deceleration used
+to read 1.06 doublings per second squared on frame one and fall away monotonically. Damped, it starts at 0.18, builds to
+a peak of 0.82 half a second in, and eases off - the zoom accelerates and decelerates instead of switching between
+coasting and slowing. Worst jerk over four cycles went from **102 to 17** doublings per second cubed, and the worst
+single frame for overall smoothness came down from 20% to 12% with it.
+
+Both integrate to the same coast, `rate * turnEase`, so `turnSpan` is untouched by the change - it is a change in feel
+and not in where the turns land. `turnEase` went from 0.45 to 0.6 to give the new shape room to be seen.
 
 **The aim jumped.** The autopilot picks a different cell every `aimInterval`, and a single lag chasing a target that
 moves in steps has a continuous position and a discontinuous velocity: a corner at every re-aim. Those frames moved the
