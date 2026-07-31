@@ -11,6 +11,9 @@
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    // For vite.config.ts reading the version out of package.json. The library
+    // build has its own include of `src` alone, so nothing here reaches it.
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "declaration": true,
     "declarationMap": true,

@@ -204,6 +204,20 @@ input[type='range'] {
   font-variant-numeric: tabular-nums;
 }
 
+/* The build, in the corner the panel does not use. `pointer-events: none`
+   because every effect here reads drags off the window, and a label that ate
+   one at the edge of the screen would be a small mystery. */
+#version {
+  position: fixed;
+  right: 1rem;
+  bottom: 0.75rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 .note {
   margin: 0.15rem 0 0;
   font-size: 0.72rem;

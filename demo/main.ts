@@ -27,6 +27,9 @@ import {
 } from '../src/index.js';
 import { COPY } from './copy.js';
 
+// Substituted by Vite at build time - see `define` in vite.config.ts.
+declare const __VERSION__: string;
+
 const canvas = document.getElementById('background') as HTMLCanvasElement;
 
 // Frames actually drawn, which is the number worth watching - every effect
@@ -1046,6 +1049,8 @@ ditherButton.addEventListener('click', () => {
   // library's; `dither` is a plain option there.
   mount();
 });
+
+(document.getElementById('version') as HTMLParagraphElement).textContent = `v${__VERSION__}`;
 
 renderCopy();
 buildRampPicker();
