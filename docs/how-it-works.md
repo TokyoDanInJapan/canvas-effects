@@ -625,6 +625,46 @@ divided by a span of about 1e-7 to reach the screen: it put the view an eighth o
 it, in one frame, measuring as a ten-fold jump. Measuring from the span the descent actually stopped at makes it exact
 at both ends - `deep` at the turn, `home` at the top.
 
+### The classification must not be a cliff
+
+Individual cells used to flicker between black and bright, frame to frame, and the cause was a special case that read as
+obviously correct: an interior cell was drawn at zero, the darkest the palette goes.
+
+Its neighbour, being right against the boundary, comes out at **one**. A cell on the line between them changes
+classification whenever the view shifts by less than its own width - which it does constantly - so it was alternating
+between the two ends of the palette every frame. Measured at fixed points in the *plane* over a recorded camera path, so
+the view's own motion does not count: **8.5%** of consecutive frames at a sample point were an oscillation rather than a
+movement.
+
+Nothing had to be added to fix it, only taken away. An interior cell already carries the iteration budget as its escape
+count, so the difference against its neighbours means something - flat in the deep interior, so the distance comes out
+enormous and the cell is black, and steep next to the boundary, so it is bright, which is what its exterior neighbour is
+too. The classification stops being a cliff and the flip stops mattering. The contours are the one exception: an interior
+escape count is the same synthetic number everywhere, so banding it would lay a flat tone across the whole set, and they
+fade out as the distance goes to nothing anyway.
+
+That left a tail, at 2.4%, from a blind spot rather than a cliff. **A central difference cannot see a feature one cell
+wide**: with exterior on both sides of a single interior cell the two halves cancel, the estimate reports the set as
+nowhere near, and a one-cell filament got a dark speck down the middle of its own glow. The classification knows what the
+arithmetic cannot - a cell with a neighbour on the other side of the line is *on* the boundary, whatever its
+surroundings make of it - so its distance is capped at half a cell. Worst disagreement across the line went from 0.626 to
+0.104, with a median of 0.002.
+
+| | flicker |
+| --- | --- |
+| as first written | 8.5% |
+| interior lit by the same estimate | 2.4% |
+| plus the one-cell cap | **0.11%** |
+
+Two things that were **not** the cause, both checked before the real one was found. The iteration budget steps up about
+six times a second as the view descends, which reclassifies cells - but reversals on the frames where it ticks (2.55%)
+match the frames where it does not (2.38%). And the exterior contours contribute nothing: with `bands` at zero it is
+2.43% against 2.37%.
+
+What is left is the ordinary marginality of a finite budget - cells that genuinely sit on the edge of escaping within it
+- and the only cure for that is more iterations. At 2,000 the flicker measures zero, and the frame costs six times as
+much.
+
 ### The camera is a mass, and the goal is a walk
 
 Two changes, both about the fact that a zoom is one coherent motion the eye tracks.

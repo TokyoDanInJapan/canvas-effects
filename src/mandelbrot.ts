@@ -693,10 +693,17 @@ export function patchAt(m: Mandelbrot, i: number, j: number, out: Float64Array):
     for (let di = -AIM_WINDOW; di <= AIM_WINDOW; di++) {
       const x = i + di;
       if (x < 0 || x >= w) continue;
-      const value = field[y * w + x];
+      // Interior counted as dark, whatever the picture does with it. The
+      // rendering lights the inside of the boundary as well as the outside -
+      // that is what stopped it flickering - but every threshold these numbers
+      // are compared against was measured on "how much lit *exterior* is
+      // there", and interior brightness is a rendering choice rather than
+      // anything about the structure. See the note in `renderMandelbrot`.
+      const dark = inside[y * w + x];
+      const value = dark ? 0 : field[y * w + x];
       sum += value;
       sumSq += value * value;
-      solid += inside[y * w + x];
+      solid += dark;
       count++;
     }
   }
@@ -757,12 +764,6 @@ export function renderMandelbrot(m: Mandelbrot, params: MandelbrotParams = MANDE
 
     for (let i = 0; i < w; i++) {
       const k = row + i;
-      if (inside[k]) {
-        distance[k] = 0;
-        field[k] = 0;
-        continue;
-      }
-
       const im = i > 0 ? i - 1 : i;
       const ip = i < w - 1 ? i + 1 : i;
       const gx = (escape[row + ip] - escape[row + im]) / (ip - im || 1);
@@ -771,9 +772,47 @@ export function renderMandelbrot(m: Mandelbrot, params: MandelbrotParams = MANDE
 
       // A flat neighbourhood means the set is further away than this frame can
       // measure, which is the same thing as very far indeed.
-      const d = gradient > 1e-9 ? 1 / (Math.LN2 * gradient) : 1e9;
+      let d = gradient > 1e-9 ? 1 / (Math.LN2 * gradient) : 1e9;
+
+      // A central difference cannot see a feature one cell wide: with exterior
+      // on both sides of a single interior cell the two halves cancel and the
+      // estimate comes back saying the set is nowhere near - so a one-cell
+      // filament got a dark speck down the middle of its own glow. The
+      // classification knows what the difference cannot, and a cell with a
+      // neighbour on the other side of the line is on the boundary by
+      // definition, whatever the arithmetic makes of its surroundings.
+      if (
+        (i > 0 && inside[k - 1] !== inside[k]) ||
+        (i < w - 1 && inside[k + 1] !== inside[k]) ||
+        (j > 0 && inside[k - w] !== inside[k]) ||
+        (j < h - 1 && inside[k + w] !== inside[k])
+      ) {
+        if (d > TOUCHING) d = TOUCHING;
+      }
+
       distance[k] = d;
-      field[k] = brightnessAt(d, escape[k], params);
+      // The interior goes through the same estimate as everything else, and
+      // that is what stops the picture flickering. It used to be forced to
+      // zero - the darkest the palette goes - while the cell beside it, being
+      // right against the boundary, came out at one. A cell on the line
+      // between them flips classification whenever the view shifts by less
+      // than its own width, so it was alternating between the two ends of the
+      // palette from frame to frame: 9.25% of cells doing that every frame.
+      //
+      // Nothing had to be added to fix it, only taken away. An interior cell
+      // already carries the budget as its escape count, so the difference
+      // against its neighbours means something: flat in the deep interior, so
+      // the distance comes out enormous and it is dark, and steep next to the
+      // boundary, so it is bright - which is what its exterior neighbour is
+      // too. The classification stops being a cliff and the flip stops
+      // mattering.
+      //
+      // The contours are the exception. An interior escape count is the same
+      // synthetic number everywhere, so banding it would lay a flat tone over
+      // the whole set and shift it every time the budget ticks up. They fade
+      // out as the distance goes to nothing anyway, so leaving them off inside
+      // costs no continuity at the boundary.
+      field[k] = inside[k] ? params.glow / (d + params.glow) : brightnessAt(d, escape[k], params);
     }
   }
 }
@@ -1188,15 +1227,19 @@ function lakePush(m: Mandelbrot, i: number, j: number, out: Float64Array): numbe
  * caller's cue to have `aimAt` seat the goal somewhere else.
  */
 export function traceStep(m: Mandelbrot, params: MandelbrotParams, dt: number): boolean {
-  const { w, h, field, distance, state: s } = m;
+  const { w, h, escape, distance, state: s } = m;
   cellOf(m, s.goalX, s.goalY, m.cell);
   const i = Math.round(m.cell[0]);
   const j = Math.round(m.cell[1]);
   if (i < 1 || i > w - 2 || j < 1 || j > h - 2) return false;
 
   const k = j * w + i;
-  const gx = (field[k + 1] - field[k - 1]) / 2;
-  const gy = (field[k + w] - field[k - w]) / 2;
+  // The escape count, not the brightness. Both rise towards the set, so either
+  // gives the contour - but the escape count is the potential itself and is
+  // untouched by how the picture chooses to shade the interior, where the
+  // brightness now turns over and would send the walk back on itself.
+  const gx = (escape[k + 1] - escape[k - 1]) / 2;
+  const gy = (escape[k + w] - escape[k - w]) / 2;
   const g = Math.sqrt(gx * gx + gy * gy);
   // Flat: either open exterior or the middle of a lake, and in both the
   // direction to walk is undefined rather than merely uninteresting.
@@ -1300,14 +1343,23 @@ export function frameTone(m: Mandelbrot, out: Float64Array): void {
   let sum = 0;
   let solid = 0;
   for (let k = 0; k < field.length; k++) {
-    sum += field[k];
-    if (field[k] > LIT_LEVEL) lit++;
+    // Exterior only, for the same reason `patchAt` does it - see there.
+    const value = inside[k] ? 0 : field[k];
+    sum += value;
+    if (value > LIT_LEVEL) lit++;
     solid += inside[k];
   }
   out[0] = lit / field.length;
   out[1] = sum / field.length;
   out[2] = solid / field.length;
 }
+
+/**
+ * The furthest a cell that touches the other side of the classification line
+ * can be from the set, in cells. Half of one, because that is where the
+ * boundary between two neighbours is.
+ */
+const TOUCHING = 0.5;
 
 /** Brightness at which a cell counts as lit rather than as background. */
 const LIT_LEVEL = 0.25;
