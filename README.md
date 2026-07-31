@@ -209,7 +209,7 @@ Every effect takes the same shape of options object. These are shared:
 | `pixelSize`            | `6`           | CSS pixels per rendered pixel - one dither cell. Bigger is cheaper. `1` renders at native resolution.    |
 | `fieldScale`           | varies        | How much coarser the field is than the output, per axis.                                                 |
 | `maxPixels`            | `160000`      | Ceiling on rendered pixels; raises `pixelSize` on large windows.                                         |
-| `levels`               | `5`           | Palette size. Small on purpose - the dither makes it look smooth.                                        |
+| `levels`               | `5`           | Palette size, up to 256. Small on purpose - the dither makes it look smooth.                             |
 | `dither`               | `'auto'`      | Off posterises flat: same palette, visible bands. `'auto'` is on above one CSS pixel a cell, off at one. |
 | `gamma`                | varies        | Weights the field dark (above 1) or light (below).                                                       |
 | `fps`                  | `24`          | Redraw rate.                                                                                             |
@@ -220,6 +220,11 @@ Every effect takes the same shape of options object. These are shared:
 | `watchThemeClass`      | `true`        | Re-read `shading` when the `class` on `<html>` changes.                                                  |
 | `watchColorScheme`     | `true`        | Re-read `shading` when the OS colour scheme changes.                                                     |
 | `random`               | `Math.random` | Pass a seeded generator for a repeatable background.                                                     |
+
+**`levels` has a ceiling that is not `levels`.** The palette is bytes, and a greyscale shading only spans `base` to
+`base + amplitude` - so at the default amplitude of 26 there are 27 distinct greys to be had, and asking for 64 or for
+256 both give you 27. Raise `amplitude` to suit, or use a `ramp`, which spans three channels and has far more room in
+it. The dither shrinks itself out of the way as the palette fills: at 256 levels its nudge is half a byte.
 
 ### Running at native resolution
 

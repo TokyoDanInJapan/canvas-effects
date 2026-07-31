@@ -232,7 +232,12 @@ export interface SurfaceOptions {
   maxPixels: number;
   /** Ceiling on field cells. `Infinity` to let the field scale freely. */
   maxFieldCells: number;
-  /** Palette size. Small on purpose - the dither is what makes it smooth. */
+  /**
+   * Palette size. Small on purpose - the dither is what makes it smooth.
+   *
+   * Up to 256. Past `|amplitude| + 1` the entries start repeating, because the
+   * palette is bytes - see `levels` in `CommonBackgroundOptions`.
+   */
   levels: number;
   /**
    * Ordered-dither the output, rather than posterising it flat.
