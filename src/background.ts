@@ -47,7 +47,16 @@ export interface CommonBackgroundOptions {
   maxPixels: number;
   /** Redraw rate. Well below the refresh rate on purpose. */
   fps: number;
-  /** Palette size. Small on purpose - the dither is what makes it look smooth. */
+  /**
+   * Palette size. Small on purpose - the dither is what makes it look smooth.
+   *
+   * Anything up to 256 works, but there is a ceiling above which it does
+   * nothing, and it is `amplitude` rather than this. The palette is bytes, and
+   * a greyscale shading only spans `base` to `base + amplitude`: at the default
+   * amplitude of 26 there are 27 distinct greys to be had, so asking for 64
+   * levels and asking for 256 both give 27. Raise `amplitude`, or use a `ramp`,
+   * which spans three channels and so has far more room in it.
+   */
   levels: number;
   /**
    * Ordered-dither the output. Off posterises flat, showing the bands.

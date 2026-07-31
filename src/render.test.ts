@@ -509,6 +509,46 @@ describe('createSurface', () => {
       expect(seen.size).toBeGreaterThan(1);
     });
 
+    it('holds up at a 256-entry palette', () => {
+      // The shade loop indexes the palette with `round(level * (levels - 1)) * 3`,
+      // which has to stay inside it at every level count - and the top of the
+      // range is where it would not.
+      for (const levels of [2, 5, 64, 255, 256]) {
+        const dom = fake();
+        const surface = createSurface(dom.canvas, dom.ctx, options({ levels, dither: false }));
+        surface.resize();
+        for (const value of [0, 0.5, 1]) {
+          surface.shade(flat(surface, value), { base: 0, amplitude: 255 }, 1);
+          const image = dom.painted()!;
+          for (let i = 0; i < image.data.length; i += 4) {
+            expect(Number.isFinite(image.data[i]), `levels ${levels} at ${value}`).toBe(true);
+          }
+        }
+        // The ends of the field land on the ends of the palette, whatever its size.
+        surface.shade(flat(surface, 1), { base: 0, amplitude: 255 }, 1);
+        expect(dom.painted()!.data[0], `levels ${levels}`).toBe(255);
+        surface.shade(flat(surface, 0), { base: 0, amplitude: 255 }, 1);
+        expect(dom.painted()!.data[0], `levels ${levels}`).toBe(0);
+      }
+    });
+
+    it('runs out of distinct greys before it runs out of levels', () => {
+      // The ceiling on `levels` is `amplitude`, not `levels`. A byte palette
+      // over a 26-step throw has 27 greys in it however many are asked for,
+      // which is worth knowing before turning the dial up and seeing nothing.
+      const distinct = (levels: number, amplitude: number) => {
+        const palette = buildPalette({ base: 18, amplitude }, levels);
+        const seen = new Set<number>();
+        for (let i = 0; i < levels; i++) seen.add(palette[i * 3]);
+        return seen.size;
+      };
+
+      expect(distinct(64, 26)).toBe(27);
+      expect(distinct(256, 26)).toBe(27);
+      // With room to work in, the levels are all there.
+      expect(distinct(256, 237)).toBeGreaterThan(200);
+    });
+
     it("takes 'auto' to mean dither above one CSS pixel a cell and not at one", () => {
       // The size the surface *settled* at, not the one asked for. A 1200-wide
       // canvas at one pixel a cell is 1200 cells, so the dither goes off; the
