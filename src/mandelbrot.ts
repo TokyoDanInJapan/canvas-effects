@@ -111,6 +111,7 @@
 // mandelbrot-background.ts.
 
 import { approach, aspectOf } from './background.js';
+import { hash2 } from './noise.js';
 
 const TAU = Math.PI * 2;
 
@@ -185,6 +186,33 @@ export interface MandelbrotParams {
   aimEase: number;
   /** Seconds for the view to reach where a drag is aiming it. Shorter: it is being steered. */
   steerEase: number;
+  /**
+   * Screen heights per second the aim walks along the boundary.
+   *
+   * The aim is not a point that gets replaced any more, it is a point that
+   * *travels*, and this is how fast. Following the boundary rather than jumping
+   * between targets is what makes the lateral motion smooth: a walked path is
+   * continuous by construction, where a re-picked one is a corner however well
+   * it is filtered afterwards.
+   */
+  traceSpeed: number;
+  /**
+   * Distance from the set, in cells, the walk tries to hold.
+   *
+   * Brightness here is a function of distance in cells, so a contour of equal
+   * brightness *is* a curve at a fixed distance from the set - and the gradient
+   * of the field, which is already computed, is normal to it. Walking along the
+   * perpendicular traces the boundary at an offset; this is the offset.
+   */
+  traceDistance: number;
+  /** Seconds of descending between pauses to look around. */
+  exploreEvery: number;
+  /** Seconds spent tracing sideways at one magnification. */
+  exploreFor: number;
+  /** How many of those pauses back out a little way instead, 0 to 1. */
+  retreatChance: number;
+  /** Doublings a partial back-out gives up before descending again. */
+  retreatDoublings: number;
   /** How far from the preferred point the autopilot will look, in field heights. */
   aimReach: number;
   /** How far off centre the autopilot prefers to aim, in field heights. */
@@ -244,6 +272,8 @@ export const MANDELBROT_DEFAULTS: MandelbrotParams = {
   glow: 4,
   bands: 0.35,
   bandWidth: 9,
+  // How often the aim's surroundings are re-checked, not how often it moves -
+  // it moves every frame now. A re-seat only happens if the check fails.
   aimInterval: 0.8,
   // Half the re-aim interval, so a jump is spread over most of the gap before
   // the next one without lagging far enough behind to stop tracking. `aimEase`
@@ -260,6 +290,19 @@ export const MANDELBROT_DEFAULTS: MandelbrotParams = {
   // is another fifth of a doubling spent slowing down.
   turnEase: 0.45,
   dwell: 1.2,
+  // A twelfth of the screen a second. Fast enough to be going somewhere over
+  // the seconds an explore lasts, slow enough that it reads as drift rather
+  // than as a pan.
+  traceSpeed: 0.085,
+  // Just outside the glow, so the walk runs along the lit edge of the filigree
+  // rather than through the dark of the set or out in the open.
+  traceDistance: 1.6,
+  exploreEvery: 9,
+  exploreFor: 5,
+  // A third of them. Often enough to break the descent up, rare enough that the
+  // zoom still feels like it is going somewhere.
+  retreatChance: 0.34,
+  retreatDoublings: 2.5,
 };
 
 /**
@@ -271,7 +314,7 @@ export const MANDELBROT_DEFAULTS: MandelbrotParams = {
  * motionless, it is coasting to a stop, and it is the coast that lets the
  * descent land on `minSpan` and the pull-out land framed on home.
  */
-export type MandelbrotPhase = 'in' | 'holdDeep' | 'out' | 'holdHome';
+export type MandelbrotPhase = 'in' | 'cruise' | 'retreat' | 'holdDeep' | 'out' | 'holdHome';
 
 /** Where the view is, where it is going, and where in the cycle it is. */
 export interface MandelbrotState {
@@ -280,12 +323,58 @@ export interface MandelbrotState {
   cy: number;
   /** Height of the view, in complex units. */
   span: number;
-  /** The point the autopilot last picked. Jumps; nothing follows it directly. */
+  /**
+   * The point the view is drawn towards, walked along the boundary each frame.
+   *
+   * Re-seated by `aimAt` only when the walk runs out of boundary to follow, so
+   * the jumps that used to happen every `aimInterval` are now rare events
+   * rather than the normal case.
+   */
   goalX: number;
   goalY: number;
+  /** Which way along the boundary the walk is going. */
+  traceSign: number;
+  /**
+   * The cell `aimAt` would choose right now, refreshed on the `aimInterval`.
+   *
+   * The walk is drawn towards it rather than being replaced by it, and that
+   * blend is what buys both properties at once. Following a contour alone is
+   * perfectly continuous and drifts into the glow: measured over four descents,
+   * the field's standard deviation - which is what tells a crisp frame from a
+   * soft one - sat at 0.237 against 0.334 for views seated the way `aimAt`
+   * seats them. Being re-seated outright is the opposite trade, a jump every
+   * time. A pull is continuous and still goes where the picker points.
+   */
+  pickX: number;
+  pickY: number;
+  /**
+   * How hard the walk is currently trying to get out into open exterior, 0 to 1.
+   *
+   * Positive when the frame has washed out - every cell within a cell of the
+   * set, the flat mid-grey of hair below the sampling - and negative when the
+   * set has left the picture altogether and what is left is soft exterior glow
+   * with no filigree in it. Decays back to nothing in between.
+   *
+   * Both are invisible from where the walk is standing and obvious from the
+   * frame, and neither can be fixed by re-seating: `aimAt` refuses bright
+   * patches, so when the *whole frame* is bright it finds nowhere to go at all.
+   * One wash measured 22.7 seconds before this.
+   */
+  openUp: number;
   /** Where the view is being drawn towards - the goal, smoothed. */
   aimX: number;
   aimY: number;
+  /**
+   * How fast the view is moving, in screen heights per second.
+   *
+   * Screen units rather than complex ones, and it has to be: the same momentum
+   * has to mean the same thing at every magnification, and a velocity in
+   * complex units would be a hundred-thousand-fold faster by the bottom of a
+   * descent. It is the state that makes the camera a mass rather than a lag -
+   * when the aim moves, this is what carries the view through the corner.
+   */
+  vx: number;
+  vy: number;
   /** Which part of the cycle the view is in. */
   phase: MandelbrotPhase;
   /**
@@ -295,8 +384,15 @@ export interface MandelbrotState {
    * phase wants rather than set to it. See `turnEase`.
    */
   rate: number;
-  /** Seconds until the next re-aim. */
+  /** Seconds until the aim's surroundings are next checked. */
   nextAim: number;
+  /** Seconds of descending left before the next pause to look around. */
+  nextExplore: number;
+  /** The span a partial back-out is climbing to. */
+  retreatTo: number;
+  /** Which decision the schedule is on, and the seed it draws them from. */
+  events: number;
+  seed: number;
   /** Seconds left of the pause at the end of a run. */
   held: number;
   /**
@@ -331,7 +427,7 @@ export function randomizeMandelbrot(
   rand: () => number = Math.random,
   params: MandelbrotParams = MANDELBROT_DEFAULTS
 ): MandelbrotState {
-  // Warmed before the one draw this effect makes, and it is not superstition.
+  // Warmed before the draws this effect makes, and it is not superstition.
   // Unlike the other six there is nothing here to randomise but the direction
   // the autopilot leans - the set is the set - so that single value is the only
   // thing separating one run from another. A weakly seeded generator's first
@@ -341,19 +437,37 @@ export function randomizeMandelbrot(
   // them and getting the same picture three times.
   for (let i = 0; i < 4; i++) rand();
 
+  // A whole number for `hash2`, which is where the schedule's variety comes
+  // from - the alternative is threading a generator through every call of
+  // `stepMandelbrot` for the sake of two decisions a minute.
+  const seed = Math.floor(rand() * 0x7fffffff);
+
   return {
     cx: params.homeX,
     cy: params.homeY,
     span: params.homeSpan,
     goalX: params.homeX,
     goalY: params.homeY,
+    pickX: params.homeX,
+    pickY: params.homeY,
+    traceSign: 1,
+    openUp: 0,
     aimX: params.homeX,
     aimY: params.homeY,
+    vx: 0,
+    vy: 0,
     phase: 'in',
     // From rest, so the opening descent accelerates in like every other one
     // rather than starting at full speed.
     rate: 0,
     nextAim: 0,
+    // Jittered like every later one. Left at the flat `exploreEvery` it was the
+    // one moment of the cycle every seed shared, and three runs side by side
+    // paused together.
+    nextExplore: params.exploreEvery * (0.6 + hash2(0, 2, seed) * 0.8),
+    retreatTo: params.homeSpan,
+    events: 0,
+    seed,
     held: 0,
     deepX: params.homeX,
     deepY: params.homeY,
@@ -466,6 +580,12 @@ export interface Mandelbrot {
   aim: Float64Array;
   /** Scratch for one candidate patch, so the aim scan allocates nothing. */
   patch: Float64Array;
+  /** Scratch for one axis of the camera spring, one cell coordinate, one lean. */
+  spring: Float64Array;
+  cell: Float64Array;
+  push: Float64Array;
+  /** Scratch for the frame's lit fraction, mean brightness and interior share. */
+  tone: Float64Array;
 }
 
 export function createMandelbrot(
@@ -484,6 +604,10 @@ export function createMandelbrot(
     state: randomizeMandelbrot(rand, params),
     aim: new Float64Array(2),
     patch: new Float64Array(3),
+    spring: new Float64Array(2),
+    cell: new Float64Array(2),
+    push: new Float64Array(2),
+    tone: new Float64Array(3),
   };
 }
 
@@ -737,11 +861,19 @@ export function stepMandelbrot(
 
   // The rate is eased towards what the phase wants, never switched to it. See
   // `turnEase` - this one line is most of what makes the cycle smooth.
-  const wanted = s.phase === 'in' ? -params.speed : s.phase === 'out' ? params.speed * params.returnSpeed : 0;
+  const wanted = rateFor(s.phase, params);
+  const was = s.rate;
   s.rate = approach(s.rate, wanted, dt, params.turnEase);
   if (s.held > 0) s.held -= dt;
 
-  s.span *= Math.pow(2, s.rate * dt);
+  // The mean of the rate across the step, not the rate at the end of it. The
+  // end-of-step value under-integrates a decaying rate by about `dt / 2` of it,
+  // which is a twentieth of a doubling a frame at 24fps - and the coast is
+  // *aimed* at the limits, so a systematic shortfall means it lands short every
+  // time. It did: a pull-out asked to arrive at the home span stopped at 97.4%
+  // of it, under the 98% the next descent waits for, and the cycle deadlocked
+  // there with nothing left to move it.
+  s.span *= Math.pow(2, ((was + s.rate) / 2) * dt);
   // Belt and braces on the precision floor and the framing. The turns are taken
   // early by exactly what the coast covers, so neither of these should ever
   // bite; if `turnEase` is raised past what the cycle has room for, they do.
@@ -755,6 +887,25 @@ export function stepMandelbrot(
         break;
       }
       steer(m, params, dt, pointer);
+      // Only descending counts down to the next pause: an explore should be
+      // separated from the next one by a stretch of actual descending, not by
+      // wall-clock time it spent not descending.
+      if (!pointer && (s.nextExplore -= dt) <= 0) beginExplore(m, params);
+      break;
+
+    case 'cruise':
+      // The rate is on its way to nothing and then back, so this is not a
+      // freeze - it is the zoom easing off while the walk carries on sideways,
+      // which is the whole point of it.
+      steer(m, params, dt, pointer);
+      if ((s.held -= dt) <= 0) resumeDescent(m, params);
+      break;
+
+    case 'retreat':
+      steer(m, params, dt, pointer);
+      // Far enough back out. Not a hard stop: `rateFor` has already begun
+      // easing towards the descent by the time this fires.
+      if (s.span >= s.retreatTo) resumeDescent(m, params);
       break;
 
     case 'holdDeep':
@@ -778,7 +929,10 @@ export function stepMandelbrot(
       // Stopped, and actually framed on the whole set rather than merely out of
       // time: the coast is asymptotic, so waiting on the clock alone would
       // start the next descent from a view still visibly cropped.
-      if (s.held <= 0 && s.span >= params.homeSpan * HOME_ENOUGH) {
+      // Framed on the whole set, or as framed as it is ever going to be. The
+      // second half is not belt and braces: the coast is asymptotic, so a
+      // threshold it happens to fall short of is a cycle that never restarts.
+      if (s.held <= 0 && (s.span >= params.homeSpan * HOME_ENOUGH || Math.abs(s.rate) < RATE_DEAD)) {
         s.phase = 'in';
         s.goalX = s.cx;
         s.goalY = s.cy;
@@ -786,7 +940,10 @@ export function stepMandelbrot(
         s.aimY = s.cy;
         s.nextAim = 0;
         s.blind = 0;
+        s.vx = 0;
+        s.vy = 0;
         s.biasAngle += GOLDEN_ANGLE;
+        resumeDescent(m, params);
       }
       break;
   }
@@ -814,49 +971,525 @@ function turnSpan(params: MandelbrotParams, rate: number): number {
   return Math.pow(2, Math.min(Math.abs(rate) * params.turnEase, range / 3));
 }
 
+/** What the rate is easing towards in each phase, in doublings a second. */
+function rateFor(phase: MandelbrotPhase, params: MandelbrotParams): number {
+  switch (phase) {
+    case 'in':
+      return -params.speed;
+    case 'retreat':
+      // Gentler than the full pull-out. A partial back-out is meant to read as
+      // the view drawing back for a wider look, not as the run being abandoned.
+      return params.speed * RETREAT_SPEED;
+    case 'out':
+      return params.speed * params.returnSpeed;
+    default:
+      return 0;
+  }
+}
+
+/** How much faster than the descent a partial back-out climbs. */
+const RETREAT_SPEED = 1.6;
+
+/**
+ * Starts a pause in the descent - either tracing sideways at this magnification
+ * for a few seconds, or giving up a couple of doublings for a wider look.
+ *
+ * Which, and how long, come from `hash2` over a counter rather than from a
+ * generator: two decisions a minute is not worth threading `random` through
+ * every call of `stepMandelbrot`, and the counter and seed live in the state,
+ * so a seeded background still replays exactly.
+ */
+function beginExplore(m: Mandelbrot, params: MandelbrotParams): void {
+  const s = m.state;
+  const roll = hash2(s.events, 0, s.seed);
+  const jitter = hash2(s.events, 1, s.seed);
+  s.events++;
+
+  // Not near the floor: there is no room to back out into and nothing to be
+  // gained by hovering just above the precision limit.
+  const headroom = Math.log2(s.span / params.minSpan);
+
+  if (roll < params.retreatChance && headroom > params.retreatDoublings * 2) {
+    s.phase = 'retreat';
+    s.retreatTo = s.span * Math.pow(2, params.retreatDoublings * (0.6 + jitter * 0.8));
+    if (s.retreatTo > params.homeSpan) s.retreatTo = params.homeSpan;
+    return;
+  }
+
+  s.phase = 'cruise';
+  s.held = params.exploreFor * (0.6 + jitter * 0.8);
+}
+
+/** Back to descending, with the next pause scheduled. */
+function resumeDescent(m: Mandelbrot, params: MandelbrotParams): void {
+  const s = m.state;
+  s.phase = 'in';
+  s.held = 0;
+  s.nextExplore = params.exploreEvery * (0.6 + hash2(s.events, 2, s.seed) * 0.8);
+}
+
 /** How close to the home span counts as framed on the whole set. */
 const HOME_ENOUGH = 0.98;
 
-/** Re-aims if it is time to, and draws the view towards wherever it is aimed. */
-function steer(m: Mandelbrot, params: MandelbrotParams, dt: number, pointer: readonly [number, number] | null): void {
-  const s = m.state;
-  s.nextAim -= dt;
+/** A rate below which nothing further is going to happen, in doublings a second. */
+const RATE_DEAD = 0.004;
 
-  if (pointer || s.nextAim <= 0) {
-    s.nextAim = params.aimInterval;
+/**
+ * One axis of a critically damped spring, written into `out` as
+ * `[position, velocity]`.
+ *
+ * The standard closed-form damper rather than an integrator, because it is
+ * stable for any step - `mountBackground` clamps a returning tab to 100ms, and
+ * a spring integrated explicitly at that step size with a one-second time
+ * constant is not something to rely on.
+ *
+ * Critically damped on purpose: it is the fastest approach that never
+ * overshoots, and an overshoot in a background reads as a wobble rather than as
+ * weight. `smoothTime` is roughly how long it takes to arrive, and is the dial
+ * for how heavy the view feels.
+ */
+export function damp(
+  current: number,
+  target: number,
+  velocity: number,
+  smoothTime: number,
+  dt: number,
+  out: Float64Array
+): void {
+  if (smoothTime <= 0 || dt <= 0) {
+    out[0] = smoothTime <= 0 ? target : current;
+    out[1] = smoothTime <= 0 ? 0 : velocity;
+    return;
+  }
 
-    const bias = pointer ? 0 : params.aimBias * m.h;
-    const prefI = pointer ? pointer[0] * (m.w - 1) : (m.w - 1) / 2 + Math.cos(s.biasAngle) * bias;
-    const prefJ = pointer ? pointer[1] * (m.h - 1) : (m.h - 1) / 2 + Math.sin(s.biasAngle) * bias;
+  const omega = 2 / smoothTime;
+  const x = omega * dt;
+  // A Padé-style fit to `exp(-x)`, which is what makes this exact enough at any
+  // step without calling `Math.exp` per axis per frame.
+  const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  const change = current - target;
+  const temp = (velocity + omega * change) * dt;
+  out[1] = (velocity - omega * temp) * decay;
+  out[0] = target + (change + temp) * decay;
+}
 
-    if (aimAt(m, params, prefI, prefJ)) {
-      s.blind = 0;
-      s.goalX = m.aim[0];
-      s.goalY = m.aim[1];
-    } else if (pointer) {
-      // Not counted while a drag has hold. A pointer re-aims every frame rather
-      // than every `aimInterval`, so counting here would abandon a descent an
-      // eighth of a second after a drag crossed a lake - and yanking the view
-      // into a pull-out mid-drag is the last thing wanted. The last aim stands
-      // until the pointer finds something.
-      s.blind = 0;
-    } else if (++s.blind >= BLIND_LIMIT) {
-      // Nothing left to look at, and not just for a moment.
-      endDescent(s, params);
-      return;
+/** The cell a complex coordinate falls on, fractional, written into `out`. */
+function cellOf(m: Mandelbrot, x: number, y: number, out: Float64Array): void {
+  const { w, h, state } = m;
+  const spanX = state.span * aspectOf(m);
+  out[0] = w > 1 ? ((x - state.cx) / spanX + 0.5) * (w - 1) : 0;
+  out[1] = h > 1 ? ((y - state.cy) / state.span + 0.5) * (h - 1) : 0;
+}
+
+/** How hard the walk pulls back onto its contour, against how hard it runs along it. */
+const TRACE_HOLD = 1.5;
+
+/**
+ * Seconds for the goal to close on the cell the picker likes.
+ *
+ * This is the half of the goal's motion that keeps the picture good, and the
+ * contour walk is the half that makes it explore. Easing rather than jumping is
+ * the whole point: `aimAt` chooses well and chooses discontinuously, and a lag
+ * in front of it keeps the choice and loses the jump.
+ */
+const PICK_EASE = 1.2;
+
+/**
+ * How far in or out the walk will move from `traceDistance`, as a multiplier
+ * either way, and how long it takes to give the offset back.
+ *
+ * `openUp` runs from -1 to 1 and is a slow feedback loop on the one number the
+ * walk controls - how far from the set it holds - driven by what the whole
+ * frame looks like rather than by anything local. Positive climbs out of a
+ * wash; negative closes back in when the set has left the picture entirely.
+ * Both failures are invisible from where the walk is standing, and obvious from
+ * the frame.
+ */
+const OPEN_UP = 4;
+const CLOSE_IN = 0.75;
+const OPEN_EASE = 3;
+
+/** The distance from the set the walk is currently holding, in cells. */
+function holdingAt(s: MandelbrotState, params: MandelbrotParams): number {
+  const scale = s.openUp >= 0 ? 1 + OPEN_UP * s.openUp : 1 + CLOSE_IN * s.openUp;
+  return params.traceDistance * scale;
+}
+
+/**
+ * How far the walk looks for interior to steer away from, in cells, and how
+ * hard it leans off it.
+ *
+ * Following a contour at a fixed distance from the set is not enough on its
+ * own, because the shore of a lake is a contour too - and a perfectly good one,
+ * seven cells wide, on the edge of something that fills the screen. Left to the
+ * contour alone the walk found one about seventeen times a descent, against
+ * three or four for the schedule; almost all the cruising the effect did was
+ * rescues.
+ *
+ * So the walk also leans away from wherever the interior around it is, weighted
+ * by how much of it there is. The radius has to be well past the patch the
+ * quality checks use - a lake that matters is bigger than seven cells - and it
+ * is sampled every other cell, which is a couple of hundred reads a frame
+ * against the ten thousand cells the render just did.
+ */
+const LAKE_RADIUS = 9;
+const LAKE_PUSH = 2.5;
+
+/**
+ * Which way to lean to get away from the interior nearby, written into `out` as
+ * a unit vector, and returning how much interior there was to lean off.
+ */
+function lakePush(m: Mandelbrot, i: number, j: number, out: Float64Array): number {
+  const { w, h, inside } = m;
+  let sx = 0;
+  let sy = 0;
+  let solid = 0;
+  let count = 0;
+
+  for (let dj = -LAKE_RADIUS; dj <= LAKE_RADIUS; dj += 2) {
+    const y = j + dj;
+    if (y < 0 || y >= h) continue;
+    for (let di = -LAKE_RADIUS; di <= LAKE_RADIUS; di += 2) {
+      const x = i + di;
+      if (x < 0 || x >= w) continue;
+      if (di * di + dj * dj > LAKE_RADIUS * LAKE_RADIUS) continue;
+      count++;
+      if (!inside[y * w + x]) continue;
+      solid++;
+      sx += di;
+      sy += dj;
     }
   }
 
-  // Two lags in series: the goal jumps, the aim smooths it, the view follows
-  // the aim. A drag skips most of the smoothing - a pointer moves continuously,
-  // so there is little to smooth and every bit of it is lag you can feel.
+  out[0] = 0;
+  out[1] = 0;
+  if (!count || !solid) return 0;
+
+  // Away from where the interior sits, not towards it.
+  const len = Math.sqrt(sx * sx + sy * sy);
+  if (len > 1e-6) {
+    out[0] = -sx / len;
+    out[1] = -sy / len;
+  }
+  return solid / count;
+}
+
+/**
+ * Walks the goal one step along the boundary, and says whether it managed to.
+ *
+ * The field's gradient points towards the set - brightness runs with nearness -
+ * so its perpendicular is the contour, and a contour of equal brightness is a
+ * curve at a fixed distance from the set. Running along that traces the
+ * filigree; leaning towards or away from the set by however far the local
+ * distance is off `traceDistance` holds the walk on it.
+ *
+ * Returns false when there is nothing to follow - off the frame, or a
+ * neighbourhood flat enough that the gradient says nothing - which is the
+ * caller's cue to have `aimAt` seat the goal somewhere else.
+ */
+export function traceStep(m: Mandelbrot, params: MandelbrotParams, dt: number): boolean {
+  const { w, h, field, distance, state: s } = m;
+  cellOf(m, s.goalX, s.goalY, m.cell);
+  const i = Math.round(m.cell[0]);
+  const j = Math.round(m.cell[1]);
+  if (i < 1 || i > w - 2 || j < 1 || j > h - 2) return false;
+
+  const k = j * w + i;
+  const gx = (field[k + 1] - field[k - 1]) / 2;
+  const gy = (field[k + w] - field[k - w]) / 2;
+  const g = Math.sqrt(gx * gx + gy * gy);
+  // Flat: either open exterior or the middle of a lake, and in both the
+  // direction to walk is undefined rather than merely uninteresting.
+  if (g < 1e-4) return false;
+
+  // Towards the set, and the contour at right angles to it.
+  const nx = gx / g;
+  const ny = gy / g;
+  const tx = -ny * s.traceSign;
+  const ty = nx * s.traceSign;
+
+  // Positive when the walk has drifted too far out, and the correction is
+  // towards the set. Clamped so a walk that strays into the middle of a lake
+  // turns round rather than accelerating away.
+  const holding = holdingAt(s, params);
+  const off = (distance[k] - holding) / holding;
+  const lean = off > 1 ? 1 : off < -1 ? -1 : off;
+
+  const weight = lakePush(m, i, j, m.push);
+  let dx = tx + nx * lean * TRACE_HOLD + m.push[0] * weight * LAKE_PUSH;
+  let dy = ty + ny * lean * TRACE_HOLD + m.push[1] * weight * LAKE_PUSH;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  dx /= len;
+  dy /= len;
+
+  // In screen heights, so the walk covers the same fraction of the picture a
+  // second whatever the magnification.
+  const step = params.traceSpeed * s.span * dt;
+  s.goalX += dx * step;
+  s.goalY += dy * step;
+  return true;
+}
+
+/**
+ * Seats the goal somewhere worth looking at, and says whether it found
+ * anywhere. Reverses the walk's handedness each time, so two re-seats in a row
+ * do not send it back along the path it has just come down.
+ */
+function reseat(m: Mandelbrot, params: MandelbrotParams, pointer: readonly [number, number] | null): boolean {
+  const s = m.state;
+  const bias = pointer ? 0 : params.aimBias * m.h;
+  const prefI = pointer ? pointer[0] * (m.w - 1) : (m.w - 1) / 2 + Math.cos(s.biasAngle) * bias;
+  const prefJ = pointer ? pointer[1] * (m.h - 1) : (m.h - 1) / 2 + Math.sin(s.biasAngle) * bias;
+
+  if (!aimAt(m, params, prefI, prefJ)) return false;
+  s.pickX = m.aim[0];
+  s.pickY = m.aim[1];
+  s.goalX = m.aim[0];
+  s.goalY = m.aim[1];
+  s.traceSign = -s.traceSign;
+  return true;
+}
+
+/** Refreshes where the picker is pointing, without moving the goal to it. */
+function repick(m: Mandelbrot, params: MandelbrotParams): boolean {
+  const s = m.state;
+  const bias = params.aimBias * m.h;
+  const prefI = (m.w - 1) / 2 + Math.cos(s.biasAngle) * bias;
+  const prefJ = (m.h - 1) / 2 + Math.sin(s.biasAngle) * bias;
+  if (!aimAt(m, params, prefI, prefJ)) return false;
+  s.pickX = m.aim[0];
+  s.pickY = m.aim[1];
+  return true;
+}
+
+/**
+ * How much of the frame is lit, how bright it is on average, and how much of it
+ * is interior, written into `out` as `[lit, mean, solid]`. All three in one
+ * pass, because all three are wanted at once and the pass is over every cell of
+ * the field.
+ *
+ * The lit fraction is what "there is something to look at" means here.
+ *
+ * Not the interior fraction, and that distinction cost a day. The obvious
+ * reading of a frame that is 85% interior is a black rectangle, and it is
+ * wrong: the set is drawn dark and only its boundary glows, so a frame full of
+ * set is a frame full of *silhouette*, and what decides whether it is worth
+ * looking at is how much lit edge is in it. Steering on the interior fraction
+ * pulled the view off pictures like a lit spike of exterior driven into a dark
+ * mass - which is one of the better things this draws - and spent a third of
+ * the cycle rescuing frames that needed no rescue.
+ *
+ * Measured over 1,276 frames of eight full descents: the lit fraction never
+ * once fell below 0.107, and averaged 0.15 even in the frames that were more
+ * than 80% interior. There is no blank frame in there to find.
+ *
+ * The mean is for the other end - the wash of hair finer than the sampling,
+ * where every cell is correctly within a cell of the set and the picture is a
+ * flat mid-grey. The lit fraction cannot tell that from a good frame, since
+ * both reach 1.0; the mean separates them cleanly, at 0.75 and above against a
+ * 95th percentile of 0.72 for everything else.
+ *
+ * And the interior fraction is not a quality measure - a frame can be 85%
+ * interior and be one of the better things this draws - but zero of it is:
+ * that is the set out of shot altogether, and what is left is the soft blur of
+ * the exterior glow with no filigree in it anywhere.
+ */
+export function frameTone(m: Mandelbrot, out: Float64Array): void {
+  const { field, inside } = m;
+  let lit = 0;
+  let sum = 0;
+  let solid = 0;
+  for (let k = 0; k < field.length; k++) {
+    sum += field[k];
+    if (field[k] > LIT_LEVEL) lit++;
+    solid += inside[k];
+  }
+  out[0] = lit / field.length;
+  out[1] = sum / field.length;
+  out[2] = solid / field.length;
+}
+
+/** Brightness at which a cell counts as lit rather than as background. */
+const LIT_LEVEL = 0.25;
+
+/**
+ * How little of the frame may be lit, and how bright its mean may be, before
+ * the goal is re-seated - and how little lit before the descent stops
+ * altogether to let the view get somewhere better.
+ *
+ * Both are well under anything measured - the floor over eight full descents
+ * was 0.107 - so neither fires in normal running. They are here for the
+ * configurations nobody has measured: a much smaller field, a much lower
+ * iteration budget, a `traceSpeed` turned up past what the walk can follow.
+ *
+ * Stopping rather than backing out is deliberate. A rescue that gives up two
+ * and a half doublings re-descends into the same place: when that was tried,
+ * four of eight seeded runs spent 62% of their time retreating and never got
+ * more than five doublings down at all. Pausing costs nothing already gained.
+ */
+const FRAME_DIM = 0.09;
+const FRAME_BLANK = 0.06;
+const FRAME_WASHED = 0.78;
+
+/** How little of the frame may be set before the walk closes back in on it. */
+const FRAME_BARE = 0.04;
+
+/** Seconds the zoom holds off while the view finds something to look at. */
+const RESCUE_HOLD = 2.5;
+
+/** Doublings given back to resolve a frame that has washed out. */
+const WASH_RETREAT = 1.5;
+
+/**
+ * How far off `traceDistance` the walk may drift before the goal is thrown away,
+ * as a multiple of it.
+ *
+ * The keep test asks a different question from the pick test, and asking
+ * `aimAt`'s question was wrong twice over. `aimAt` rejects a patch with little
+ * interior in it, and a patch that is mostly bright, because both are ways of
+ * having nothing to look at *when choosing between whole frames*. But the walk
+ * deliberately sits a cell and a half off the boundary, so its patch is bright
+ * and nearly empty of interior by construction: 24% of the time it fell under
+ * the interior floor and 25% over the brightness ceiling, and the goal was
+ * being thrown away about once a second. Every one of those is the jump the
+ * walk exists to avoid.
+ *
+ * What actually matters once a goal has been chosen is whether it is still
+ * near the boundary and still on screen. The walk's own contour-holding keeps
+ * it there; this is the check that it has not lost the thread.
+ */
+const KEEP_DRIFT = 4;
+
+/** True if the goal is still on screen and still near the boundary. */
+function goalStillGood(m: Mandelbrot, params: MandelbrotParams): boolean {
+  const { w, h, inside, distance } = m;
+  cellOf(m, m.state.goalX, m.state.goalY, m.cell);
+  const i = Math.round(m.cell[0]);
+  const j = Math.round(m.cell[1]);
+
+  // Well inside the frame, not merely on it: a goal in the last few cells is
+  // about to leave, and the view is still travelling towards it.
+  const margin = Math.max(2, Math.round(h * 0.08));
+  if (i < margin || i > w - 1 - margin || j < margin || j > h - 1 - margin) return false;
+
+  const k = j * w + i;
+  if (inside[k]) return false;
+  return distance[k] <= holdingAt(m.state, params) * KEEP_DRIFT;
+}
+
+/**
+ * Walks the goal, re-seating it when the walk has nowhere to go, and draws the
+ * view after it.
+ */
+function steer(m: Mandelbrot, params: MandelbrotParams, dt: number, pointer: readonly [number, number] | null): void {
+  const s = m.state;
+
+  if (pointer) {
+    // A drag replaces the walk outright. The pointer chooses roughly and
+    // `aimAt` chooses exactly, so it still cannot be steered into the dark.
+    if (reseat(m, params, pointer)) s.blind = 0;
+  } else {
+    // Towards what the picker last liked, then along the boundary from there.
+    // The first keeps the frame worth looking at, the second is the exploring;
+    // both are continuous, which is why neither shows as a jump.
+    s.goalX = approach(s.goalX, s.pickX, dt, PICK_EASE);
+    s.goalY = approach(s.goalY, s.pickY, dt, PICK_EASE);
+
+    const walked = traceStep(m, params, dt);
+    s.nextAim -= dt;
+
+    // Re-seated when the walk has run out of boundary, or when the periodic
+    // check finds it somewhere `aimAt` would not have put it. Both are rare,
+    // which is the point: every re-seat is a jump in the aim, and jumps are
+    // what the walk exists to avoid.
+    const due = s.nextAim <= 0;
+    if (due || !walked) frameTone(m, m.tone);
+    const lit = due || !walked ? m.tone[0] : 1;
+    const tone = due || !walked ? m.tone[1] : 0;
+
+    const bare = due || !walked ? m.tone[2] : 1;
+
+    if (
+      !walked ||
+      (due && (!goalStillGood(m, params) || lit < FRAME_DIM || tone > FRAME_WASHED || bare < FRAME_BARE))
+    ) {
+      s.nextAim = params.aimInterval;
+      if (reseat(m, params, null)) {
+        s.blind = 0;
+      } else if (!walked && ++s.blind >= BLIND_LIMIT) {
+        // Genuinely nowhere to go: no contour to follow *and* nowhere to seat a
+        // new goal. Only that abandons a descent. A frame that merely looks bad
+        // while the walk still has a thread to follow is handled below, by
+        // stopping rather than by giving up - counting that as blindness cut
+        // two of eight runs off after five doublings of a twenty-four doubling
+        // descent.
+        endDescent(s, params);
+        return;
+      }
+    } else if (due) {
+      s.nextAim = params.aimInterval;
+      // Not a re-seat: the walk keeps its position and is drawn towards this.
+      repick(m, params);
+    }
+
+    // Which way the walk is erring, judged from the frame rather than from
+    // under its own feet. Out of a wash, back in when the set has left shot.
+    if (tone > FRAME_WASHED) s.openUp = 1;
+    else if (bare < FRAME_BARE) s.openUp = -1;
+    else s.openUp = approach(s.openUp, 0, dt, OPEN_EASE);
+
+    // Nothing worth magnifying, and the two ends of that want opposite things.
+    //
+    // A washed frame is *under-resolved* - the filaments in it are finer than
+    // the cells - and the one move that fixes under-resolution is to back out,
+    // which is the same partial retreat the schedule uses. Sending the walk
+    // outwards helps and is not enough on its own: in dense hair there is
+    // often nowhere within the frame that is far from the set to walk *to*,
+    // and the longest wash only came down from 22.7s to 13.3s.
+    //
+    // A dim frame is the opposite - nothing near enough to be lit - and there
+    // backing out would only make it emptier. Stopping lets the walk carry the
+    // view to something while the magnification holds.
+    if (s.phase === 'in') {
+      if (tone > FRAME_WASHED) {
+        s.phase = 'retreat';
+        s.retreatTo = Math.min(s.span * Math.pow(2, WASH_RETREAT), params.homeSpan);
+      } else if (lit < FRAME_BLANK) {
+        s.phase = 'cruise';
+        s.held = RESCUE_HOLD;
+      }
+    }
+  }
+
+  // The goal moves continuously now, so this is only smoothing the re-seats.
   const smooth = pointer ? params.aimSmooth * 0.25 : params.aimSmooth;
   s.aimX = approach(s.aimX, s.goalX, dt, smooth);
   s.aimY = approach(s.aimY, s.goalY, dt, smooth);
 
-  const ease = pointer ? params.steerEase : params.aimEase;
-  s.cx = approach(s.cx, s.aimX, dt, ease);
-  s.cy = approach(s.cy, s.aimY, dt, ease);
+  follow(m, params, dt, pointer ? params.steerEase : params.aimEase);
+}
+
+/**
+ * Moves the view towards the aim, carrying its momentum.
+ *
+ * Worked in screen units throughout - the offset is divided by the span going
+ * in and multiplied by it coming out - so both the spring and the velocity
+ * behind it mean the same thing at every magnification.
+ */
+function follow(m: Mandelbrot, _params: MandelbrotParams, dt: number, ease: number): void {
+  const s = m.state;
+  const span = s.span;
+
+  damp((s.cx - s.aimX) / span, 0, s.vx, ease, dt, m.spring);
+  const ox = m.spring[0];
+  s.vx = m.spring[1];
+
+  damp((s.cy - s.aimY) / span, 0, s.vy, ease, dt, m.spring);
+  const oy = m.spring[0];
+  s.vy = m.spring[1];
+
+  s.cx = s.aimX + ox * span;
+  s.cy = s.aimY + oy * span;
 }
 
 /**

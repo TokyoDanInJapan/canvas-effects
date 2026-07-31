@@ -83,6 +83,16 @@ export const COPY: Record<string, Copy> = {
       'It turns round at about 1e-7 because a double runs out - past that, neighbouring cells land on the same number. ' +
         'The pull-out is a function of the span rather than an animation, so it leaves exactly where it was and ' +
         'arrives framed on the whole set, with the point it left holding still on screen the whole way.',
+      'The view is a <strong>mass, not a lag</strong>: a critically damped spring with velocity as state, worked in ' +
+        'screen units so that the same momentum means the same thing at every magnification. And the point it chases ' +
+        'no longer jumps - it is eased towards whatever the picker likes while walking along the boundary contour, ' +
+        'which is what makes it explore. Contour-following on its own drifts into the soft exterior glow with the set ' +
+        'out of shot; the pull keeps the picture, the walk keeps the motion.',
+      'The descent is not one uninterrupted fall either. Every ten seconds or so it either eases the zoom off and ' +
+        '<strong>traces sideways</strong> at one magnification, or gives up a couple of doublings for a wider look ' +
+        'before carrying on down. The same two moves are how it recovers when a frame stops being worth looking at, ' +
+        'and which one it uses depends on why: a washed-out frame is under-resolved, so it backs out; a frame with ' +
+        'nothing lit in it is the opposite, so it stops and walks instead.',
       'Nothing in the camera is <em>switched</em>, and that is not fussiness. The other six move diffusely and the eye ' +
         'does not track any of it; a zoom is one motion of the whole frame, so every discontinuity in it shows. The ' +
         'rate eases rather than reversing, each turn is taken early by exactly what the deceleration will coast ' +

@@ -625,6 +625,74 @@ divided by a span of about 1e-7 to reach the screen: it put the view an eighth o
 it, in one frame, measuring as a ten-fold jump. Measuring from the span the descent actually stopped at makes it exact
 at both ends - `deep` at the turn, `home` at the top.
 
+### The camera is a mass, and the goal is a walk
+
+Two changes, both about the fact that a zoom is one coherent motion the eye tracks.
+
+**The camera carries momentum.** It is a critically damped spring with velocity as state, worked entirely in screen
+units - the offset is divided by the span going in and multiplied by it coming out - so both the spring and the
+momentum behind it mean the same thing at every magnification. A velocity in complex units would be a hundred-thousand
+times faster by the bottom of a descent. Critically damped on purpose: it is the fastest approach that never
+overshoots, and an overshoot in a background reads as a wobble rather than as weight.
+
+**The goal walks instead of jumping.** It used to be replaced every `aimInterval` by whatever `aimAt` picked, which is
+a corner in the motion however well it is filtered afterwards. Now it moves every frame, under two influences at once:
+
+- **Towards the picker.** `aimAt` still runs on the interval and still chooses well; the goal is *eased* towards its
+  choice rather than teleported to it. This is the half that keeps the picture good.
+- **Along the boundary.** The field's gradient points towards the set, so its perpendicular is a contour - and since
+  brightness is a function of distance in cells, a contour of equal brightness is a curve at a fixed distance from the
+  set. Running along it traces the filigree. This is the half that explores.
+
+Both are continuous, so neither shows as a jump. Getting there took two wrong turns worth recording:
+
+- **Contour-following alone drifts into the glow.** With no pull towards the picker the walk holds its distance
+  faithfully and ends up in soft exterior with the set out of shot altogether. Measured by the field's standard
+  deviation, which is what separates a crisp frame from a mushy one: **0.237** against **0.334** for views seated the
+  way `aimAt` seats them, and the frames looked it. With the pull it is **0.354** - better than either.
+- **The keep test must be looser than the pick test.** Asking every three quarters of a second whether the goal is
+  still somewhere `aimAt` *would* choose threw it away about once a second, and every one of those is the jump the walk
+  exists to avoid. Worse, it asked the wrong question: the walk deliberately sits a cell and a half off the boundary,
+  so its patch is bright and nearly empty of interior by construction - 24% of the time it fell under the interior
+  floor and 25% over the brightness ceiling. What matters once a goal is chosen is only whether it is still on screen
+  and still near the boundary.
+
+### It stops to look around, and sometimes gives ground
+
+The descent is no longer a single uninterrupted fall. Every `exploreEvery` seconds or so it either **cruises** - eases
+the zoom off and keeps walking sideways at one magnification for a few seconds - or **retreats**, giving up a couple of
+doublings for a wider look before descending again. Roughly two thirds of a cycle is descending, an eighth cruising, a
+twentieth retreating, and the rest the pull-out home. Which and how long come from `hash2` over a counter held in the
+state, so a seeded background still replays exactly without threading a generator through every step.
+
+The same two moves double as the recovery when a frame stops being worth looking at, and **which one depends on why**:
+
+- A **washed** frame is under-resolved - every cell within a cell of the set, the flat mid-grey of hair below the
+  sampling - and the one move that fixes under-resolution is to back out. Sending the walk outwards helps and is not
+  enough: in dense hair there is often nowhere in the frame far from the set to walk *to*, and the longest wash only
+  came down from 22.7s to 13.3s. Retreating took it to 4.7s, and with the goal eased towards the picker there are now
+  none at all.
+- A **dim** frame is the opposite, nothing near enough to be lit, and there backing out only makes it emptier. That one
+  stops instead and lets the walk carry the view to something.
+
+Backing out of a *lake* was the first thing tried and was much worse than either: a rescue that gives up two and a half
+doublings re-descends into the same place, and four of eight seeded runs spent 62% of their time retreating and never
+got more than five doublings down at all.
+
+### One measurement that was wrong, and what it cost
+
+For a while this steered on the fraction of the frame that is interior, on the obvious reading that a frame full of set
+is a black rectangle. It is not. The set is drawn dark and only its boundary glows, so a frame that is 85% interior is
+85% *silhouette* - and rendering the frames the metric was calling failures showed one of the better things this draws,
+a lit spike of exterior driven into a dark mass. Steering away from those spent a third of the cycle rescuing frames
+that needed no rescue.
+
+What replaced it is three numbers off one pass over the field, in `frameTone`: how much of the frame is lit, how bright
+it is on average, and how much of it is interior. The lit fraction is "is there anything to see" - it never once fell
+below 0.107 over 1,276 frames. The mean catches the wash, which the lit fraction cannot, since both a wash and a good
+frame reach 1.0 lit; the mean separates them at 0.75 against a 95th percentile of 0.72. And the interior share is not a
+quality measure at all, except at zero, which is the set out of shot.
+
 ### The cost, which is the real constraint
 
 Cost is cells times iterations and it is the only effect here where both ends have to be capped. Measured on a 133×75
