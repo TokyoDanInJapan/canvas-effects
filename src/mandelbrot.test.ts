@@ -8,6 +8,7 @@ import {
   cellToComplex,
   createMandelbrot,
   escapeAt,
+  frameTone,
   iterationsFor,
   patchAt,
   randomizeMandelbrot,
@@ -302,6 +303,21 @@ describe('patchAt', () => {
   });
 });
 
+describe('patchAt', () => {
+  it('reports nothing usable for a cell off the field', () => {
+    // The guard exists because this takes any cell, not only ones on the field.
+    // Nothing in the library asks for one off it; a caller can, and what comes
+    // back has to be something the pick rules reject rather than a NaN - both
+    // ends of their window are failed at once.
+    const m = seeded();
+    const out = new Float64Array(3);
+    patchAt(m, -50, -50, out);
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBe(1);
+    expect(out[2]).toBe(1);
+  });
+});
+
 describe('aimAt', () => {
   it('lands somewhere the picture has something', () => {
     const m = seeded();
@@ -514,46 +530,44 @@ describe('stepMandelbrot', () => {
     expect(m.state.biasAngle).not.toBe(before);
   });
 
-  it('never spends a run staring at a black rectangle, a grey wash, or nothing', () => {
-    // The autopilot's whole job, and the three ways it has been seen to fail.
-    // Steering by "closest to the set" put the view most of the way inside it
-    // for ten seconds at a time; taking only that out left it in hair too fine
-    // for the sampling, a flat mid-grey; taking that out too sent it into open
-    // exterior with the set out of shot.
+  it('never spends a run staring at a wash or at nothing', () => {
+    // The autopilot's whole job, measured on what actually decides whether a
+    // frame is worth looking at.
     //
-    // Stepped a fifth of a second at a time rather than a frame, because what
-    // is under test is the trajectory over a whole run and fifty seconds of it
-    // at 24fps is a minute of test. The budget is trimmed for the same reason.
+    // Not the interior fraction, which is what this used to test and which was
+    // wrong: the set is drawn dark and only its boundary glows, so a frame that
+    // is 85% interior is 85% *silhouette*, and one of the better things this
+    // draws is a lit spike of exterior driven into a dark mass. Rendering the
+    // frames the old test called failures is what settled it. What matters is
+    // how much lit edge is in shot, and that the picture has not dissolved into
+    // the flat mid-grey of hair finer than the sampling.
     const p = { ...params, maxIterations: 220 };
     const m = createMandelbrot(100, 60, makeRandom(11), p);
     renderMandelbrot(m, p);
+    const tone = new Float64Array(2);
 
-    let dark = 0;
+    let dim = 0;
     let washed = 0;
-    let empty = 0;
     let frames = 0;
+    const descending = () => m.state.phase === 'in' || m.state.phase === 'cruise' || m.state.phase === 'retreat';
 
-    for (let i = 0; i < 5 * 50 && m.state.phase === 'in'; i++) {
+    for (let i = 0; i < 5 * 90 && descending(); i++) {
       stepMandelbrot(m, p, 1 / 5);
       renderMandelbrot(m, p);
       frames++;
 
-      const solid = solidFraction(m);
-      const mean = m.field.reduce((a, b) => a + b, 0) / m.field.length;
-      if (solid > 0.8) dark++;
-      if (mean > 0.75) washed++;
-      if (solid < 0.02) empty++;
+      frameTone(m, tone);
+      if (tone[0] < 0.09) dim++;
+      if (tone[1] > 0.78) washed++;
 
       // And never a flat field, whatever else it is doing.
       expect(spread(m.field), `frame ${i}`).toBeGreaterThan(0.2);
     }
 
-    // A descent, not four seconds of one: the empty-scan counter exists so a
-    // single unlucky frame does not end the run.
+    // A descent, not four seconds of one.
     expect(frames).toBeGreaterThan(100);
-    expect(dark / frames).toBeLessThan(0.1);
+    expect(dim / frames).toBeLessThan(0.05);
     expect(washed / frames).toBeLessThan(0.1);
-    expect(empty / frames).toBeLessThan(0.1);
   });
 
   it('gives a descent three empty scans before abandoning it', () => {
@@ -572,10 +586,13 @@ describe('stepMandelbrot', () => {
     renderMandelbrot(m, p);
     expect(solidFraction(m)).toBe(1);
 
+    // A frame with nothing lit in it stops the descent first - that is the
+    // rescue, and it costs nothing already gained - and only the third failed
+    // scan in a row abandons the run outright.
     stepMandelbrot(m, p, 1 / 2400);
-    expect(m.state.phase).toBe('in');
+    expect(m.state.phase).toBe('cruise');
     stepMandelbrot(m, p, 1 / 2400);
-    expect(m.state.phase).toBe('in');
+    expect(m.state.phase).toBe('cruise');
     stepMandelbrot(m, p, 1 / 2400);
     expect(m.state.phase).toBe('holdDeep');
   });
@@ -677,6 +694,122 @@ describe('stepMandelbrot', () => {
     // a `frame` measured from `minSpan` each put the worst frame near 400%.
     expect(mean / cruise).toBeLessThan(0.05);
     expect(Math.max(...jumps) / cruise).toBeLessThan(1);
+  });
+
+  it('carries momentum, so the view does not stop dead when the aim does', () => {
+    // The camera is a mass, not a lag: velocity is state, in screen units so it
+    // means the same thing at every magnification. Park the aim exactly where
+    // the view already is and it should still be travelling.
+    const m = seeded();
+    fly(m, 3);
+    const moving = Math.hypot(m.state.vx, m.state.vy);
+    expect(moving).toBeGreaterThan(0);
+
+    m.state.goalX = m.state.cx;
+    m.state.goalY = m.state.cy;
+    m.state.aimX = m.state.cx;
+    m.state.aimY = m.state.cy;
+    const before = [m.state.cx, m.state.cy];
+    stepMandelbrot(m, params, 1 / 24);
+    // It coasts on rather than stopping in the frame the target went still.
+    expect(Math.hypot(m.state.cx - before[0], m.state.cy - before[1])).toBeGreaterThan(0);
+    // And it is slowing down, not running away.
+    expect(Math.hypot(m.state.vx, m.state.vy)).toBeLessThan(moving);
+  });
+
+  it('walks the goal along the boundary rather than jumping between targets', () => {
+    // What makes the lateral motion smooth: a walked path is continuous by
+    // construction, where a re-picked one is a corner however well it is
+    // filtered afterwards.
+    const m = seeded();
+    fly(m, 2);
+
+    let moved = 0;
+    let jumped = 0;
+    for (let i = 0; i < 24 * 20; i++) {
+      const from = [m.state.goalX, m.state.goalY];
+      const span = m.state.span;
+      stepMandelbrot(m, params, 1 / 24);
+      renderMandelbrot(m, params);
+      const step = Math.hypot(m.state.goalX - from[0], m.state.goalY - from[1]) / span;
+      if (step > 1e-9) moved++;
+      // A re-seat. Rare by design - a walked step is a fraction of a cell.
+      if (step > 0.05) jumped++;
+    }
+
+    // Moving nearly all the time, and never in a jump. The frames it does not
+    // move on are the ones where it has settled onto the picker's choice and
+    // the contour under it is momentarily flat.
+    expect(moved).toBeGreaterThan(24 * 12);
+    // A handful of genuine re-seats over twenty seconds, where the walk lost
+    // the thread entirely. It used to be one a second.
+    expect(jumped).toBeLessThan(6);
+  });
+
+  it('holds the zoom and traces sideways when it stops to look around', () => {
+    const p = { ...params, exploreEvery: 2, retreatChance: 0 };
+    const m = seeded(21, p);
+    until(m, p, () => m.state.phase === 'cruise', 24 * 30);
+
+    const span = m.state.span;
+    const from = [m.state.cx, m.state.cy];
+    for (let i = 0; i < 24 && m.state.phase === 'cruise'; i++) {
+      stepMandelbrot(m, p, 1 / 24);
+      renderMandelbrot(m, p);
+    }
+
+    // The magnification eases off...
+    expect(Math.abs(Math.log2(m.state.span / span))).toBeLessThan(0.2);
+    // ...while the view keeps travelling across the picture.
+    expect(Math.hypot(m.state.cx - from[0], m.state.cy - from[1]) / span).toBeGreaterThan(0.01);
+  });
+
+  it('gives up a little depth sometimes without going all the way home', () => {
+    // Far enough into a descent that there is depth to give up: a retreat is
+    // only offered when there is more headroom than it would use.
+    const p = { ...params, exploreEvery: 12, retreatChance: 1 };
+    const m = seeded(21, p);
+    until(m, p, () => m.state.phase === 'retreat', 24 * 40);
+
+    const from = m.state.span;
+    expect(m.state.retreatTo).toBeGreaterThan(from);
+    // A couple of doublings, not a return to the top.
+    expect(m.state.retreatTo / from).toBeLessThan(Math.pow(2, p.retreatDoublings * 1.5));
+    expect(m.state.retreatTo).toBeLessThan(params.homeSpan);
+
+    until(m, p, () => m.state.phase !== 'retreat', 24 * 60);
+    // And it goes back to descending rather than carrying on out.
+    expect(m.state.phase).toBe('in');
+    expect(m.state.span).toBeGreaterThan(from);
+    expect(m.state.span).toBeLessThan(params.homeSpan);
+  });
+
+  it('backs out of a frame that has washed out rather than magnifying it', () => {
+    // Dense hair, where every filament is finer than a cell: the distance
+    // estimate quite correctly reports "within a cell of the set" everywhere
+    // and the picture is a flat mid-grey. Under-resolution is the one failure
+    // that backing out fixes, and re-seating cannot - `aimAt` refuses bright
+    // patches, so when the whole frame is bright it finds nowhere to go.
+    const p = { ...params, aimInterval: 0 };
+    const m = seeded(4, p);
+    m.state.cx = -1.002741053886546;
+    m.state.cy = -0.2891053940938287;
+    m.state.span = 1.98e-5;
+    renderMandelbrot(m, p);
+
+    const tone = new Float64Array(3);
+    frameTone(m, tone);
+    expect(tone[1]).toBeGreaterThan(0.78);
+
+    const span = m.state.span;
+    stepMandelbrot(m, p, 1 / 24);
+
+    expect(m.state.phase).toBe('retreat');
+    expect(m.state.retreatTo).toBeGreaterThan(span);
+    expect(m.state.retreatTo).toBeLessThanOrEqual(params.homeSpan);
+    // And the walk is sent outwards at the same time, since the way out of hair
+    // is away from the set.
+    expect(m.state.openUp).toBe(1);
   });
 
   it('is reproducible from a seeded generator', () => {
