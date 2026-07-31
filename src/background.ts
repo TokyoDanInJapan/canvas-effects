@@ -28,7 +28,18 @@ import { createSurface, defaultShading, sameShading, type BackgroundHandle, type
  * the doc comment is where anyone tuning one of these actually reads.
  */
 export interface CommonBackgroundOptions {
-  /** CSS pixels per rendered pixel - one dither cell. Bigger is coarser and cheaper. */
+  /**
+   * CSS pixels per rendered pixel - one dither cell. Bigger is coarser and
+   * cheaper.
+   *
+   * One renders at the display's own resolution, which is what `dither: 'auto'`
+   * reads to mean "no dither": there is no block of cells left to spend on
+   * shading. It is not cheap - the output pass is one pixel of work per CSS
+   * pixel, so a 1280x800 window is 1.0M pixels a frame against 29,000 at the
+   * default six - and `maxPixels` will quietly coarsen it back unless that is
+   * raised to suit. Asking for one and being given three is the usual outcome
+   * otherwise.
+   */
   pixelSize: number;
   /** How much coarser the field is than the output, per axis. */
   fieldScale: number;
@@ -38,8 +49,15 @@ export interface CommonBackgroundOptions {
   fps: number;
   /** Palette size. Small on purpose - the dither is what makes it look smooth. */
   levels: number;
-  /** Ordered-dither the output. Off posterises flat, showing the bands. */
-  dither: boolean;
+  /**
+   * Ordered-dither the output. Off posterises flat, showing the bands.
+   *
+   * `'auto'`, the default, is on above one CSS pixel a cell and off at one. It
+   * follows the size the surface settled at rather than the one asked for, and
+   * it is a choice about look rather than a correction - the dither blends
+   * perfectly well at one pixel a cell. See `dither` in `SurfaceOptions`.
+   */
+  dither: boolean | 'auto';
   /** Weights the field towards its dark end. See `darken` in dither.ts. */
   gamma: number;
   /** The greys the field is mapped onto. A function is re-read on theme changes. */
@@ -78,7 +96,7 @@ export const COMMON_BACKGROUND_DEFAULTS: CommonBackgroundOptions = {
   maxPixels: 160_000,
   fps: 24,
   levels: 5,
-  dither: true,
+  dither: 'auto',
   gamma: 1,
   shading: defaultShading,
   interactive: true,

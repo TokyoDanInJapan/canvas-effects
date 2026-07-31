@@ -28,6 +28,14 @@ each pixel by its 4×4 Bayer threshold before rounding means a value halfway bet
 for half the pixels in the cell and the higher one for the other half. The region reads as the intermediate shade, and a
 gradient crossing it breaks into texture rather than a band.
 
+**At one CSS pixel a cell it turns itself off**, which `dither: 'auto'` does by default - and that is a choice about
+look rather than a correction. The obvious reasoning for it is wrong: at that size the Bayer pattern sits at the
+display's own pitch, which is where dithering works best, and rendering the same view both ways shows it blending into a
+genuinely smooth gradient. What turning it off buys is the other look - crisp posterised regions with clean curved
+boundaries between them, which is only available at native resolution, since at any coarser size undithered output is
+just visible steps. `dither: true` keeps the smooth version at any size. See "Running at native resolution" in the
+README for the cost, which is considerable.
+
 **Seeing it for yourself.** `dither: false` posterises flat instead. The palette is identical either way - only the
 distribution changes - so it is the cleanest demonstration of what the Bayer threshold is doing. Measured on the demo,
 switching it off takes the proportion of horizontally adjacent pixels that differ from 47.5% to 10.4% on the smoke and
