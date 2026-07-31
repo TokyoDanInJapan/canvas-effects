@@ -10,7 +10,7 @@ The `canvas-effects` name on the npm registry belongs to an unrelated package, s
 aliases a Git URL under the package's own name, so imports stay `from 'canvas-effects'`:
 
 ```bash
-npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.3.0
+npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.4.0
 ```
 
 ## The effects
