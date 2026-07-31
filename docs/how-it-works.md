@@ -571,9 +571,38 @@ spend the rest of its life pulling out again.
 ### Why it turns round, and why the pull-out needed no animating
 
 A double holds about 16 significant digits and the coordinates are of order 1, so the plane runs out at about 1e-16 - and
-a view has to be far wider than that or neighbouring cells land on the same number. `minSpan` is 1.5e-7, about 24
-doublings below home, which is well short of that limit and set by iterations rather than by precision: each doubling
-costs budget on every cell of every frame.
+a view has to be far wider than that or neighbouring cells land on the same number. `minSpan` is **1e-11**, about 38
+doublings below home, and precision is the only thing that sets it.
+
+It was 1.5e-7 - fourteen doublings and a factor of fifteen thousand shallower - on the reasoning that depth costs
+iterations on every cell of every frame. **That reasoning was wrong.** The budget a frame needs does not grow with depth:
+it is set by how much boundary is in shot, not by magnification. Holding the false-solid fraction under 5% took between
+2,000 and 3,200 iterations at 24 doublings, at 36 and at 48 alike, and flying the autopilot to each of those floors and
+measuring what it renders says the same - cost 3.4-3.9 ms, false-solid 18-26%, contrast 0.30-0.35, flat all the way
+down.
+
+The useful measure of the precision that *does* bind is **how many representable doubles fit across one field cell**. The
+distance estimate is a finite difference between cells, so it needs sub-cell room to work in:
+
+| doublings | span | doubles per cell |
+| --- | --- | --- |
+| 24 | 1.5e-7 | 9,300,000 |
+| 36 | 3.8e-11 | 2,272 |
+| **38** | **1e-11** | **568** |
+| 40 | 2.4e-12 | 142 |
+| 44 | 1.5e-13 | 9 |
+| 48 | 9.2e-15 | 1 |
+
+Rendering the floor at 44 doublings gives a soft-edged blob with no filigree in it anywhere. 38 leaves real room.
+
+**Two metrics missed this, and it is worth knowing which.** Counting adjacent cells that land on bit-identical escape
+counts reads 15% at 42 doublings and only reaches 79% at 51 - far too blunt, because exact equality is the last symptom,
+long after sub-cell structure has gone. The field's standard deviation is no better: it reads **0.337** at the
+44-doubling floor, because a large dark region beside a large light one has plenty of contrast and no structure
+whatever. It was rendering the frame and looking at it that settled the number.
+
+The one real cost is time: a descent takes about 110 seconds rather than 72, so the cycle is about half again as long.
+`speed` buys the old cadence back at the new depth.
 
 Coming back out is a pure function of the span rather than an animation of its own:
 
@@ -611,8 +640,19 @@ measured 1.0% on a 144Hz display, where 24 does divide the refresh, which is wha
 
 **The rate was switched.** Reversing at the floor swapped half a doubling a second inwards for two outwards in a single
 frame. It is eased now, and both turns are taken *early* by exactly the distance the deceleration coasts through -
-`rate * turnEase` doublings, which is what a first-order ease covers - so the descent still asymptotes onto `minSpan`
-and the pull-out onto `homeSpan` instead of overshooting.
+`rate * turnEase` doublings - so the descent still asymptotes onto `minSpan` and the pull-out onto `homeSpan` instead of
+overshooting.
+
+The rate is **damped rather than lagged**, which is a second correction to the same thing. A first-order ease keeps the
+rate continuous but not its derivative: deceleration arrives at full strength on the very first frame after a phase
+changes and only decays from there, which is precisely what a sudden stop is. Entering a cruise, the deceleration used
+to read 1.06 doublings per second squared on frame one and fall away monotonically. Damped, it starts at 0.18, builds to
+a peak of 0.82 half a second in, and eases off - the zoom accelerates and decelerates instead of switching between
+coasting and slowing. Worst jerk over four cycles went from **102 to 17** doublings per second cubed, and the worst
+single frame for overall smoothness came down from 20% to 12% with it.
+
+Both integrate to the same coast, `rate * turnEase`, so `turnSpan` is untouched by the change - it is a change in feel
+and not in where the turns land. `turnEase` went from 0.45 to 0.6 to give the new shape room to be seen.
 
 **The aim jumped.** The autopilot picks a different cell every `aimInterval`, and a single lag chasing a target that
 moves in steps has a continuous position and a discontinuous velocity: a corner at every re-aim. Those frames moved the

@@ -569,12 +569,12 @@ const MANDELBROT_DIALS: Dial[] = [
     key: 'minSpanLog',
     label: 'depth',
     min: 4,
-    max: 13,
+    max: 14,
     step: 0.25,
-    // Decades, because the useful range spans seven orders of magnitude and a
-    // linear slider cannot hold it. 7.25 is `MANDELBROT_DEFAULTS.minSpan`.
+    // Decades, because the useful range spans thirteen orders of magnitude and
+    // a linear slider cannot hold it.
     value: Math.round(Math.log10(MANDELBROT_DEFAULTS.homeSpan / MANDELBROT_DEFAULTS.minSpan) * 4) / 4,
-    note: 'decades below home - past ~13 a double gives out',
+    note: 'decades below home - past ~12 it goes soft',
   },
   { key: 'iterations', label: 'iterations', min: 30, max: 400, step: 10, value: MANDELBROT_DEFAULTS.iterations },
   {

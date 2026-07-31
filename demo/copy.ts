@@ -86,7 +86,10 @@ export const COPY: Record<string, Copy> = {
         'cell is correctly within a cell of the set and the frame is a flat grey - and the few stray dark cells in it ' +
         'score a <em>high</em> spread, so it is a feedback loop. Too little interior is open exterior with the set out ' +
         'of shot, which is exactly where removing the first two sends it.',
-      'It turns round at about 1e-7 because a double runs out - past that, neighbouring cells land on the same number. ' +
+      'It turns round at about 1e-11 because a double runs out - past that, neighbouring cells land on the same number, ' +
+        'and the estimate has no sub-cell room left to work in. Depth costs nothing per frame, as ' +
+        'it turns out: the iteration budget a frame needs is set by how much boundary is in shot rather than by how far ' +
+        'down it is, so it is the same at forty-eight doublings as at twenty-four. Only precision binds. ' +
         'The pull-out is a function of the span rather than an animation, so it leaves exactly where it was and ' +
         'arrives framed on the whole set, with the point it left holding still on screen the whole way.',
       'The view is a <strong>mass, not a lag</strong>: a critically damped spring with velocity as state, worked in ' +
@@ -101,7 +104,9 @@ export const COPY: Record<string, Copy> = {
         'nothing lit in it is the opposite, so it stops and walks instead.',
       'Nothing in the camera is <em>switched</em>, and that is not fussiness. The other six move diffusely and the eye ' +
         'does not track any of it; a zoom is one motion of the whole frame, so every discontinuity in it shows. The ' +
-        'rate eases rather than reversing, each turn is taken early by exactly what the deceleration will coast ' +
+        'rate is damped rather than lagged, so the zoom accelerates and decelerates instead of switching between ' +
+        'coasting and slowing - a plain ease puts full deceleration on the first frame after a change, which is what a ' +
+        'sudden stop is. Each turn is taken early by exactly what the deceleration will coast ' +
         'through, and the aim is smoothed by a second lag so that re-aiming is a curve rather than a corner. The ' +
         'timestep is the clock, not a fixed step - at 24fps on a 60Hz screen a fixed step means equal movement shown ' +
         'for alternating 33ms and 50ms, which is judder you can see.',

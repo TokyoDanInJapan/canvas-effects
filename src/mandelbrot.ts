@@ -42,7 +42,9 @@
 // order 1, so the plane is resolvable down to roughly 1e-16 - and a *view* has
 // to be much wider than that or neighbouring cells land on the same number and
 // the picture goes blocky. `minSpan` is where that is called: past it, more
-// zoom is not more detail.
+// zoom is not more detail. It is a precision limit and nothing else - the
+// iteration budget a frame needs turns out not to grow with depth at all, which
+// is measured at the default.
 //
 // Coming back out is a pure function of the span rather than an animation of
 // its own:
@@ -231,6 +233,11 @@ export interface MandelbrotParams {
    * descent still asymptotes onto `minSpan` and the pull-out onto `homeSpan`
    * rather than overshooting either. Zero restores the old switched behaviour,
    * and the turn distances collapse to the limits themselves.
+   *
+   * The rate is damped rather than lagged towards what the phase wants, so it
+   * has momentum of its own and the zoom eases into and out of every change
+   * instead of switching between coasting and slowing. Both integrate to the
+   * same coast, so this is a change in feel and not in where the turns land.
    */
   turnEase: number;
   /** Seconds held at each end of the cycle, once the rate has died away. */
@@ -253,11 +260,40 @@ export const MANDELBROT_DEFAULTS: MandelbrotParams = {
   homeX: -0.7,
   homeY: 0,
   homeSpan: 2.6,
-  // ~24 doublings below home. Double precision would allow nine or ten more,
-  // but each costs iterations on every cell of every frame, and the picture at
-  // 24 doublings is the same picture as at 34 - the set is not more detailed
-  // further down, only further down.
-  minSpan: 1.5e-7,
+  // ~38 doublings below home, and this was 1.5e-7 - fourteen doublings and a
+  // factor of fifteen thousand shallower - on the reasoning that more depth
+  // costs iterations on every cell of every frame. That reasoning was wrong,
+  // and measuring it is what showed so.
+  //
+  // The budget a frame needs does not grow with depth. It is set by how much
+  // boundary is in shot, not by magnification: holding the false-solid
+  // fraction under 5% took between 2,000 and 3,200 iterations at 24 doublings,
+  // at 36 and at 48 alike. Flying the autopilot to each of those floors says
+  // the same - cost 3.4-3.9 ms, false-solid 18-26%, contrast 0.30-0.35, flat
+  // all the way down.
+  //
+  // What binds is precision, and the useful measure of it is how many
+  // representable doubles fit across one field cell. A coordinate of order 1
+  // has neighbours 2.2e-16 away, so at this span a cell is about 700 doubles
+  // wide; at 44 doublings it is 9, and at 48 it is 1. The distance estimate is
+  // a finite difference between cells, so it needs sub-cell room to work in -
+  // and rendering the floor at 44 gives a soft-edged blob with no filigree in
+  // it at all.
+  //
+  // Which the obvious metric missed. Counting adjacent cells that land on
+  // bit-identical escape counts says 15% at 42 doublings and only reaches 79%
+  // at 51, so it looked as though there were room down to the mid-forties. It
+  // is far too blunt: exact equality is the last symptom, long after sub-cell
+  // structure has gone. The field's contrast is no better - it reads 0.337 at
+  // the 44-doubling floor, because a large dark region beside a large light one
+  // has plenty of contrast and no structure whatever. Looking at the frame is
+  // what settled it.
+  //
+  // The one real cost is time. A descent takes about 110 seconds now rather
+  // than 72, so the cycle is about half again as long - which for a background
+  // meant to go unnoticed is not obviously the wrong direction. Raise `speed`
+  // for the old cadence at the new depth.
+  minSpan: 1e-11,
   iterations: 90,
   iterationsPerDoubling: 12,
   maxIterations: 300,
@@ -284,11 +320,18 @@ export const MANDELBROT_DEFAULTS: MandelbrotParams = {
   steerEase: 0.35,
   aimReach: 0.3,
   aimBias: 0.15,
-  // Under half a second, which is a gentle second or so of visible
-  // deceleration. Longer costs depth: the coast is `rate * turnEase`
-  // doublings, and at the pull-out's two doublings a second every extra tenth
-  // is another fifth of a doubling spent slowing down.
-  turnEase: 0.45,
+  // Six tenths, which is a little over a second of visible deceleration from
+  // full descent to a stop. It was 0.45 when the rate was lagged rather than
+  // damped, where the deceleration arrived at full strength on the first frame
+  // and only decayed; damped it eases in as well as out, and a slightly longer
+  // constant gives that shape room to be seen. Peak deceleration goes from
+  // 1.11 doublings per second squared on the opening frame to 0.61 half a
+  // second in.
+  //
+  // Longer still costs depth: the coast is `rate * turnEase` doublings, and at
+  // the pull-out's two doublings a second every extra tenth is another fifth of
+  // a doubling spent slowing down.
+  turnEase: 0.6,
   dwell: 1.2,
   // A twelfth of the screen a second. Fast enough to be going somewhere over
   // the seconds an explore lasts, slow enough that it reads as drift rather
@@ -384,6 +427,17 @@ export interface MandelbrotState {
    * phase wants rather than set to it. See `turnEase`.
    */
   rate: number;
+  /**
+   * How fast the rate itself is changing, in doublings per second squared.
+   *
+   * The rate has momentum of its own, so that the zoom accelerates and
+   * decelerates rather than switching between coasting and slowing. A plain
+   * first-order ease keeps the rate continuous but not its derivative: the
+   * deceleration is at its steepest the instant a phase changes, which is
+   * exactly what a sudden stop is. Measured over four cycles, that put the jerk
+   * at 102 doublings per second cubed at its worst.
+   */
+  rateVel: number;
   /** Seconds until the aim's surroundings are next checked. */
   nextAim: number;
   /** Seconds of descending left before the next pause to look around. */
@@ -462,6 +516,7 @@ export function randomizeMandelbrot(
     // From rest, so the opening descent accelerates in like every other one
     // rather than starting at full speed.
     rate: 0,
+    rateVel: 0,
     nextAim: 0,
     // Jittered like every later one. Left at the flat `exploreEvery` it was the
     // one moment of the cycle every seed shared, and three runs side by side
@@ -905,7 +960,14 @@ export function stepMandelbrot(
   // `turnEase` - this one line is most of what makes the cycle smooth.
   const wanted = rateFor(s.phase, params);
   const was = s.rate;
-  s.rate = approach(s.rate, wanted, dt, params.turnEase);
+  // Critically damped, like the camera, and for the same reason - it is the
+  // fastest approach that never overshoots, and an overshoot here would have
+  // the zoom briefly reverse. The coast it covers is unchanged at `rate *
+  // turnEase`: a first-order ease integrates to that, and so does this one, so
+  // `turnSpan` still lands the turns on their limits.
+  damp(s.rate, wanted, s.rateVel, params.turnEase, dt, m.spring);
+  s.rate = m.spring[0];
+  s.rateVel = m.spring[1];
   if (s.held > 0) s.held -= dt;
 
   // The mean of the rate across the step, not the rate at the end of it. The

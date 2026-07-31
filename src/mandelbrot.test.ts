@@ -797,13 +797,20 @@ describe('stepMandelbrot', () => {
 
     const span = m.state.span;
     const from = [m.state.cx, m.state.cy];
-    for (let i = 0; i < 24 && m.state.phase === 'cruise'; i++) {
+    const entering = Math.abs(m.state.rate);
+
+    for (let i = 0; i < 24 * 3 && m.state.phase === 'cruise'; i++) {
       stepMandelbrot(m, p, 1 / 24);
       renderMandelbrot(m, p);
     }
 
-    // The magnification eases off...
-    expect(Math.abs(Math.log2(m.state.span / span))).toBeLessThan(0.2);
+    // The magnification coasts to a stop rather than being switched off, and
+    // the distance it coasts is the one the turns are calculated against:
+    // `rate * turnEase` doublings, which is what a damped approach integrates
+    // to. Measuring the first second instead would be measuring the ramp.
+    expect(Math.abs(m.state.rate)).toBeLessThan(entering * 0.1);
+    expect(Math.abs(Math.log2(m.state.span / span))).toBeLessThan(params.speed * params.turnEase * 1.5);
+
     // ...while the view keeps travelling across the picture.
     expect(Math.hypot(m.state.cx - from[0], m.state.cy - from[1]) / span).toBeGreaterThan(0.01);
   });
