@@ -652,9 +652,12 @@ surroundings make of it - so its distance is capped at half a cell. Worst disagr
 
 | | flicker |
 | --- | --- |
-| as first written | 8.5% |
-| interior lit by the same estimate | 2.4% |
-| plus the one-cell cap | **0.11%** |
+| as first written | 9.7% |
+| interior lit by the same estimate, plus the one-cell cap | **2.7%** |
+
+Those are averages over eight seeds and two starting depths each. An earlier version of this table read 0.11% for the
+fixed figure, measured on a single recorded path that happened to be a quiet one - a reminder that a path-dependent
+number needs averaging before it means anything. The improvement is real and is threefold, not eightyfold.
 
 Two things that were **not** the cause, both checked before the real one was found. The iteration budget steps up about
 six times a second as the view descends, which reclassifies cells - but reversals on the frames where it ticks (2.55%)
@@ -669,7 +672,9 @@ much.
 
 Two changes, both about the fact that a zoom is one coherent motion the eye tracks.
 
-**The camera carries momentum.** It is a critically damped spring with velocity as state, worked entirely in screen
+**The camera carries momentum**, and it is sprung onto the pull-out's framing as well as onto the aim - assigning that
+position directly dropped whatever lateral velocity the descent had in a single frame, and every one of the worst frames
+for smoothness over a whole cycle was one of those transitions. It is a critically damped spring with velocity as state, worked entirely in screen
 units - the offset is divided by the span going in and multiplied by it coming out - so both the spring and the
 momentum behind it mean the same thing at every magnification. A velocity in complex units would be a hundred-thousand
 times faster by the bottom of a descent. Critically damped on purpose: it is the fastest approach that never
@@ -696,6 +701,35 @@ Both are continuous, so neither shows as a jump. Getting there took two wrong tu
   so its patch is bright and nearly empty of interior by construction - 24% of the time it fell under the interior
   floor and 25% over the brightness ceiling. What matters once a goal is chosen is only whether it is still on screen
   and still near the boundary.
+
+### The zoom has to be anchored to the target, or the target never arrives
+
+Magnifying about the middle of the screen multiplies any screen offset by the zoom factor. So a target that is not
+already dead centre is being pushed outwards at `2^speed` a second - 1.41 at the default - while the spring closes on it
+at about `1 / aimEase`, which is 1.11. **The zoom wins.** Measured over four descents, the view sat a median of 0.21
+screen heights from its target and a 95th percentile of 0.46, which is most of the way to the edge. It was not lagging
+behind on the way to arriving; it was never going to arrive.
+
+Holding the aim still under the zoom takes the exponential out of the problem and leaves the spring to converge on what
+remains. It is also the smoother motion - the picture then magnifies about a fixed point rather than magnifying and
+translating at once - and measurably so: flicker came down as well, since less content sweeps across the cells.
+
+Two more things were pulling the target off centre, both in the picker:
+
+- **`aimBias` never stopped.** It is what sends one run somewhere different from the last, and it does that by
+  preferring a target off to one side - which is right at the start of a descent and wrong for the rest of it, because
+  an off-centre target is one the zoom is permanently pulling away from. It decides the heading now and then fades over
+  about six seconds.
+- **The picker had no hysteresis.** Nothing stopped it hopping between two candidates it scored almost equally, and
+  each hop is both a jolt and a target that was never reached. Half the preference is now where it last pointed, which
+  settles it without ever refusing a better cell - the preference only breaks ties.
+
+| | view-to-aim | view-to-target |
+| --- | --- | --- |
+| before | 0.082 | 0.206 |
+| after | **0.047** | **0.136** |
+
+Screen heights, median, over four descents.
 
 ### It stops to look around, and sometimes gives ground
 

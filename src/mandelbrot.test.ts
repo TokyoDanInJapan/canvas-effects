@@ -484,14 +484,21 @@ describe('stepMandelbrot', () => {
     // asymptotically. `frame` ties the centre to the span, so being within 2%
     // of home on one is being within 2% on the other - which is why nothing
     // has to steer the framing.
-    const fast = { ...params, speed: 20, dwell: 0 };
+    // Six rather than the twenty the other tests use, and the real dwell rather
+    // than none. The framing is sprung onto rather than assigned now, so it
+    // arrives with a lag - and the dwell is exactly the time the cycle sets
+    // aside for it to arrive in. Taking that away measures the lag rather than
+    // the framing.
+    const fast = { ...params, speed: 6 };
     const m = seeded(4, fast);
     until(m, fast, () => m.state.phase !== 'in');
     until(m, fast, () => m.state.phase === 'in');
     expect(m.state.span / params.homeSpan).toBeGreaterThan(0.97);
     expect(m.state.span).toBeLessThanOrEqual(params.homeSpan);
-    expect(m.state.cx).toBeCloseTo(params.homeX, 1);
-    expect(m.state.cy).toBeCloseTo(params.homeY, 1);
+
+    // In screen terms, which is the only way the claim means anything.
+    expect(Math.abs(m.state.cx - params.homeX) / params.homeSpan).toBeLessThan(0.05);
+    expect(Math.abs(m.state.cy - params.homeY) / params.homeSpan).toBeLessThan(0.05);
   });
 
   it('does not jump when it turns', () => {
