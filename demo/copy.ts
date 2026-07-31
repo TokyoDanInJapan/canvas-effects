@@ -86,7 +86,10 @@ export const COPY: Record<string, Copy> = {
         'cell is correctly within a cell of the set and the frame is a flat grey - and the few stray dark cells in it ' +
         'score a <em>high</em> spread, so it is a feedback loop. Too little interior is open exterior with the set out ' +
         'of shot, which is exactly where removing the first two sends it.',
-      'It turns round at about 1e-7 because a double runs out - past that, neighbouring cells land on the same number. ' +
+      'It turns round at about 1e-11 because a double runs out - past that, neighbouring cells land on the same number, ' +
+        'and the estimate has no sub-cell room left to work in. Depth costs nothing per frame, as ' +
+        'it turns out: the iteration budget a frame needs is set by how much boundary is in shot rather than by how far ' +
+        'down it is, so it is the same at forty-eight doublings as at twenty-four. Only precision binds. ' +
         'The pull-out is a function of the span rather than an animation, so it leaves exactly where it was and ' +
         'arrives framed on the whole set, with the point it left holding still on screen the whole way.',
       'The view is a <strong>mass, not a lag</strong>: a critically damped spring with velocity as state, worked in ' +

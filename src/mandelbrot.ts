@@ -42,7 +42,9 @@
 // order 1, so the plane is resolvable down to roughly 1e-16 - and a *view* has
 // to be much wider than that or neighbouring cells land on the same number and
 // the picture goes blocky. `minSpan` is where that is called: past it, more
-// zoom is not more detail.
+// zoom is not more detail. It is a precision limit and nothing else - the
+// iteration budget a frame needs turns out not to grow with depth at all, which
+// is measured at the default.
 //
 // Coming back out is a pure function of the span rather than an animation of
 // its own:
@@ -253,11 +255,40 @@ export const MANDELBROT_DEFAULTS: MandelbrotParams = {
   homeX: -0.7,
   homeY: 0,
   homeSpan: 2.6,
-  // ~24 doublings below home. Double precision would allow nine or ten more,
-  // but each costs iterations on every cell of every frame, and the picture at
-  // 24 doublings is the same picture as at 34 - the set is not more detailed
-  // further down, only further down.
-  minSpan: 1.5e-7,
+  // ~38 doublings below home, and this was 1.5e-7 - fourteen doublings and a
+  // factor of fifteen thousand shallower - on the reasoning that more depth
+  // costs iterations on every cell of every frame. That reasoning was wrong,
+  // and measuring it is what showed so.
+  //
+  // The budget a frame needs does not grow with depth. It is set by how much
+  // boundary is in shot, not by magnification: holding the false-solid
+  // fraction under 5% took between 2,000 and 3,200 iterations at 24 doublings,
+  // at 36 and at 48 alike. Flying the autopilot to each of those floors says
+  // the same - cost 3.4-3.9 ms, false-solid 18-26%, contrast 0.30-0.35, flat
+  // all the way down.
+  //
+  // What binds is precision, and the useful measure of it is how many
+  // representable doubles fit across one field cell. A coordinate of order 1
+  // has neighbours 2.2e-16 away, so at this span a cell is about 700 doubles
+  // wide; at 44 doublings it is 9, and at 48 it is 1. The distance estimate is
+  // a finite difference between cells, so it needs sub-cell room to work in -
+  // and rendering the floor at 44 gives a soft-edged blob with no filigree in
+  // it at all.
+  //
+  // Which the obvious metric missed. Counting adjacent cells that land on
+  // bit-identical escape counts says 15% at 42 doublings and only reaches 79%
+  // at 51, so it looked as though there were room down to the mid-forties. It
+  // is far too blunt: exact equality is the last symptom, long after sub-cell
+  // structure has gone. The field's contrast is no better - it reads 0.337 at
+  // the 44-doubling floor, because a large dark region beside a large light one
+  // has plenty of contrast and no structure whatever. Looking at the frame is
+  // what settled it.
+  //
+  // The one real cost is time. A descent takes about 110 seconds now rather
+  // than 72, so the cycle is about half again as long - which for a background
+  // meant to go unnoticed is not obviously the wrong direction. Raise `speed`
+  // for the old cadence at the new depth.
+  minSpan: 1e-11,
   iterations: 90,
   iterationsPerDoubling: 12,
   maxIterations: 300,
