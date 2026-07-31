@@ -104,7 +104,9 @@ export const COPY: Record<string, Copy> = {
         'nothing lit in it is the opposite, so it stops and walks instead.',
       'Nothing in the camera is <em>switched</em>, and that is not fussiness. The other six move diffusely and the eye ' +
         'does not track any of it; a zoom is one motion of the whole frame, so every discontinuity in it shows. The ' +
-        'rate eases rather than reversing, each turn is taken early by exactly what the deceleration will coast ' +
+        'rate is damped rather than lagged, so the zoom accelerates and decelerates instead of switching between ' +
+        'coasting and slowing - a plain ease puts full deceleration on the first frame after a change, which is what a ' +
+        'sudden stop is. Each turn is taken early by exactly what the deceleration will coast ' +
         'through, and the aim is smoothed by a second lag so that re-aiming is a curve rather than a corner. The ' +
         'timestep is the clock, not a fixed step - at 24fps on a 60Hz screen a fixed step means equal movement shown ' +
         'for alternating 33ms and 50ms, which is judder you can see.',
