@@ -69,8 +69,14 @@ jobs:
       #
       # Write the message as Markdown, because that is what it becomes. Use `-`
       # for bullets and leave a blank line before a list, or GitHub folds the
-      # whole section into one run-on paragraph; keep continuation lines under
+      # whole section into one run-on paragraph. Keep continuation lines under
       # four spaces of indent, or they render as a code block.
+      #
+      # And tag with `--cleanup=verbatim`, or git treats every line beginning
+      # with `#` as a comment and strips it. `git tag -a -F notes.md` silently
+      # deletes all your `##` headings and leaves the paragraphs run together,
+      # with nothing to indicate it happened - v2.4.0 was published that way and
+      # had to have its notes repaired by hand afterwards.
       - name: Take the notes from the tag
         run: |
           git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" > release-notes.md
@@ -80,10 +86,23 @@ jobs:
           fi
           cat release-notes.md
 
-      - name: Create the release
+      # Create it, or bring an existing one back in line with the tag. Creating
+      # unconditionally fails with `Release.tag_name already exists` the moment
+      # a release for this tag exists at all, which makes the job impossible to
+      # re-run - including after a failure that has nothing to do with the
+      # release, and including when a corrected tag is pushed over a bad one.
+      # Both happened on v2.4.0.
+      - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "$GITHUB_REF_NAME is already released; updating it from the tag."
+            gh release edit "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          fi
+
 # There is no `npm publish` step, and not by oversight: `canvas-effects` on npm
 # belongs to someone else's package, so publishing under that name would fail with
 # a 403. Adding one means scoping the package first - `@owner/canvas-effects`, with
