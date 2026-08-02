@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  POLAR_DEFAULTS,
   buildPalette,
   createSurface,
   defaultShading,
   planSurface,
+  polarReach,
+  polarSample,
+  resolvePolar,
   sameShading,
+  type Polar,
   type Shading,
   type SurfaceOptions,
 } from './render.js';
@@ -327,6 +332,167 @@ describe('sameShading', () => {
 // for the same reason the driver's tests are: what matters is the sequence of
 // calls it makes on a context and the bytes it writes into the ImageData, and a
 // fake reports both directly.
+describe('resolvePolar', () => {
+  it('takes both spellings of off', () => {
+    expect(resolvePolar(null)).toBeNull();
+    expect(resolvePolar(false)).toBeNull();
+    expect(resolvePolar(undefined)).toBeNull();
+  });
+
+  it('takes `true` as the defaults', () => {
+    expect(resolvePolar(true)).toEqual(POLAR_DEFAULTS);
+  });
+
+  it('fills in what a partial setting leaves out', () => {
+    const polar = resolvePolar({ turns: 3 })!;
+    expect(polar.turns).toBe(3);
+    expect(polar.seam).toBe(POLAR_DEFAULTS.seam);
+    expect(polar.centre).toEqual(POLAR_DEFAULTS.centre);
+  });
+
+  it('leaves the defaults alone', () => {
+    resolvePolar({ turns: 5 });
+    expect(POLAR_DEFAULTS.turns).toBe(1);
+  });
+});
+
+describe('polarReach', () => {
+  const polar = (over: Polar = {}) => resolvePolar(over)!;
+
+  it('measures to the farthest corner, so the field covers the canvas', () => {
+    expect(polarReach(1, polar())).toBeCloseTo(Math.hypot(0.5, 0.5), 6);
+  });
+
+  it('counts a wide canvas as wide', () => {
+    // The x axis is scaled by the aspect, which is what keeps a ring round.
+    expect(polarReach(2, polar())).toBeCloseTo(Math.hypot(1, 0.5), 6);
+  });
+
+  it('follows the centre rather than assuming the middle', () => {
+    expect(polarReach(1, polar({ centre: [0, 0] }))).toBeCloseTo(Math.hypot(1, 1), 6);
+  });
+
+  it('scales with the radius asked for', () => {
+    expect(polarReach(1, polar({ radius: 2 }))).toBeCloseTo(2 * Math.hypot(0.5, 0.5), 6);
+  });
+});
+
+describe('polarSample', () => {
+  const polar = (over: Polar = {}) => resolvePolar(over)!;
+
+  /** The angle and radius of a point, whichever axes they came back on. */
+  function read(u: number, v: number, aspect: number, over: Polar = {}) {
+    const settings = polar(over);
+    const [x, y] = polarSample(u, v, aspect, settings);
+    return settings.angleAxis === 'x' ? { angle: x, radius: y } : { angle: y, radius: x };
+  }
+
+  describe('the radius axis', () => {
+    it('reads the innermost cell at the centre', () => {
+      expect(read(0.5, 0.5, 1).radius).toBe(0);
+    });
+
+    it('reaches the outermost cell at the corners, and no further', () => {
+      for (const [u, v] of [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [1, 1],
+      ]) {
+        expect(read(u, v, 1).radius).toBeCloseTo(1, 6);
+      }
+    });
+
+    it('is round rather than elliptical on a canvas that is not square', () => {
+      // Equal distances on screen, which on a 2:1 canvas is half the fraction
+      // horizontally. Without the aspect these would differ by a factor of two.
+      const across = read(0.75, 0.5, 2).radius;
+      const down = read(0.5, 1, 2).radius;
+      expect(across).toBeCloseTo(down, 6);
+    });
+
+    it('stops at the end of the field rather than running past it', () => {
+      // `radius` below 1 leaves the corners outside the field; the last row is
+      // stretched across them, which is what the clamp is for.
+      expect(read(0, 0, 1, { radius: 0.5 }).radius).toBe(1);
+      expect(read(1, 1, 1, { radius: 0.5 }).radius).toBe(1);
+    });
+
+    it('holds still where the reach is degenerate', () => {
+      expect(read(0.9, 0.2, 1, { radius: 0 }).radius).toBe(0);
+    });
+  });
+
+  describe('the angle axis', () => {
+    it('holds along a ray out from the centre', () => {
+      const near = read(0.6, 0.6, 1).angle;
+      const far = read(0.9, 0.9, 1).angle;
+      expect(near).toBeCloseTo(far, 6);
+    });
+
+    it('sweeps the whole field in one revolution', () => {
+      const eighths = new Set<number>();
+      for (let i = 0; i < 16; i++) {
+        const turn = (i / 16) * Math.PI * 2;
+        const at = read(0.5 + 0.4 * Math.cos(turn), 0.5 + 0.4 * Math.sin(turn), 1, { seam: 'wrap' });
+        eighths.add(Math.floor(at.angle * 8));
+      }
+      // Every eighth of the field reached, which is only true of a map that
+      // covers it - and covers it once.
+      expect(eighths.size).toBe(8);
+    });
+
+    it('comes back to where it started under a mirror, which is the seam gone', () => {
+      // Either side of the join, a ten-thousandth of a turn apart. A wrap jumps
+      // the width of the whole field here; a fold does not move.
+      const above = read(0.1, 0.5 - 1e-4, 1).angle;
+      const below = read(0.1, 0.5 + 1e-4, 1).angle;
+      expect(Math.abs(above - below)).toBeLessThan(0.01);
+    });
+
+    it('jumps the width of the field at a wrapped join', () => {
+      const above = read(0.1, 0.5 - 1e-4, 1, { seam: 'wrap' }).angle;
+      const below = read(0.1, 0.5 + 1e-4, 1, { seam: 'wrap' }).angle;
+      expect(Math.abs(above - below)).toBeGreaterThan(0.99);
+    });
+
+    it('repeats once per turn asked for', () => {
+      // Three copies means the same field position comes up every third of a
+      // revolution.
+      const first = read(0.5, 0.1, 1, { turns: 3 }).angle;
+      const third = read(0.5 + 0.4 * Math.cos(Math.PI / 6), 0.5 + 0.4 * Math.sin(Math.PI / 6), 1, { turns: 3 }).angle;
+      expect(first).toBeCloseTo(third, 6);
+    });
+
+    it('turns the picture clockwise by what `rotate` says, whatever `turns` is', () => {
+      // A quarter turn puts what was at the top out to the right - and does it
+      // for three copies of the field as for one, which is why `rotate` is in
+      // turns of the picture rather than of the field.
+      for (const turns of [1, 3]) {
+        const top = read(0.5, 0.1, 1, { turns, seam: 'wrap' }).angle;
+        const right = read(0.9, 0.5, 1, { turns, seam: 'wrap', rotate: 0.25 }).angle;
+        expect(right).toBeCloseTo(top, 6);
+      }
+    });
+  });
+
+  it('puts the angle on the axis it was told to', () => {
+    const settings = polar({ angleAxis: 'y' });
+    const [x, y] = polarSample(0.9, 0.5, 1, settings);
+    // The radius is on x now, so a point out to the right is far along it.
+    expect(x).toBeGreaterThan(0.5);
+    expect(y).toBe(read(0.9, 0.5, 1, { angleAxis: 'y' }).angle);
+  });
+
+  it('agrees with a reach worked out for it', () => {
+    // The loop over every pixel hands one in rather than recomputing it, and the
+    // two paths must not drift.
+    const settings = polar({ centre: [0.2, 0.8], radius: 1.4 });
+    const passed = polarSample(0.3, 0.4, 1.5, settings, polarReach(1.5, settings));
+    expect(polarSample(0.3, 0.4, 1.5, settings)).toEqual(passed);
+  });
+});
+
 describe('createSurface', () => {
   interface Fake {
     canvas: HTMLCanvasElement;
@@ -682,6 +848,143 @@ describe('createSurface', () => {
       );
 
       expect(pixel(dom.painted()!, 0)).toEqual([255, 240, 200, 255]);
+    });
+  });
+
+  describe('the polar lookup', () => {
+    /** A field whose value is its row: bands across, and rings once bent. */
+    function rows(surface: { fieldW: number; fieldH: number }): Float32Array {
+      const field = new Float32Array(surface.fieldW * surface.fieldH);
+      for (let j = 0; j < surface.fieldH; j++) {
+        for (let i = 0; i < surface.fieldW; i++) field[j * surface.fieldW + i] = j / (surface.fieldH - 1);
+      }
+      return field;
+    }
+
+    /** A field whose value is its column: a gradient across, spokes once bent. */
+    function columns(surface: { fieldW: number; fieldH: number }): Float32Array {
+      const field = new Float32Array(surface.fieldW * surface.fieldH);
+      for (let j = 0; j < surface.fieldH; j++) {
+        for (let i = 0; i < surface.fieldW; i++) field[j * surface.fieldW + i] = i / (surface.fieldW - 1);
+      }
+      return field;
+    }
+
+    const shades = (over: Partial<SurfaceOptions>) => options({ dither: false, levels: 256, ...over });
+
+    const at = (image: ImageData, x: number, y: number, width: number) => pixel(image, y * width + x)[0];
+
+    // The canvas is 200x100 rendered pixels, so its centre falls between pixels
+    // at (99.5, 49.5). These two are the same distance from it, one out along
+    // the x axis and one along the y - which under a polar lookup is the same
+    // ring, and under the plain one is not even the same row.
+    const ACROSS = { x: 79, y: 49 };
+    const DOWN = { x: 99, y: 29 };
+
+    it('paints rings from a field the plain lookup paints as bands', () => {
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, shades({ polar: true }));
+      surface.resize();
+      surface.shade(rows(surface), { base: 0, amplitude: 255 }, 1);
+
+      const image = dom.painted()!;
+      expect(at(image, ACROSS.x, ACROSS.y, surface.width)).toBe(at(image, DOWN.x, DOWN.y, surface.width));
+      // Not a flat picture that happens to match: the centre is the field's
+      // first row and the rim is its last.
+      expect(at(image, 99, 49, surface.width)).toBeLessThan(at(image, 0, 0, surface.width));
+    });
+
+    it('leaves the plain lookup alone', () => {
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, shades({}));
+      surface.resize();
+      surface.shade(rows(surface), { base: 0, amplitude: 255 }, 1);
+
+      const image = dom.painted()!;
+      // The control for the test above: the same field, the same two pixels, and
+      // they differ because one is twenty rows above the other.
+      expect(at(image, ACROSS.x, ACROSS.y, surface.width)).not.toBe(at(image, DOWN.x, DOWN.y, surface.width));
+    });
+
+    it('takes a partial setting as well as `true`', () => {
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, shades({ polar: { centre: [0.5, 0.5] } }));
+      surface.resize();
+      surface.shade(rows(surface), { base: 0, amplitude: 255 }, 1);
+
+      const image = dom.painted()!;
+      expect(at(image, ACROSS.x, ACROSS.y, surface.width)).toBe(at(image, DOWN.x, DOWN.y, surface.width));
+    });
+
+    it('sends the field out as spokes when the angle is on the other axis', () => {
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, shades({ polar: { angleAxis: 'y' } }));
+      surface.resize();
+      // The rows are the radius under the default axis and the angle under this
+      // one, so the same two pixels - one ring, two angles - now differ.
+      surface.shade(rows(surface), { base: 0, amplitude: 255 }, 1);
+
+      const image = dom.painted()!;
+      expect(at(image, ACROSS.x, ACROSS.y, surface.width)).not.toBe(at(image, DOWN.x, DOWN.y, surface.width));
+    });
+
+    it('wraps whichever axis carries the angle', () => {
+      // The join is the field's two edges meeting, and they meet on the y axis
+      // here. Either side of it is a cell's blend rather than a hard step,
+      // which is only true if the lookup runs the last row back into the first.
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, shades({ polar: { angleAxis: 'y', seam: 'wrap' } }));
+      surface.resize();
+      surface.shade(rows(surface), { base: 0, amplitude: 255 }, 1);
+
+      const image = dom.painted()!;
+      const above = at(image, 40, 49, surface.width);
+      const below = at(image, 40, 50, surface.width);
+      expect(Math.abs(above - below)).toBeLessThan(255);
+    });
+
+    it('turns the picture rather than the field it reads', () => {
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, shades({ polar: { seam: 'wrap', rotate: 0.25 } }));
+      surface.resize();
+      surface.shade(columns(surface), { base: 0, amplitude: 255 }, 1);
+      const turned = at(dom.painted()!, 179, 49, surface.width);
+
+      const plain = createSurface(dom.canvas, dom.ctx, shades({ polar: { seam: 'wrap' } }));
+      plain.resize();
+      plain.shade(columns(plain), { base: 0, amplitude: 255 }, 1);
+      // A quarter turn clockwise: what the unturned picture showed at the top is
+      // what the turned one shows out to the right.
+      expect(turned).toBe(at(dom.painted()!, 99, 0, plain.width));
+    });
+
+    it('is symmetric about the fold under a mirror', () => {
+      const dom = fake();
+      const surface = createSurface(dom.canvas, dom.ctx, shades({ polar: true }));
+      surface.resize();
+      surface.shade(columns(surface), { base: 0, amplitude: 255 }, 1);
+
+      const image = dom.painted()!;
+      // The fold runs along the horizontal, so a point and its reflection above
+      // and below it read the same cell. This is what buys the missing seam.
+      // The centre falls between pixels at (99.5, 49.5), so 29 reflects to 70.
+      expect(at(image, 40, 29, surface.width)).toBe(at(image, 40, 70, surface.width));
+    });
+
+    it('rebuilds the map when the canvas changes shape', () => {
+      const dom = fake(1200, 600);
+      const surface = createSurface(dom.canvas, dom.ctx, shades({ polar: true }));
+      surface.resize();
+
+      dom.resizeTo(600, 600);
+      surface.resize();
+      surface.shade(rows(surface), { base: 0, amplitude: 255 }, 1);
+
+      // A stale map would be the wrong length for the new canvas, and the rings
+      // would be centred wherever the old one put them.
+      const image = dom.painted()!;
+      const middle = Math.floor(surface.width / 2);
+      expect(at(image, middle, middle, surface.width)).toBeLessThan(at(image, 0, 0, surface.width));
     });
   });
 });

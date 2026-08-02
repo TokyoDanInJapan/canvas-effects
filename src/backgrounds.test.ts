@@ -20,6 +20,10 @@ import { createRidgesBackground } from './ridges-background.js';
 import { createSmokeBackground } from './smoke-background.js';
 import { createTunnelBackground } from './tunnel-background.js';
 import { type BackgroundHandle } from './render.js';
+import { type CommonBackgroundOptions } from './background.js';
+
+/** The options every effect has, which is what an `over` may set. */
+type Shared = Partial<CommonBackgroundOptions>;
 
 type Listener = (event?: unknown) => void;
 
@@ -155,47 +159,60 @@ function page({ width = 900, height = 600, reducedMotion = false } = {}): Page {
 /** Distinct greys in the last frame - how much of the palette actually reached it. */
 const distinct = (greys: number[]) => new Set(greys).size;
 
-/** Every effect, with settings that keep the test quick and repeatable. */
+/**
+ * Every effect, with settings that keep the test quick and repeatable.
+ *
+ * `over` is for the options that are shared by all seven and worth exercising on
+ * all seven - `polar` is the one so far - so that a test of one can be a test of
+ * the lot without seven more entries here.
+ */
 const EFFECTS = [
   {
     name: 'smoke',
-    mount: (canvas: HTMLCanvasElement, random: () => number) =>
-      createSmokeBackground(canvas, { random, shading: { base: 18, amplitude: 60 }, settleSteps: 8, fps: 20 }),
+    mount: (canvas: HTMLCanvasElement, random: () => number, over: Shared = {}) =>
+      createSmokeBackground(canvas, {
+        random,
+        shading: { base: 18, amplitude: 60 },
+        settleSteps: 8,
+        fps: 20,
+        ...over,
+      }),
   },
   {
     name: 'plasma',
-    mount: (canvas: HTMLCanvasElement, random: () => number) =>
-      createPlasmaBackground(canvas, { random, shading: { base: 18, amplitude: 60 } }),
+    mount: (canvas: HTMLCanvasElement, random: () => number, over: Shared = {}) =>
+      createPlasmaBackground(canvas, { random, shading: { base: 18, amplitude: 60 }, ...over }),
   },
   {
     name: 'rain',
-    mount: (canvas: HTMLCanvasElement, random: () => number) =>
-      createRainBackground(canvas, { random, shading: { base: 18, amplitude: 60 }, settleSteps: 8 }),
+    mount: (canvas: HTMLCanvasElement, random: () => number, over: Shared = {}) =>
+      createRainBackground(canvas, { random, shading: { base: 18, amplitude: 60 }, settleSteps: 8, ...over }),
   },
   {
     name: 'ridges',
-    mount: (canvas: HTMLCanvasElement, random: () => number) =>
-      createRidgesBackground(canvas, { random, shading: { base: 18, amplitude: 60 } }),
+    mount: (canvas: HTMLCanvasElement, random: () => number, over: Shared = {}) =>
+      createRidgesBackground(canvas, { random, shading: { base: 18, amplitude: 60 }, ...over }),
   },
   {
     name: 'metaballs',
-    mount: (canvas: HTMLCanvasElement, random: () => number) =>
-      createMetaballsBackground(canvas, { random, shading: { base: 18, amplitude: 60 } }),
+    mount: (canvas: HTMLCanvasElement, random: () => number, over: Shared = {}) =>
+      createMetaballsBackground(canvas, { random, shading: { base: 18, amplitude: 60 }, ...over }),
   },
   {
     name: 'tunnel',
-    mount: (canvas: HTMLCanvasElement, random: () => number) =>
-      createTunnelBackground(canvas, { random, shading: { base: 18, amplitude: 60 } }),
+    mount: (canvas: HTMLCanvasElement, random: () => number, over: Shared = {}) =>
+      createTunnelBackground(canvas, { random, shading: { base: 18, amplitude: 60 }, ...over }),
   },
   {
     name: 'mandelbrot',
-    mount: (canvas: HTMLCanvasElement, random: () => number) =>
+    mount: (canvas: HTMLCanvasElement, random: () => number, over: Shared = {}) =>
       // A coarse field on purpose: this is the one effect whose per-cell cost is
       // hundreds of iterations, and the wiring is what is under test here.
       createMandelbrotBackground(canvas, {
         random,
         shading: { base: 18, amplitude: 60 },
         maxFieldCells: 1200,
+        ...over,
       }),
   },
 ];
@@ -224,6 +241,21 @@ describe.each(EFFECTS)('$name', ({ mount }) => {
     const dom = page();
     start(dom);
     expect(distinct(dom.greys())).toBeGreaterThan(1);
+  });
+
+  it('takes a polar lookup, like every other effect', () => {
+    // The one option here that has to work on all seven, and the reason it lives
+    // in the shading rather than in any effect: nothing in a mount file knows
+    // about it, so this is what would notice a mount that stopped passing it on.
+    const plain = page();
+    start(plain);
+
+    const bent = page();
+    const handle = mount(bent.canvas, makeRandom(12345), { polar: true });
+    expect(handle).not.toBeNull();
+
+    expect(distinct(bent.greys())).toBeGreaterThan(1);
+    expect(bent.greys()).not.toEqual(plain.greys());
   });
 
   it('fills the canvas it was given', () => {

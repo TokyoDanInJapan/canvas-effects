@@ -544,6 +544,96 @@ describe('mountBackground', () => {
 
       expect(other.listeners() - beforeOther).toBeGreaterThan(withoutDrag);
     });
+
+    describe('under a polar lookup', () => {
+      /** Mounts with a drag that records every emission it is given. */
+      function pressing(dom: Harness, polar: CommonBackgroundOptions['polar']) {
+        const emissions: Array<[number, number, number, number]> = [];
+        mountBackground(
+          dom.canvas,
+          config({ polar }),
+          spec({
+            drag: {
+              spacing: 0.02,
+              maxPerMove: 8,
+              onEmit: (u, v, du, dv) => emissions.push([u, v, du, dv]),
+            },
+          })
+        );
+        return emissions;
+      }
+
+      it('bends a press through the transform the picture is read through', () => {
+        // Otherwise the effect would be disturbed in field coordinates that are
+        // no longer the canvas's, and a press would land somewhere else entirely.
+        const dom = stub();
+        const emissions = pressing(dom, true);
+
+        // The middle of a 1200x600 canvas, which is the middle of the rings.
+        dom.fire('window', 'pointerdown', { clientX: 600, clientY: 300, buttons: 1 });
+        expect(emissions[0][1]).toBe(0);
+      });
+
+      it('leaves the pointer alone when there is no transform', () => {
+        const dom = stub();
+        const emissions = pressing(dom, null);
+
+        dom.fire('window', 'pointerdown', { clientX: 600, clientY: 300, buttons: 1 });
+        expect(emissions[0].slice(0, 2)).toEqual([0.5, 0.5]);
+      });
+
+      it('takes the shorter way round a wrapped join', () => {
+        // A drag straight through the join - the ray out to nine o'clock - which
+        // is where differencing two positions reads a step of nearly the whole
+        // field the wrong way.
+        const dom = stub();
+        const emissions = pressing(dom, { seam: 'wrap' });
+
+        dom.fire('window', 'pointerdown', { clientX: 300, clientY: 280, buttons: 1 });
+        dom.fire('window', 'pointermove', { clientX: 300, clientY: 340, buttons: 1 });
+        // And back the other way, because the two directions differ by a sign
+        // and only one of them is the one that was got wrong.
+        dom.fire('window', 'pointermove', { clientX: 300, clientY: 280, buttons: 1 });
+
+        const angles = emissions.map(([u]) => u);
+        // It really did cross: the angle is at both ends of the field.
+        expect(Math.max(...angles)).toBeGreaterThan(0.9);
+        expect(Math.min(...angles)).toBeLessThan(0.1);
+
+        // And no emission claims to have travelled most of a turn to do it.
+        for (const [, , du] of emissions) expect(Math.abs(du)).toBeLessThan(0.5);
+      });
+
+      it('takes it round on whichever axis carries the angle', () => {
+        const dom = stub();
+        const emissions = pressing(dom, { seam: 'wrap', angleAxis: 'y' });
+
+        dom.fire('window', 'pointerdown', { clientX: 300, clientY: 280, buttons: 1 });
+        dom.fire('window', 'pointermove', { clientX: 300, clientY: 340, buttons: 1 });
+
+        // The angle is the second coordinate now, and so is the step.
+        for (const [, , , dv] of emissions) expect(Math.abs(dv)).toBeLessThan(0.5);
+      });
+
+      it('measures the step in the field rather than on the screen', () => {
+        // The same drag is a small step out at the rim and a large one near the
+        // centre, because that is what the transform does to it.
+        const dom = stub();
+        const emissions = pressing(dom, true);
+
+        dom.fire('window', 'pointerdown', { clientX: 900, clientY: 305, buttons: 1 });
+        dom.fire('window', 'pointermove', { clientX: 900, clientY: 400, buttons: 1 });
+        const outer = Math.abs(emissions[1][2]);
+
+        emissions.length = 0;
+        dom.fire('window', 'pointerup', {});
+        dom.fire('window', 'pointerdown', { clientX: 620, clientY: 305, buttons: 1 });
+        dom.fire('window', 'pointermove', { clientX: 620, clientY: 400, buttons: 1 });
+        const inner = Math.abs(emissions[1][2]);
+
+        expect(inner).toBeGreaterThan(outer);
+      });
+    });
   });
 
   describe('start and stop', () => {

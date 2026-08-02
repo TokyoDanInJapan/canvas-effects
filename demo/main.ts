@@ -70,6 +70,7 @@ const copyOut = document.getElementById('copy') as HTMLDivElement;
 const rampPick = document.getElementById('ramp') as HTMLSelectElement;
 const rampName = document.getElementById('ramp-name') as HTMLElement;
 const ditherButton = document.getElementById('dither') as HTMLButtonElement;
+const polarButton = document.getElementById('polar') as HTMLButtonElement;
 const textButton = document.getElementById('text') as HTMLButtonElement;
 const prose = document.querySelector('main') as HTMLElement;
 
@@ -178,6 +179,7 @@ const RAMPS: Array<{ id: string; name: string; dark: Stops | null; light: Stops 
 
 let rampId = 'grey';
 let dithering = true;
+let polar = false;
 
 interface Dial {
   key: string;
@@ -737,6 +739,18 @@ function mount() {
     pixelSize,
     maxPixels: native ? window.innerWidth * window.innerHeight : undefined,
     fps: Math.round(values.fps),
+    // Shared by every effect, because it bends the lookup rather than the field:
+    // whatever is being drawn gets read round a centre instead of straight
+    // across. `null` rather than `false` for an off switch reads better here.
+    polar: polar
+      ? {
+          centre: [values.polarCentreX, values.polarCentreY] as [number, number],
+          turns: Math.round(values.polarTurns),
+          rotate: values.polarRotate,
+          radius: values.polarRadius,
+          seam: values.polarSeam >= 0.5 ? ('wrap' as const) : ('mirror' as const),
+        }
+      : null,
     random,
   };
 
@@ -951,11 +965,54 @@ const SHADING_DIALS: Dial[] = [
   { key: 'rangeHi', label: 'lightest', min: 0.1, max: 1, step: 0.05, value: 1, note: 'ceiling of the spectrum' },
 ];
 
+// Also shared by every effect, for the same reason: they are dials on the
+// lookup rather than on any field. Dead until the Polar button is on.
+const POLAR_DIALS: Dial[] = [
+  {
+    key: 'polarTurns',
+    label: 'polar turns',
+    min: 1,
+    max: 6,
+    step: 1,
+    value: 1,
+    note: 'copies of the field round the circle - the Polar button turns these on',
+  },
+  { key: 'polarRotate', label: 'polar rotate', min: 0, max: 1, step: 0.01, value: 0, note: 'turns, clockwise' },
+  {
+    key: 'polarRadius',
+    label: 'polar radius',
+    min: 0.2,
+    max: 2,
+    step: 0.05,
+    value: 1,
+    note: '1 reaches exactly to the corners',
+  },
+  {
+    key: 'polarSeam',
+    label: 'polar seam',
+    min: 0,
+    max: 1,
+    step: 1,
+    value: 0,
+    note: '0 mirrors the join away, 1 wraps',
+  },
+  {
+    key: 'polarCentreX',
+    label: 'polar centre x',
+    min: -0.5,
+    max: 1.5,
+    step: 0.05,
+    value: 0.5,
+    note: 'off the canvas gives a fan rather than a wheel',
+  },
+  { key: 'polarCentreY', label: 'polar centre y', min: -0.5, max: 1.5, step: 0.05, value: 0.5 },
+];
+
 function buildDials() {
   // A lookup rather than the ternary chain this used to be: six effects deep it
   // had stopped being readable, and the fall-through arm meant a new effect
   // silently showed the ridges' dials instead of failing to compile.
-  const list = [...DIALS[effect], ...SHADING_DIALS];
+  const list = [...DIALS[effect], ...SHADING_DIALS, ...POLAR_DIALS];
   values = Object.fromEntries(list.map((d) => [d.key, d.value]));
   dials.replaceChildren();
 
@@ -1047,6 +1104,15 @@ ditherButton.addEventListener('click', () => {
   ditherButton.classList.toggle('active', dithering);
   // Baked in at construction, so this remounts - a demo concern, not the
   // library's; `dither` is a plain option there.
+  mount();
+});
+
+polarButton.addEventListener('click', () => {
+  polar = !polar;
+  polarButton.textContent = `Polar: ${polar ? 'on' : 'off'}`;
+  polarButton.classList.toggle('active', polar);
+  // Baked in at construction like the dither, so this remounts. The dials below
+  // it are live either way; they simply do nothing while it is off.
   mount();
 });
 
