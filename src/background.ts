@@ -16,7 +16,18 @@
 // after it.
 
 import { createDragSource, createDriver, prefersReducedMotion, type DragOptions } from './driver.js';
-import { createSurface, defaultShading, sameShading, type BackgroundHandle, type Shading } from './render.js';
+import {
+  createSurface,
+  defaultShading,
+  polarSample,
+  resolvePolar,
+  sameShading,
+  type BackgroundHandle,
+  type Polar,
+  type PolarOption,
+  type Shading,
+  type Surface,
+} from './render.js';
 
 /**
  * The options every background takes, whatever it draws.
@@ -69,6 +80,29 @@ export interface CommonBackgroundOptions {
   dither: boolean | 'auto';
   /** Weights the field towards its dark end. See `darken` in dither.ts. */
   gamma: number;
+  /**
+   * Read the field round a centre rather than straight across the canvas: one
+   * of its axes becomes the angle about a point, the other the distance from
+   * it. Off by default.
+   *
+   * `true` takes the defaults - once round, mirrored, centred, filling the
+   * canvas - and an object sets any of them; see `Polar`. It works with every
+   * effect, because the effect is not involved: it draws its rectangle exactly
+   * as before and only the lookup that reads it is bent. The rain falls out
+   * from the centre, the ridges stack into rings, the tunnel comes back round
+   * on itself.
+   *
+   * Two things to know before turning it on. The centre is where the transform
+   * is weakest - one pixel there covers every angle at once, so the innermost
+   * cells read as a sparkle however fine the field is, and moving `centre` off
+   * the canvas avoids it entirely. And it costs two floats per rendered pixel,
+   * built on resize, because a polar lookup is not separable the way the plain
+   * one is; at the default `maxPixels` that is about 1.3 MB.
+   *
+   * A pointer is bent through the same transform, so a drag still disturbs the
+   * effect where it looks like it should.
+   */
+  polar: PolarOption;
   /** The greys the field is mapped onto. A function is re-read on theme changes. */
   shading: Shading | (() => Shading);
   /**
@@ -107,6 +141,7 @@ export const COMMON_BACKGROUND_DEFAULTS: CommonBackgroundOptions = {
   levels: 5,
   dither: 'auto',
   gamma: 1,
+  polar: null,
   shading: defaultShading,
   interactive: true,
   respectReducedMotion: true,
@@ -165,6 +200,54 @@ export interface BackgroundSpec {
   destroy?(): void;
 }
 
+/** The shorter of the two ways round a wrapped axis, in fractions of it. */
+function shortestWayRound(step: number): number {
+  if (step > 0.5) return step - 1;
+  if (step < -0.5) return step + 1;
+  return step;
+}
+
+/**
+ * Bends a drag through the same transform the picture is read through.
+ *
+ * Without this, a polar background would be disturbed somewhere other than
+ * where it was pressed - the effect thinks in field coordinates, and under
+ * `polar` those are no longer the canvas's. Effects need no say in it, for the
+ * same reason they need no say in the lookup.
+ *
+ * The step is differenced rather than rotated, because the transform is not a
+ * rotation: the same few pixels of drag are a fraction of a turn out at the rim
+ * and most of one near the centre, and an effect that reads `du`/`dv` as a
+ * shove should feel that.
+ */
+function throughPolar(drag: DragOptions, polar: Required<Polar>, surface: Surface): DragOptions {
+  const angleIsX = polar.angleAxis === 'x';
+
+  return {
+    ...drag,
+    onEmit(u, v, du, dv) {
+      // Read per emission rather than captured: the canvas may have been
+      // resized since the drag was wired up.
+      const aspect = surface.height > 0 ? surface.width / surface.height : 1;
+
+      const [au, av] = polarSample(u, v, aspect, polar);
+      const [bu, bv] = polarSample(u - du, v - dv, aspect, polar);
+
+      let su = au - bu;
+      let sv = av - bv;
+
+      // A step across a wrapped join differences as nearly a whole field the
+      // other way, which is the one place this arithmetic lies.
+      if (polar.seam === 'wrap') {
+        if (angleIsX) su = shortestWayRound(su);
+        else sv = shortestWayRound(sv);
+      }
+
+      drag.onEmit(au, av, su, sv);
+    },
+  };
+}
+
 /**
  * Mounts an effect on a canvas: sizes it, shades it, animates it, watches the
  * theme, and hands back the handle that tears all of it down again.
@@ -199,7 +282,12 @@ export function mountBackground(
     maxFieldCells: spec.maxFieldCells,
     levels: config.levels,
     dither: config.dither,
+    polar: config.polar,
   });
+
+  // Resolved here as well as inside the surface, because the pointer has to be
+  // bent by the same transform the picture is read through.
+  const polar = resolvePolar(config.polar);
 
   let shading: Shading = { base: 0, amplitude: 0 };
 
@@ -261,7 +349,7 @@ export function mountBackground(
 
   function wireDrag() {
     if (!stopDragging && spec.drag && config.interactive && !still) {
-      stopDragging = createDragSource(canvas, spec.drag);
+      stopDragging = createDragSource(canvas, polar ? throughPolar(spec.drag, polar, surface) : spec.drag);
     }
   }
 

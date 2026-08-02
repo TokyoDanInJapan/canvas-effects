@@ -24,6 +24,7 @@
 // which is what lets body text sit directly on top of one of these.
 
 import { orderedDither, quantise } from './dither.js';
+import { withDefaults } from './options.js';
 
 /** How the field's 0..1 levels are mapped onto actual greys. */
 export interface Shading {
@@ -271,7 +272,193 @@ export interface SurfaceOptions {
    * adds an array lookup and an add.
    */
   dither: boolean | 'auto';
+  /**
+   * Read the field round a centre rather than straight across the canvas.
+   * `true` for the defaults, omitted or `false` for the plain lookup.
+   */
+  polar?: PolarOption;
 }
+
+// POLAR
+// -----
+// Every effect here draws on a rectangle, and the rectangle is the only thing
+// this bends. One axis of the field becomes the angle about a centre and the
+// other the distance from it, so the rain falls outwards from the middle of the
+// page, the ridges stack into rings, and the plasma turns about a point. No
+// effect knows about any of it: the field is built exactly as before, and only
+// the lookup that reads it changes.
+//
+// That is why it lives here rather than in seven places. It is also why it
+// costs a table: the plain lookup is separable - a row of x weights and a
+// column of y ones - and a polar one is not, because the field cell an output
+// pixel reads depends on both of its coordinates at once. So the transform is
+// evaluated once per pixel on resize and the frame path stays two array reads
+// and a blend, which is what the separable version costs anyway.
+
+/** Reading the field round a centre. See `polar` in `CommonBackgroundOptions`. */
+export interface Polar {
+  /**
+   * The point everything turns about, as fractions of the canvas box.
+   *
+   * Outside `0..1` is allowed and useful: a centre beyond one edge gives a fan
+   * rather than a wheel, and takes the sparkle at the middle off screen with it.
+   */
+  centre?: readonly [number, number];
+  /**
+   * Copies of the field in one revolution. 1 is once round, 3 gives three-fold
+   * symmetry.
+   *
+   * Keep it whole. A fraction leaves the field part-way through itself where it
+   * comes back round, which is a join even under `'mirror'`.
+   */
+  turns?: number;
+  /**
+   * Where the field's leading edge sits, in turns of the *picture* rather than
+   * of the field - 0.25 is a quarter turn clockwise however many `turns` there
+   * are. With `'wrap'` this is the dial that moves the join somewhere less
+   * conspicuous.
+   */
+  rotate?: number;
+  /**
+   * How far the radius axis reaches, as a fraction of the distance to the
+   * farthest corner.
+   *
+   * 1 - the default - is exactly far enough to fill the canvas. Below it the
+   * field runs out before the corners do and its last row is stretched across
+   * them; above it, the outermost rows are never seen.
+   */
+  radius?: number;
+  /**
+   * What happens where the angle axis meets itself again.
+   *
+   * A field is a rectangle, and its left and right edges have no reason to
+   * agree - so wrapping one round a circle leaves a join along a radius.
+   * `'mirror'`, the default, reflects at each edge instead of wrapping. It has
+   * no join anywhere, at the cost of a picture symmetric about the fold, and it
+   * puts a mirrored copy beside each of the `turns`. `'wrap'` keeps the field
+   * the right way round throughout and shows the join, which is what you want
+   * for a field that is already seamless in x - the plasma samples a seamless
+   * tile - or when the join is wanted.
+   */
+  seam?: 'mirror' | 'wrap';
+  /**
+   * Which axis of the field carries the angle, leaving the other the radius.
+   *
+   * `'x'` - the default - lays the field's rows out as rings, so anything
+   * travelling down the field travels outwards: rain falls away from the
+   * centre. `'y'` lays its columns out as spokes, and the same motion becomes a
+   * rotation about the centre instead.
+   */
+  angleAxis?: 'x' | 'y';
+}
+
+/** A polar setting, or the two ways of saying there is not one. */
+export type PolarOption = Polar | boolean | null;
+
+export const POLAR_DEFAULTS: Required<Polar> = {
+  centre: [0.5, 0.5],
+  turns: 1,
+  rotate: 0,
+  radius: 1,
+  // Seamless by default. A background is meant to go unnoticed, and a hard
+  // radial join is the one thing here that a reader's eye does catch.
+  seam: 'mirror',
+  angleAxis: 'x',
+};
+
+/**
+ * Fills in a partial polar setting, or answers null for one that is off.
+ *
+ * Both `false` and `null` mean off, because both are what a host toggling this
+ * from its own config naturally produces.
+ */
+export function resolvePolar(polar: PolarOption | undefined): Required<Polar> | null {
+  if (!polar) return null;
+  return polar === true ? POLAR_DEFAULTS : withDefaults(POLAR_DEFAULTS, polar);
+}
+
+const TAU = Math.PI * 2;
+
+const CORNERS: ReadonlyArray<readonly [number, number]> = [
+  [0, 0],
+  [1, 0],
+  [0, 1],
+  [1, 1],
+];
+
+/**
+ * How far the radius axis reaches, in the units `polarSample` measures in -
+ * canvas fractions with x scaled by the aspect, so that a circle comes out
+ * round rather than as an ellipse.
+ *
+ * Measured to the farthest corner rather than the nearest edge, because
+ * anything shorter leaves the corners past the end of the field, where there is
+ * nothing left to read but its last row smeared across them.
+ */
+export function polarReach(aspect: number, polar: Required<Polar>): number {
+  const [cx, cy] = polar.centre;
+  let far = 0;
+  for (const [x, y] of CORNERS) far = Math.max(far, Math.hypot((x - cx) * aspect, y - cy));
+  return far * polar.radius;
+}
+
+/**
+ * A triangle wave: 0 up to 1 and back down, with period 2.
+ *
+ * This is what makes `'mirror'` seamless. Wrapping is discontinuous wherever it
+ * comes back round; folding is continuous everywhere, so the field simply
+ * reverses at each edge and there is nothing to see.
+ */
+function fold(t: number): number {
+  const cycle = t - Math.floor(t / 2) * 2;
+  return cycle > 1 ? 2 - cycle : cycle;
+}
+
+/**
+ * Where an output point reads from, as fractions of the field's own two axes.
+ *
+ * `u` and `v` are the point on the canvas, 0..1 on each axis, and `aspect` is
+ * its width over its height. `reach` is `polarReach`, taken as an argument so
+ * that a loop over every pixel works it out once rather than per pixel.
+ *
+ * Shared by the lookup table and the pointer, which is the point of it being a
+ * function at all: a drag has to be bent by exactly the transform the picture
+ * is read through, or it disturbs the field somewhere other than where it was
+ * aimed.
+ */
+export function polarSample(
+  u: number,
+  v: number,
+  aspect: number,
+  polar: Required<Polar>,
+  reach: number = polarReach(aspect, polar)
+): [number, number] {
+  const dx = (u - polar.centre[0]) * aspect;
+  const dy = v - polar.centre[1];
+
+  // Clamped rather than allowed past the end: `radius` above 1 puts the corners
+  // beyond the field, and reading its last row there beats reading past it.
+  const distance = Math.hypot(dx, dy);
+  const radius = reach > 0 ? (distance < reach ? distance / reach : 1) : 0;
+
+  // `atan2` runs -pi..pi. The half turn added is what makes `rotate: 0` put the
+  // field's leading edge at nine o'clock. `rotate` comes off the *revolution*
+  // rather than off the field position, so that it turns the picture by the
+  // amount it says whatever `turns` is set to - and it is subtracted rather than
+  // added because the field moving one way round is the picture moving the
+  // other, and a positive `rotate` should turn the picture clockwise.
+  const revolution = Math.atan2(dy, dx) / TAU + 0.5 - polar.rotate;
+  const along = revolution * polar.turns;
+
+  // Doubled under a fold, because one revolution then covers the field out and
+  // back - `turns` copies each with a mirrored twin, and no join at either end.
+  const angle = polar.seam === 'wrap' ? along - Math.floor(along) : fold(along * 2);
+
+  return polar.angleAxis === 'x' ? [angle, radius] : [radius, angle];
+}
+
+/** As far along an axis as the polar map is allowed to land. See `buildPolarMap`. */
+const JUST_INSIDE = 1 - 1e-7;
 
 /** One axis of the output-to-field lookup. */
 interface AxisMap {
@@ -376,6 +563,14 @@ export function createSurface(
   let mapX: AxisMap = { i0: new Int32Array(0), i1: new Int32Array(0), t: new Float32Array(0) };
   let mapY: AxisMap = mapX;
 
+  // The polar lookup, when there is one: field coordinates per output pixel,
+  // already scaled to the field's axes so the frame path has no multiply in it.
+  // Two floats a pixel rather than the four indices and two weights the blend
+  // actually wants - a floor is cheaper than three more megabytes.
+  const polar = resolvePolar(options.polar);
+  let polarX: Float32Array | null = null;
+  let polarY: Float32Array | null = null;
+
   // Resolved on resize rather than per frame, because it depends on the size
   // the surface settled at. See `dither` in `SurfaceOptions`.
   let dithering = options.dither !== false;
@@ -423,6 +618,55 @@ export function createSurface(
     return gammaTable;
   }
 
+  /**
+   * Evaluates the polar transform once per output pixel.
+   *
+   * The angle axis spans a whole cell more under `'wrap'` than under
+   * `'mirror'`, because its last cell blends back into its first rather than
+   * stopping at it - which is the difference between a seam a cell wide and a
+   * seam that is merely where the field's two edges meet.
+   *
+   * Every axis is scaled to stop a hair inside its own end. That is what lets
+   * the frame path treat a step past the last cell as a wrap and nothing else:
+   * a fraction a ten-millionth short of 1 is indistinguishable on screen, and
+   * without it one that rounded up to exactly 1 on its way into a `Float32Array`
+   * would index a cell off the end of the field.
+   */
+  function buildPolarMap(): void {
+    if (!polar) {
+      polarX = null;
+      polarY = null;
+      return;
+    }
+
+    const aspect = height > 0 ? width / height : 1;
+    const reach = polarReach(aspect, polar);
+    const angleIsX = polar.angleAxis === 'x';
+    const wraps = polar.seam === 'wrap';
+
+    const angleCells = angleIsX ? fieldW : fieldH;
+    const angleSpan = wraps ? angleCells : angleCells - 1;
+    const radiusSpan = (angleIsX ? fieldH : fieldW) - 1;
+
+    const spanX = angleIsX ? angleSpan : radiusSpan;
+    const spanY = angleIsX ? radiusSpan : angleSpan;
+
+    polarX = new Float32Array(width * height);
+    polarY = new Float32Array(width * height);
+
+    for (let y = 0; y < height; y++) {
+      // Cell centres rather than corners, so the picture is not half a pixel
+      // off the centre it was asked to turn about.
+      const v = (y + 0.5) / height;
+      for (let x = 0; x < width; x++) {
+        const [fx, fy] = polarSample((x + 0.5) / width, v, aspect, polar, reach);
+        const p = y * width + x;
+        polarX[p] = Math.min(fx, JUST_INSIDE) * spanX;
+        polarY[p] = Math.min(fy, JUST_INSIDE) * spanY;
+      }
+    }
+  }
+
   function resize(): boolean {
     // The element's own box rather than the viewport, so a canvas that is not
     // full-screen still renders at its true size.
@@ -449,6 +693,7 @@ export function createSurface(
 
     mapX = mapAxis(width, fieldW);
     mapY = mapAxis(height, fieldH);
+    buildPolarMap();
     return true;
   }
 
@@ -469,20 +714,56 @@ export function createSurface(
     const x1s = mapX.i1;
     const txs = mapX.t;
 
+    // The polar lookup, hoisted so the inner loop's test is against a local.
+    const px = polarX;
+    const py = polarY;
+    const maxX = fieldW - 1;
+    const maxY = fieldH - 1;
+
     for (let y = 0; y < height; y++) {
+      // The row-invariant half of the plain lookup. The polar path has no
+      // row-invariant half - which field row it reads changes along the row as
+      // well as down it - so it reads its own table per pixel instead.
       const rowA = mapY.i0[y] * fieldW;
       const rowB = mapY.i1[y] * fieldW;
       const ty = mapY.t[y];
-      const rowOffset = y * width * 4;
+      const rowStart = y * width;
+      const rowOffset = rowStart * 4;
 
       for (let x = 0; x < width; x++) {
-        const x0 = x0s[x];
-        const x1 = x1s[x];
-        const tx = txs[x];
+        let value: number;
 
-        const top = field[rowA + x0] + (field[rowA + x1] - field[rowA + x0]) * tx;
-        const bottom = field[rowB + x0] + (field[rowB + x1] - field[rowB + x0]) * tx;
-        let value = top + (bottom - top) * ty;
+        if (px && py) {
+          const gx = px[rowStart + x];
+          const gy = py[rowStart + x];
+
+          // Stepping past the last cell can only be a wrapped angle axis coming
+          // back round to its first: every axis is scaled to stop a hair inside
+          // its own end, so nothing else ever reaches here. See `buildPolarMap`.
+          const ax = gx | 0;
+          let bx = ax + 1;
+          if (bx > maxX) bx = 0;
+
+          const ay = gy | 0;
+          let by = ay + 1;
+          if (by > maxY) by = 0;
+
+          const above = ay * fieldW;
+          const below = by * fieldW;
+          const fx = gx - ax;
+          const top = field[above + ax] + (field[above + bx] - field[above + ax]) * fx;
+          const bottom = field[below + ax] + (field[below + bx] - field[below + ax]) * fx;
+          value = top + (bottom - top) * (gy - ay);
+        } else {
+          const x0 = x0s[x];
+          const x1 = x1s[x];
+          const tx = txs[x];
+
+          const top = field[rowA + x0] + (field[rowA + x1] - field[rowA + x0]) * tx;
+          const bottom = field[rowB + x0] + (field[rowB + x1] - field[rowB + x0]) * tx;
+          value = top + (bottom - top) * ty;
+        }
+
         value = value < 0 ? 0 : value > 1 ? 1 : value;
         if (gammaLut) value = gammaLut[(value * (GAMMA_STEPS - 1) + 0.5) | 0];
 

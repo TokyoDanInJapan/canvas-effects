@@ -214,6 +214,7 @@ Every effect takes the same shape of options object. These are shared:
 | `levels`               | `5`           | Palette size, up to 256. Small on purpose - the dither makes it look smooth.                             |
 | `dither`               | `'auto'`      | Off posterises flat: same palette, visible bands. `'auto'` is on above one CSS pixel a cell, off at one. |
 | `gamma`                | varies        | Weights the field dark (above 1) or light (below).                                                       |
+| `polar`                | off           | Read the field round a centre rather than across the canvas. `true` for the defaults, or see below.      |
 | `fps`                  | `24`          | Redraw rate.                                                                                             |
 | `shading`              | auto          | The greys. See above.                                                                                    |
 | `interactive`          | `true`        | Respond to the pointer.                                                                                  |
@@ -227,6 +228,42 @@ Every effect takes the same shape of options object. These are shared:
 `base + amplitude`. At the default amplitude of 26 there are 27 distinct greys to be had, so asking for 64 and asking
 for 256 both give you 27. Raise `amplitude` to suit, or use a `ramp`, which spans three channels and has far more room
 in it. The dither shrinks itself out of the way as the palette fills: at 256 levels its nudge is half a byte.
+
+### Polar
+
+`polar` bends the lookup rather than the field. Each effect goes on drawing its rectangle exactly as before, and one
+axis of that rectangle is then read as the angle about a centre and the other as the distance from it. The rain falls
+outwards from the middle of the page, the ridges stack into rings, the tunnel comes back round on itself. It works with
+all seven because none of them is involved.
+
+```js
+createRainBackground(canvas, { polar: true });
+
+createRidgesBackground(canvas, {
+  polar: { turns: 3, centre: [0.5, 0], radius: 1.2 },
+});
+```
+
+| Field       | Default      | Does                                                                                                  |
+| ----------- | ------------ | ----------------------------------------------------------------------------------------------------- |
+| `centre`    | `[0.5, 0.5]` | The point it turns about, in fractions of the canvas. Outside `0..1` gives a fan, not a wheel.        |
+| `turns`     | `1`          | Copies of the field in one revolution. Keep it whole.                                                 |
+| `rotate`    | `0`          | Turns the picture clockwise, in turns.                                                                |
+| `radius`    | `1`          | How far out the field reaches. `1` is exactly to the corners.                                         |
+| `seam`      | `'mirror'`   | `'mirror'` folds the join away; `'wrap'` keeps the field the right way round and shows it.            |
+| `angleAxis` | `'x'`        | Which axis carries the angle. `'x'` sends the field's rows out as rings, `'y'` its columns as spokes. |
+
+**The seam is the choice worth making deliberately.** A field is a rectangle, and its left and right edges have no
+reason to meet: wrap one round a circle and there is a join along a radius. The default reflects at each edge instead,
+which has no join anywhere and gives a picture symmetric about the fold. Use `'wrap'` where the field is already
+seamless across - the plasma samples a seamless tile - or where you want the join.
+
+Two costs. The centre is where the transform is weakest: one pixel there covers every angle at once, so the innermost
+cells read as a sparkle however fine the field is. Moving `centre` off the canvas avoids it entirely. And the lookup is
+no longer separable, so it is a table of two floats per rendered pixel, rebuilt on resize - about 1.3 MB at the default
+`maxPixels`. The frame itself costs what it did before.
+
+A press or drag is bent through the same transform, so an effect is still disturbed where it looks like it should be.
 
 ### Running at native resolution
 
