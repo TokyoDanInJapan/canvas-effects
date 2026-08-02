@@ -3,14 +3,14 @@
 Seven animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**. They modulate the
 page colour rather than becoming a picture, and stay quiet enough that a reader should not consciously notice them.
 
-No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All seven together are 17.1 kB
+No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All seven together are 17.9 kB
 minified and gzipped.
 
 The `canvas-effects` name on the npm registry belongs to an unrelated package, so this one installs from GitHub. npm
 aliases a Git URL under the package's own name, so imports stay `from 'canvas-effects'`:
 
 ```bash
-npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.4.0
+npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.5.0
 ```
 
 ## The effects

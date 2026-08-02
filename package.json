@@ -1,6 +1,6 @@
 {
   "name": "canvas-effects",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Seven animated, ordered-dithered greyscale backgrounds for a 2D canvas: a Stable Fluids smoke solver, a domain-warped plasma, digital rain, a ridgeline landscape, metaballs, a reciprocal tunnel, and a Mandelbrot zoomer.",
   "keywords": [
     "canvas",
