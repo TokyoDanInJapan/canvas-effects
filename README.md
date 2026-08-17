@@ -1,9 +1,9 @@
 # canvas-effects
 
-Seven animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**. They modulate the
+Eight animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**. They modulate the
 page colour rather than becoming a picture, and stay quiet enough that a reader should not consciously notice them.
 
-No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All seven together are 17.9 kB
+No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All eight together are 21.0 kB
 minified and gzipped.
 
 The `canvas-effects` name on the npm registry belongs to an unrelated package, so this one installs from GitHub. npm
@@ -15,7 +15,7 @@ npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.5.0
 
 ## The effects
 
-Each takes a canvas and returns a handle. All seven respond to the pointer.
+Each takes a canvas and returns a handle. All eight respond to the pointer.
 
 ![Smoke](docs/screens/smoke.png)
 
@@ -65,6 +65,15 @@ is the distance to the set, and a finite difference over a field already compute
 It steers itself, because a target picked in advance is empty space twenty doublings later. Nor does it simply fall. It pauses to trace
 sideways along the boundary at one magnification, and now and then gives up a couple of doublings for a wider look. It descends about 38 doublings, which is where a double runs out rather than where the iterations do.
 _Press and drag to aim it._
+
+![Beer](docs/screens/beer.png)
+
+**Beer** - `createBeerBackground`. A glass filled to a set level, fizzing. Bubbles nucleate on the bottom, rise, swell
+as the pressure above them drops, and burst at the surface. They are metaballs, so two that pass close fuse into one.
+The head is not drawn: a bursting bubble hands its own area to the foam, the foam drains and levels sideways, and the
+thickness you see is where those two rates balance. The surface is a simulated wave field - bursts splash it, and the
+slosh after a stir is only the waves reflecting between the walls. _Drag to stir it - the fizz follows the pointer, the
+drag scrapes loose more of it, and a sweep along the surface ploughs a bow wave through it._
 
 ## Quick start
 
@@ -183,15 +192,16 @@ screen, and the ramp decides which. `buildPalette(shading, levels)` is exported 
 
 ## Interaction
 
-| Effect     | Press or drag                                                           |
-| ---------- | ----------------------------------------------------------------------- |
-| Smoke      | Stirs the fluid along the drag. Idle movement is ignored.               |
-| Plasma     | Sends ripples out. A drag leaves a wake.                                |
-| Rain       | Sends lens-like distortions through it.                                 |
-| Ridges     | Sets wobbles running through the stack.                                 |
-| Metaballs  | Picks the nearest blob up, carries it, and throws it when you let go.   |
-| Tunnel     | Steers the vanishing point towards the pointer, easing back on release. |
-| Mandelbrot | Aims the zoom at the nearest filigree to the pointer, on the way in.    |
+| Effect     | Press or drag                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------ |
+| Smoke      | Stirs the fluid along the drag. Idle movement is ignored.                                                    |
+| Plasma     | Sends ripples out. A drag leaves a wake.                                                                     |
+| Rain       | Sends lens-like distortions through it.                                                                      |
+| Ridges     | Sets wobbles running through the stack.                                                                      |
+| Metaballs  | Picks the nearest blob up, carries it, and throws it when you let go.                                        |
+| Tunnel     | Steers the vanishing point towards the pointer, easing back on release.                                      |
+| Mandelbrot | Aims the zoom at the nearest filigree to the pointer, on the way in.                                         |
+| Beer       | Stirs it: the fizz follows the drag, more of it comes loose, and a bow wave sloshes off through the surface. |
 
 `interactive: false` turns any of them off. Emissions are spaced by _distance_ along the drag rather than throttled by
 time, so a slow careful drag lays down as densely as a fast one. Each effect also caps how many disturbances run at
@@ -234,7 +244,7 @@ in it. The dither shrinks itself out of the way as the palette fills: at 256 lev
 `polar` bends the lookup rather than the field. Each effect goes on drawing its rectangle exactly as before, and one
 axis of that rectangle is then read as the angle about a centre and the other as the distance from it. The rain falls
 outwards from the middle of the page, the ridges stack into rings, the tunnel comes back round on itself. It works with
-all seven because none of them is involved.
+all eight because none of them is involved.
 
 ```js
 createRainBackground(canvas, { polar: true });
@@ -314,11 +324,15 @@ createSmokeBackground(canvas, { gamma: config.gamma }); // fine when config.gamm
 
 ## Performance
 
-All seven draw at `fps` - 24 by default - rather than the refresh rate, and stop entirely when the tab is hidden.
+All eight draw at `fps` - 24 by default - rather than the refresh rate, and stop entirely when the tab is hidden.
 
 What makes them cheap is that they render at **two resolutions**. The expensive field is computed coarsely and
 interpolated up, then ordered-dithered per output pixel. That last part is a few multiply-adds and a table lookup. `maxPixels`
 raises `pixelSize` on large windows, so 2560×1440 renders 147,000 pixels rather than 409,000.
+
+The beer renders in three lanes - air is one clear, deep liquid is one fill per row, and only the strip around the
+surface pays per cell - so its cost tracks the surface band rather than the window. Its bubbles find their merges along
+a sorted sweep rather than by checking every pair, so raising `maxBubbles` costs close to linearly.
 
 For the smoke, `maxSimCells` is the number to reach for first, not `maxPixels`. The solver touches every cell a dozen
 or more times a frame, where the shading touches each output pixel once. The Mandelbrot's `maxFieldCells` is the same
@@ -328,7 +342,7 @@ where the tunnel's is 160,000.
 ## Accessibility
 
 - The canvas is decoration. Mark it `aria-hidden="true"`.
-- With `prefers-reduced-motion: reduce` all seven draw a single frame and stop, and pointer interaction is disabled. The
+- With `prefers-reduced-motion: reduce` all eight draw a single frame and stop, and pointer interaction is disabled. The
   stateful ones settle themselves first, so the still frame is smoke or mid-storm rain rather than an empty field. The
   Mandelbrot's is the whole set, which needs no settling to be worth looking at.
 - With JavaScript off nothing is painted and the page keeps its ordinary background - the other reason `base` has to match
@@ -348,7 +362,7 @@ Everything is exported, and the maths is DOM-free so it can be used and tested o
 warp, the falling lanes, the terrain, the implicit surface, the tunnel projection and the set with the camera that flies
 it are all usable on their own.
 
-Writing an eighth is `mountBackground`, which is what the seven above are. Hand it a `rebuild`, a `field` and a `step`.
+Writing a ninth is `mountBackground`, which is what the eight above are. Hand it a `rebuild`, a `field` and a `step`.
 It does the canvas, the sizing, the dithered shading, the frame loop, the theme watching and the teardown.
 `createSurface` is the layer under that, if you would rather drive the loop yourself.
 
@@ -370,7 +384,7 @@ in range. The canvas and loop code is exercised by the demo page.
 
 MIT - see [LICENSE](LICENSE).
 
-All seven implement published techniques. Those are Jos Stam's _Stable Fluids_, domain-warped fbm, Wyvill's falloff for
+All eight implement published techniques. Those are Jos Stam's _Stable Fluids_, domain-warped fbm, Wyvill's falloff for
 the metaballs, the demoscene reciprocal tunnel, the Douady-Hubbard potential with the distance estimate that follows
 from it, and ordered dithering on a Bayer matrix throughout. Where a well-known constant is used, it is credited at the
 point of use: MurmurHash3's public-domain finalisers in `hash2`, and the classic 4×4 Bayer matrix.

@@ -3,6 +3,8 @@
 // of this.
 
 import {
+  BEER_BACKGROUND_DEFAULTS,
+  BEER_DEFAULTS,
   MANDELBROT_BACKGROUND_DEFAULTS,
   MANDELBROT_DEFAULTS,
   PLASMA_BACKGROUND_DEFAULTS,
@@ -15,6 +17,7 @@ import {
   SMOKE_BACKGROUND_DEFAULTS,
   TUNNEL_BACKGROUND_DEFAULTS,
   TUNNEL_DEFAULTS,
+  createBeerBackground,
   createPlasmaBackground,
   createMandelbrotBackground,
   createMetaballsBackground,
@@ -74,7 +77,7 @@ const polarButton = document.getElementById('polar') as HTMLButtonElement;
 const textButton = document.getElementById('text') as HTMLButtonElement;
 const prose = document.querySelector('main') as HTMLElement;
 
-type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'metaballs' | 'tunnel' | 'mandelbrot';
+type Effect = 'smoke' | 'plasma' | 'rain' | 'ridges' | 'metaballs' | 'tunnel' | 'mandelbrot' | 'beer';
 
 type Stops = ReadonlyArray<readonly [number, number, number]>;
 
@@ -697,6 +700,137 @@ const MANDELBROT_DIALS: Dial[] = [
   { key: 'dwell', label: 'dwell', min: 0, max: 5, step: 0.1, value: MANDELBROT_DEFAULTS.dwell },
 ];
 
+const BEER_DIALS: Dial[] = [
+  { key: 'amplitude', label: 'amplitude', min: 0, max: 255, step: 1, value: 32, note: 'the readability dial' },
+  {
+    key: 'levels',
+    label: 'levels',
+    min: 2,
+    max: 256,
+    step: 1,
+    value: BEER_BACKGROUND_DEFAULTS.levels,
+    note: 'colours in the palette - beyond amplitude+1 they repeat',
+  },
+  { key: 'pixelSize', label: 'pixelSize', min: 1, max: 16, step: 1, value: BEER_BACKGROUND_DEFAULTS.pixelSize },
+  { key: 'fieldScale', label: 'fieldScale', min: 1, max: 4, step: 1, value: BEER_BACKGROUND_DEFAULTS.fieldScale },
+  { key: 'fps', label: 'fps', min: 6, max: 60, step: 1, value: BEER_BACKGROUND_DEFAULTS.fps },
+  { key: 'gamma', label: 'gamma', min: 0.5, max: 3, step: 0.05, value: BEER_BACKGROUND_DEFAULTS.gamma },
+  {
+    key: 'fill',
+    label: 'fill',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    value: BEER_DEFAULTS.fill,
+    note: 'how high it is poured - the head sits above this',
+  },
+  { key: 'liquidLevel', label: 'liquid', min: 0, max: 1, step: 0.02, value: BEER_DEFAULTS.liquid },
+  { key: 'depthFade', label: 'depthFade', min: 0, max: 1, step: 0.05, value: BEER_DEFAULTS.depthFade },
+  {
+    key: 'rate',
+    label: 'rate',
+    min: 0,
+    max: 80,
+    step: 1,
+    value: BEER_DEFAULTS.rate,
+    note: 'bubbles a second - the head thins with it',
+  },
+  { key: 'bubbleRadius', label: 'radius', min: 0.004, max: 0.06, step: 0.002, value: BEER_DEFAULTS.radius },
+  {
+    key: 'radiusVariance',
+    label: 'radiusVariance',
+    min: 0,
+    max: 0.9,
+    step: 0.05,
+    value: BEER_DEFAULTS.radiusVariance,
+  },
+  { key: 'rise', label: 'rise', min: 0.05, max: 1.2, step: 0.02, value: BEER_DEFAULTS.rise },
+  {
+    key: 'growth',
+    label: 'growth',
+    min: 0,
+    max: 0.6,
+    step: 0.02,
+    value: BEER_DEFAULTS.growth,
+    note: 'swelling as it climbs',
+  },
+  { key: 'sway', label: 'sway', min: 0, max: 0.05, step: 0.002, value: BEER_DEFAULTS.sway, note: 'the zigzag' },
+  { key: 'swaySpeed', label: 'swaySpeed', min: 0, max: 8, step: 0.2, value: BEER_DEFAULTS.swaySpeed },
+  { key: 'merge', label: 'merge', min: 0, max: 1, step: 0.05, value: BEER_DEFAULTS.merge, note: '0 never fuses them' },
+  { key: 'iso', label: 'iso', min: 0.1, max: 1.5, step: 0.05, value: BEER_DEFAULTS.iso, note: 'the bubble surface' },
+  {
+    key: 'shoulder',
+    label: 'shoulder',
+    min: 0,
+    max: 1,
+    step: 0.02,
+    value: BEER_DEFAULTS.shoulder,
+    note: '0 = hard edge',
+  },
+  { key: 'bubbleLevel', label: 'bubble', min: 0, max: 1, step: 0.02, value: BEER_DEFAULTS.bubble },
+  {
+    key: 'headMax',
+    label: 'headMax',
+    min: 0,
+    max: 0.3,
+    step: 0.005,
+    value: BEER_DEFAULTS.headMax,
+    note: 'ceiling on the foam, not its depth',
+  },
+  { key: 'headGain', label: 'headGain', min: 0, max: 4, step: 0.1, value: BEER_DEFAULTS.headGain },
+  { key: 'drain', label: 'drain', min: 0.02, max: 2, step: 0.02, value: BEER_DEFAULTS.drain },
+  {
+    key: 'spread',
+    label: 'spread',
+    min: 0,
+    max: 0.4,
+    step: 0.01,
+    value: BEER_DEFAULTS.spread,
+    note: 'sideways levelling',
+  },
+  { key: 'foamTexture', label: 'foamTexture', min: 0, max: 1.5, step: 0.05, value: BEER_DEFAULTS.foamTexture },
+  { key: 'foamScale', label: 'foamScale', min: 6, max: 80, step: 2, value: BEER_DEFAULTS.foamScale },
+  {
+    key: 'waveSpeed',
+    label: 'waveSpeed',
+    min: 0.5,
+    max: 6,
+    step: 0.1,
+    value: BEER_DEFAULTS.waveSpeed,
+    note: 'sets the slosh period too',
+  },
+  { key: 'waveDamping', label: 'waveDamping', min: 0.1, max: 5, step: 0.1, value: BEER_DEFAULTS.waveDamping },
+  {
+    key: 'splash',
+    label: 'splash',
+    min: 0,
+    max: 0.5,
+    step: 0.01,
+    value: BEER_DEFAULTS.splash,
+    note: 'surface kick per burst - the idle shimmer',
+  },
+  {
+    key: 'slosh',
+    label: 'slosh',
+    min: 0,
+    max: 30,
+    step: 0.5,
+    value: BEER_DEFAULTS.slosh,
+    note: 'drag along the surface to plough a wave',
+  },
+  { key: 'stirReach', label: 'stirReach', min: 0.02, max: 0.6, step: 0.02, value: BEER_DEFAULTS.stirReach },
+  { key: 'stirStrength', label: 'stirStrength', min: 0, max: 20, step: 0.5, value: BEER_DEFAULTS.stirStrength },
+  {
+    key: 'scrape',
+    label: 'scrape',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    value: BEER_BACKGROUND_DEFAULTS.scrape,
+    note: 'bubbles a drag knocks loose',
+  },
+];
+
 const DIALS: Record<Effect, Dial[]> = {
   smoke: SMOKE_DIALS,
   plasma: PLASMA_DIALS,
@@ -705,6 +839,7 @@ const DIALS: Record<Effect, Dial[]> = {
   metaballs: METABALL_DIALS,
   tunnel: TUNNEL_DIALS,
   mandelbrot: MANDELBROT_DIALS,
+  beer: BEER_DIALS,
 };
 
 let effect: Effect = 'smoke';
@@ -785,6 +920,44 @@ function mount() {
         aimBias: values.aimBias,
         steerEase: values.steerEase,
         dwell: values.dwell,
+      },
+    });
+    if (!handle) fpsOut.textContent = 'no 2D context';
+    return;
+  }
+
+  if (effect === 'beer') {
+    handle = createBeerBackground(canvas, {
+      ...common,
+      fieldScale: Math.round(values.fieldScale),
+      scrape: values.scrape,
+      beer: {
+        fill: values.fill,
+        liquid: values.liquidLevel,
+        depthFade: values.depthFade,
+        rate: values.rate,
+        radius: values.bubbleRadius,
+        radiusVariance: values.radiusVariance,
+        rise: values.rise,
+        growth: values.growth,
+        sway: values.sway,
+        swaySpeed: values.swaySpeed,
+        merge: values.merge,
+        iso: values.iso,
+        shoulder: values.shoulder,
+        bubble: values.bubbleLevel,
+        headMax: values.headMax,
+        headGain: values.headGain,
+        drain: values.drain,
+        spread: values.spread,
+        foamTexture: values.foamTexture,
+        foamScale: values.foamScale,
+        waveSpeed: values.waveSpeed,
+        waveDamping: values.waveDamping,
+        splash: values.splash,
+        slosh: values.slosh,
+        stirReach: values.stirReach,
+        stirStrength: values.stirStrength,
       },
     });
     if (!handle) fpsOut.textContent = 'no 2D context';

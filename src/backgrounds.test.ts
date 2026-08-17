@@ -1,17 +1,18 @@
 // Every effect, mounted for real.
 //
-// The seven mount files are thin now - each is its options, its defaults and a spec
+// The eight mount files are thin now - each is its options, its defaults and a spec
 // handed to `background.ts` - but thin is not the same as right, and a spec that
 // returns the wrong field or never renders would still typecheck. So this mounts
 // each of them against a stubbed canvas and checks the bytes that come out.
 //
-// What it is really for: these seven are the entry points the README documents, and
+// What it is really for: these eight are the entry points the README documents, and
 // until now nothing exercised them at all. A wiring mistake in any of them - a
 // field that is never filled, a `rebuild` that forgets to render, an interaction
 // wired to the wrong axis - reaches the page and nothing else here would notice.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeRandom } from './noise.js';
+import { createBeerBackground } from './beer-background.js';
 import { createMandelbrotBackground } from './mandelbrot-background.js';
 import { createMetaballsBackground } from './metaballs-background.js';
 import { createPlasmaBackground } from './plasma-background.js';
@@ -162,9 +163,9 @@ const distinct = (greys: number[]) => new Set(greys).size;
 /**
  * Every effect, with settings that keep the test quick and repeatable.
  *
- * `over` is for the options that are shared by all seven and worth exercising on
- * all seven - `polar` is the one so far - so that a test of one can be a test of
- * the lot without seven more entries here.
+ * `over` is for the options that are shared by all eight and worth exercising on
+ * all eight - `polar` is the one so far - so that a test of one can be a test of
+ * the lot without eight more entries here.
  */
 const EFFECTS = [
   {
@@ -215,6 +216,13 @@ const EFFECTS = [
         ...over,
       }),
   },
+  {
+    name: 'beer',
+    mount: (canvas: HTMLCanvasElement, random: () => number, over: Shared = {}) =>
+      // A short settle, for the same reason the rain gets one: the wiring is
+      // what is under test, and the default run is six seconds of stepping.
+      createBeerBackground(canvas, { random, shading: { base: 18, amplitude: 60 }, settleSteps: 12, ...over }),
+  },
 ];
 
 afterEach(() => vi.unstubAllGlobals());
@@ -244,7 +252,7 @@ describe.each(EFFECTS)('$name', ({ mount }) => {
   });
 
   it('takes a polar lookup, like every other effect', () => {
-    // The one option here that has to work on all seven, and the reason it lives
+    // The one option here that has to work on all eight, and the reason it lives
     // in the shading rather than in any effect: nothing in a mount file knows
     // about it, so this is what would notice a mount that stopped passing it on.
     const plain = page();
@@ -714,6 +722,7 @@ describe('effect specifics', () => {
     { name: 'rain', mount: createRainBackground, extra: { settleSteps: 8 } },
     { name: 'ridges', mount: createRidgesBackground, extra: {} },
     { name: 'plasma', mount: createPlasmaBackground, extra: {} },
+    { name: 'beer', mount: createBeerBackground, extra: { settleSteps: 12 } },
   ])('$name', ({ mount, extra }) => {
     it('is visibly disturbed by a drag', () => {
       // Same seed, same frames, one of them dragged across.

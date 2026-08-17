@@ -1,7 +1,7 @@
 {
   "name": "canvas-effects",
   "version": "2.5.0",
-  "description": "Seven animated, ordered-dithered greyscale backgrounds for a 2D canvas: a Stable Fluids smoke solver, a domain-warped plasma, digital rain, a ridgeline landscape, metaballs, a reciprocal tunnel, and a Mandelbrot zoomer.",
+  "description": "Eight animated, ordered-dithered greyscale backgrounds for a 2D canvas: a Stable Fluids smoke solver, a domain-warped plasma, digital rain, a ridgeline landscape, metaballs, a reciprocal tunnel, a Mandelbrot zoomer, and a glass of fizzing beer.",
   "keywords": [
     "canvas",
     "background",
@@ -27,7 +27,11 @@
     "tunnel",
     "mandelbrot",
     "fractal",
-    "distance-estimator"
+    "distance-estimator",
+    "beer",
+    "bubbles",
+    "foam",
+    "fizz"
   ],
   "license": "MIT",
   "author": "Daniel Hebberd",

@@ -192,4 +192,28 @@ export const COPY: Record<string, Copy> = {
       SHARED,
     ],
   },
+
+  beer: {
+    heading: 'Beer',
+    paragraphs: [
+      'A glass filled to a set level, fizzing. Bubbles nucleate on the bottom, rise, swell as the pressure above ' +
+        'them drops, and burst at the surface. They are metaballs - the same falloff the blobs use, summed into the ' +
+        'same kind of field - so two that pass close bulge towards each other and fuse into one, and nothing in the ' +
+        'code knows what a merge looks like.',
+      '<strong>The head is not drawn.</strong> A bursting bubble hands its own area to the foam above it, the foam ' +
+        'drains away exponentially and levels sideways, and what you see is where those two rates balance. Turn ' +
+        '<code>rate</code> down and the head thins on its own; turn <code>drain</code> down and it climbs until it ' +
+        'hits its ceiling. Nothing anywhere sets a thickness.',
+      '<strong>Drag to stir it.</strong> Three things come out of the one gesture. The bubbles under the pointer are ' +
+        'carried at the speed you are moving - eased towards it rather than shoved, so they never outrun the cursor ' +
+        'however long you hold it there. The drag scrapes fresh bubbles off the glass as it passes, which is how a ' +
+        'bubble gets started in the first place. And near the surface it ploughs a bow wave - risen ahead of the ' +
+        'motion, dipped behind it - whose wake sloshes between the walls.',
+      'The surface is a simulated wave field: one height and one velocity per column, stepped every frame. Nothing ' +
+        'animates the slosh - it is the fundamental mode of that field, and its period follows from the wave speed ' +
+        'and the width of the glass, exactly as it does for a real one. Bursting bubbles splash the same field, ' +
+        'which is where the idle shimmer comes from; turn the fizz off and the glass goes glassy still.',
+      SHARED,
+    ],
+  },
 };

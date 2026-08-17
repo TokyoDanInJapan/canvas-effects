@@ -13,7 +13,7 @@ what it does and where its default came from.
 
 ## The shared half: two resolutions and a dither
 
-All seven render at two scales at once, and this is what makes them cheap enough to leave running:
+All eight render at two scales at once, and this is what makes them cheap enough to leave running:
 
 - The **field** - the expensive part, whatever generates it - is computed at `pixelSize × fieldScale` CSS pixels per
   cell. The smoke and plasma fields are soft and low-frequency and gain nothing from more samples, so they run at half
@@ -844,6 +844,115 @@ Two things that did **not** work, both worth knowing before trying them again:
 
 The two ceilings pull against each other and the trade is real: half the cells buys twice the iterations, which is a
 thinner, truer boundary in a coarser picture. 10,000 cells is where both are still just about right.
+
+---
+
+## Beer: two rates, not a thickness
+
+`src/beer.ts`. A glass poured to `fill`, with bubbles rising through it and a head of foam on top. Air above, foam,
+the liquid line, beer below - and the order they stack in is the whole picture.
+
+**The bubbles are metaballs, in the strict sense.** `falloff` is imported from `metaballs.ts` rather than copied,
+because the claim is only true if it is the same kernel: each bubble adds Wyvill's cubic to a shared field, the field
+is thresholded, and two bubbles that pass close bulge towards each other and fuse. Nothing here draws a merge. The
+physics fuses a pair only when they are within `merge` of the sum of their radii, which is far closer than the field
+needs to have joined them - so the merge is on screen before it happens, and the swap from two bubbles to one is
+invisible. There is a test that pins exactly that: a pair a hair too far apart to fuse, already lit between them.
+
+**The head is not drawn anywhere.** A bubble bursts when its top edge breaks the surface, and hands its own area to
+the foam above it. The foam drains exponentially and levels sideways. What you see is where those two rates balance:
+turn `rate` down and the head thins on its own, turn `drain` down and it climbs until `headMax` stops it. Nothing
+anywhere sets a thickness, which is why the dials behave the way a glass does rather than the way a slider does.
+
+**A pop deposits an area, not a thickness, and that took two attempts.** The obvious version drops the foam into the
+one column under the bubble's centre. That thickness is the area divided by the column's width, so on a fine field it
+is enormous, `headMax` clips almost all of it away, and the head comes out thin - measurably: at 384 columns the
+settled head was less than half what the same parameters gave at 96. Spread over the columns the bubble actually
+covers, and divided by the width of *those* columns rather than by the ideal footprint, it is the same foam at any
+resolution, exactly. A test pops one bubble on a 64-wide field and a 512-wide one and requires the same volume.
+
+**The levelling is a diffusion step, and it must not run at its stability limit.** An explicit diffusion is stable up
+to a coefficient of a half, and at exactly a half it degenerates into "replace each column by the mean of its
+neighbours" - which decouples the odd columns from the even ones. A spike then spreads into alternate columns and
+leaves a comb along the top of the head that never fills in. The step is capped at a quarter and taken several times
+instead, so `spread` stays a rate in height units rather than a number whose meaning changes with the window size.
+
+**The surface is a wave equation, not an animation.** One height and one velocity per column, stepped every frame with
+reflecting walls. The first version had a procedural sine ripple and a single tilted-cosine "rock" - a damped harmonic
+oscillator - bolted together, and the wave field replaced both with less state and the right behaviour, because both
+of those were hand-drawn imitations of things a wave field does on its own. The slosh is its fundamental mode, with a
+period of `2 * aspect / waveSpeed` - so a wider glass sloshes slower, which is true of real glasses and was not true
+of the oscillator. There is a test that pins the emergence rather than the formula: seed the fundamental, wait half a
+period, and the wall that started high must have swung *below* level, or the surface is easing like a lid rather than
+swinging like a liquid.
+
+Three numerical points, all with tests. It substeps to a CFL limit - half a cell of wave travel per substep, since at
+the full-cell stability bound the scheme is maximally dispersive and a sharp splash rings - with damping applied per
+substep as an exponential, so the physics is a function of elapsed time rather than of how the frames landed. The
+velocity updates first and the position uses the new velocity, the semi-implicit ordering, because the explicit form
+feeds energy in and the surface works itself rough instead of settling. And the mean height is subtracted every frame,
+which is an exact volume guarantee rather than a fudge: stirs and splashes promise nothing about summing to zero, but
+every travelling wave and the slosh itself are zero-mean shapes, so levelling the mean removes only conjured beer and
+never motion.
+
+**Bursts splash the surface, and that is the whole of the idle shimmer.** A pop hands the wave field a kick as well as
+handing the head its area, so the dip and rebound spread from where the bubble actually broke. There is no other
+ambient motion anywhere: turn the fizz off and the glass goes glassy still, which is correct - it is the fizz that
+keeps a real pint's surface alive. The retired procedural ripple faked the same few thousandths of a height of
+shimmer, but it ran whether or not anything was causing it.
+
+**Drag to stir it, and three things come out of the one gesture.** Bubbles near the pointer are eased *towards* its
+speed rather than shoved by it, so the fizz can be carried at the speed of the drag and never faster however long the
+pointer is held over it. The drag scrapes fresh bubbles into being, which is how a bubble starts in the first place -
+it needs a rough spot to form on. And near the surface it ploughs a bow wave: risen ahead of the motion, dipped behind
+it, the shape a finger pulled through liquid actually makes. The shape is antisymmetric, so a stir moves beer about
+without adding any, and it attenuates with depth - a drag along the bottom of the glass stirs the fizz there, not the
+line half a screen above it.
+
+**Only the newest sample ploughs.** Every live stir is a sample of the same pointer, so letting each of them push the
+surface would have a fast drag plough twice over: once through its speed, and once through the extra samples that
+speed produced. One sample pushing per frame makes the impulse what it should be - the speed of the drag times how
+long it lasted. A test asserts that ten stirs push exactly as hard as one.
+
+**Bubbles rise with the square of their radius**, which is Stokes drag, where the first version used a linear law
+because it was the obvious guess. The square is visibly better for one reason: merges. An area-conserving merge grows
+the radius by root two, so the merged pair pulls away from the crowd it came from at twice the speed rather than 1.4
+times, and the finest fizz hangs almost still, which is what gives the glass depth. Capped at four times the mean
+speed, because merges compound and an uncapped square would let a lucky chain teleport to the surface.
+
+**Merges are found along a sorted sweep, not by checking every pair.** The bubbles are kept in x order - an insertion
+sort, one pass and no allocation, because between frames they barely move - and each bubble scans rightward only
+until the gap is wider than anything left could bridge. Fused bubbles are marked dead and compacted after the sweep
+rather than swap-removed under it, which would tear the ordering the scan rests on. The old every-pair check was the
+one cost that grew as the square of the count.
+
+**`fieldScale` is 1 here**, like the rain and the ridges. The bubbles are two or three cells across and the foam's
+mottling is one cell, and the shading interpolates bilinearly between cells: at two, the fizz blurs into a haze and
+the head loses the ragged edge that makes it read as foam. `pixelSize` is 5, between the field effects' six and the
+line art's four, for the same reason - at six the smallest bubbles are a single cell and read as dither noise.
+
+**The foam's noise is added before the threshold, not multiplied in after it.** Near the top of the head, density and
+threshold are close enough that the noise decides which side a cell lands on, so the edge breaks into lumps. Deeper
+in, density wins outright and the noise only mottles the brightness across the top two palette levels. One noise
+lookup does both jobs, and it is confined to a band about a tenth of the height tall.
+
+**The renderer only pays full price where the picture is.** Profiled before touching anything: 98% of the frame was
+the render loop, and nearly all of that was spent on cells that were plain liquid or plain air. So it runs in three
+lanes now. Rows above the surface band are one `fill(0)`; rows below it are wet in every column, so each is its depth
+shade - one number - written with a fill, plus the bubbles applied over their own bounding boxes; only the band
+itself, the foam and the liquid line and the ramp between them, walks its cells one by one. The bubble accumulation
+never gets a full-field clear either: the box pass zeroes each cell as it consumes it, so the scratch field is all-zero
+again by the end of the frame and untouched cells were never written at all. Two things make the lanes possible. The
+depth shading is measured from the pour line rather than the wavy instantaneous surface, so a row's shade is one
+number - an error of the wave height times `depthFade`, a fraction of one palette level. And a test forces the same
+bubble through both routes and requires identical cells, because a bubble crossing the band boundary must not change
+brightness. Measured at 1080p: 1.05ms a frame before, 0.4ms after, with the physics - waves, merges, pops, head - at
+about 40µs of that.
+
+**A resize carries the glass over.** The bubbles are in units of the height, so they mean the same thing at any
+resolution. The head and the wave field are per column - a column means a different place at a new width - so both are
+resampled rather than dropped. Losing the head on a resize is a visible flash of flat beer; losing the waves mid-slosh
+is the surface snapping level for no reason a viewer can see.
 
 ## Tuning
 
