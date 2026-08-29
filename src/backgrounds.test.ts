@@ -742,4 +742,30 @@ describe('effect specifics', () => {
       expect(differs(dragged.greys(), quiet.greys())).toBe(true);
     });
   });
+
+  describe('the beer pour', () => {
+    const brightness = (greys: number[]) => greys.reduce((a, b) => a + b, 0) / Math.max(1, greys.length);
+
+    it('opens on an empty glass and fills it', () => {
+      const dom = page();
+      createBeerBackground(dom.canvas, { random: makeRandom(5), shading, pour: true });
+
+      // The first frame is an empty glass: nothing but the base grey.
+      const before = brightness(dom.greys());
+
+      // The pour takes a couple of seconds; give the head a moment after.
+      for (let i = 0; i < 150; i++) dom.frame();
+
+      expect(brightness(dom.greys())).toBeGreaterThan(before + 8);
+    });
+
+    it('hands a reduced-motion visitor a poured glass, not the second before one', () => {
+      // The one still frame they get has to be a pint. An empty glass filling
+      // is exactly the motion they asked not to see.
+      const dom = page({ reducedMotion: true });
+      createBeerBackground(dom.canvas, { random: makeRandom(5), shading, pour: true, settleSteps: 12 });
+
+      expect(brightness(dom.greys())).toBeGreaterThan(26);
+    });
+  });
 });

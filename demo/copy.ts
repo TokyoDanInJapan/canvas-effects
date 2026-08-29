@@ -196,23 +196,27 @@ export const COPY: Record<string, Copy> = {
   beer: {
     heading: 'Beer',
     paragraphs: [
-      'A glass filled to a set level, fizzing. Bubbles nucleate on the bottom, rise, swell as the pressure above ' +
-        'them drops, and burst at the surface. They are metaballs - the same falloff the blobs use, summed into the ' +
-        'same kind of field - so two that pass close bulge towards each other and fuse into one, and nothing in the ' +
-        'code knows what a merge looks like.',
+      'A glass poured to a set level, fizzing. Bubbles stream up from fixed nucleation sites - the scratches a real ' +
+        'glass keeps its fizz on - rise, swell as the pressure above them drops, and burst at the surface. They are ' +
+        'metaballs - the same falloff the blobs use, summed into the same kind of field - so two that pass close ' +
+        'bulge towards each other and fuse into one, and nothing in the code knows what a merge looks like.',
       '<strong>The head is not drawn.</strong> A bursting bubble hands its own area to the foam above it, the foam ' +
         'drains away exponentially and levels sideways, and what you see is where those two rates balance. Turn ' +
         '<code>rate</code> down and the head thins on its own; turn <code>drain</code> down and it climbs until it ' +
-        'hits its ceiling. Nothing anywhere sets a thickness.',
-      '<strong>Drag to stir it.</strong> Three things come out of the one gesture. The bubbles under the pointer are ' +
-        'carried at the speed you are moving - eased towards it rather than shoved, so they never outrun the cursor ' +
-        'however long you hold it there. The drag scrapes fresh bubbles off the glass as it passes, which is how a ' +
-        'bubble gets started in the first place. And near the surface it ploughs a bow wave - risen ahead of the ' +
-        'motion, dipped behind it - whose wake sloshes between the walls.',
-      'The surface is a simulated wave field: one height and one velocity per column, stepped every frame. Nothing ' +
-        'animates the slosh - it is the fundamental mode of that field, and its period follows from the wave speed ' +
-        'and the width of the glass, exactly as it does for a real one. Bursting bubbles splash the same field, ' +
-        'which is where the idle shimmer comes from; turn the fizz off and the glass goes glassy still.',
+        'hits its ceiling. Nothing anywhere sets a thickness - and a breaking crest throws foam too, which is why ' +
+        'stirring the glass hard thickens the head.',
+      '<strong>Drag to stir it, click to jab it.</strong> The bubbles under the pointer are carried at the speed ' +
+        'you are moving - eased towards it rather than shoved, so they never outrun the cursor. The drag scrapes ' +
+        'fresh bubbles off the glass as it passes, which is how a bubble gets started in the first place. And the ' +
+        'sideways sweep drives the body of the beer, so it piles up the leading wall - all the way to the top of ' +
+        'the frame if you mean it - throws spray, and sloshes back. A press is a jab: a splash, a burst of ' +
+        'droplets, and the fizz it knocks loose.',
+      'The surface is shallow water: a height per column, a flow on the faces between them, stepped every frame. ' +
+        'Nothing animates the slosh - it is the fundamental mode of that field, its period follows from gravity and ' +
+        'the depth of the pour exactly as it does for a real glass, and a half-poured glass sloshes slower. ' +
+        'Bursting bubbles push the same flow, which is where the idle shimmer comes from; turn the fizz off and ' +
+        'the glass goes glassy still. Set <code>pour</code> to 1 and remount to watch it fill. The palette picker ' +
+        'colours it exactly as it colours every other effect - try amber terminal.',
       SHARED,
     ],
   },

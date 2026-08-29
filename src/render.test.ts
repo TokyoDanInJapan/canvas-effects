@@ -348,6 +348,7 @@ describe('resolvePolar', () => {
     expect(polar.turns).toBe(3);
     expect(polar.seam).toBe(POLAR_DEFAULTS.seam);
     expect(polar.centre).toEqual(POLAR_DEFAULTS.centre);
+    expect(polar.reverse).toBe(false);
   });
 
   it('leaves the defaults alone', () => {
@@ -420,6 +421,38 @@ describe('polarSample', () => {
 
     it('holds still where the reach is degenerate', () => {
       expect(read(0.9, 0.2, 1, { radius: 0 }).radius).toBe(0);
+    });
+
+    describe('reverse - the picture inside-out', () => {
+      it('reads the outermost cell at the centre and the innermost at the corners', () => {
+        expect(read(0.5, 0.5, 1, { reverse: true }).radius).toBe(1);
+        for (const [u, v] of [
+          [0, 0],
+          [1, 0],
+          [0, 1],
+          [1, 1],
+        ]) {
+          expect(read(u, v, 1, { reverse: true }).radius).toBeCloseTo(0, 6);
+        }
+      });
+
+      it('is the same picture read the other way along the radius, exactly', () => {
+        // One subtraction, not a different transform: forwards and reversed
+        // sum to the whole radius axis at every point.
+        for (const [u, v] of [
+          [0.7, 0.5],
+          [0.3, 0.9],
+          [0.5, 0.05],
+        ]) {
+          const out = read(u, v, 1.5).radius;
+          const back = read(u, v, 1.5, { reverse: true }).radius;
+          expect(out + back).toBeCloseTo(1, 6);
+        }
+      });
+
+      it('leaves the angle alone', () => {
+        expect(read(0.9, 0.7, 1, { reverse: true }).angle).toBeCloseTo(read(0.9, 0.7, 1).angle, 9);
+      });
     });
   });
 

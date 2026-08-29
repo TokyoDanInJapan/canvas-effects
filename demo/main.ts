@@ -178,9 +178,190 @@ const RAMPS: Array<{ id: string; name: string; dark: Stops | null; light: Stops 
       [34, 16, 56],
     ],
   },
+  {
+    id: 'rose',
+    name: 'rose',
+    dark: [
+      [18, 18, 18],
+      [66, 16, 44],
+      [150, 36, 96],
+      [226, 98, 158],
+      [255, 222, 238],
+    ],
+    light: [
+      [255, 255, 255],
+      [248, 214, 230],
+      [220, 116, 166],
+      [152, 42, 98],
+      [64, 12, 40],
+    ],
+  },
+  {
+    id: 'lagoon',
+    name: 'lagoon',
+    dark: [
+      [18, 18, 18],
+      [8, 52, 54],
+      [16, 116, 114],
+      [62, 192, 182],
+      [214, 250, 242],
+    ],
+    light: [
+      [255, 255, 255],
+      [206, 238, 232],
+      [104, 190, 180],
+      [24, 116, 110],
+      [6, 50, 48],
+    ],
+  },
+  {
+    id: 'copper',
+    name: 'copper',
+    dark: [
+      [18, 18, 18],
+      [58, 32, 20],
+      [128, 74, 44],
+      [204, 138, 92],
+      [250, 228, 206],
+    ],
+    light: [
+      [255, 255, 255],
+      [240, 220, 202],
+      [192, 138, 96],
+      [124, 72, 40],
+      [52, 28, 14],
+    ],
+  },
+  {
+    // The quietest of the coloured set - a cool grey with the blue barely
+    // admitted - for pages that want a whisper of tint under real text.
+    id: 'slate',
+    name: 'slate',
+    dark: [
+      [18, 18, 18],
+      [40, 48, 62],
+      [84, 98, 120],
+      [140, 158, 182],
+      [222, 232, 244],
+    ],
+    light: [
+      [255, 255, 255],
+      [226, 232, 240],
+      [158, 172, 190],
+      [92, 106, 126],
+      [36, 44, 58],
+    ],
+  },
+  {
+    // Multi-hue on purpose, where the others hold one: dusk violet through
+    // crimson and orange to gold, the way a sky grades - and a test of how
+    // well an effect's field survives a ramp whose hue moves under it.
+    id: 'sunset',
+    name: 'sunset',
+    dark: [
+      [18, 18, 18],
+      [58, 22, 66],
+      [164, 44, 80],
+      [240, 120, 52],
+      [255, 214, 140],
+    ],
+    light: [
+      [255, 255, 255],
+      [250, 220, 170],
+      [236, 120, 60],
+      [150, 44, 86],
+      [50, 18, 58],
+    ],
+  },
+  // The rest of the travelling-hue family. Same recipe as the sunset: the hue
+  // moves across the ladder while the lightness climbs monotonically, so the
+  // dither always has a clean gradient to break up and the colour does the
+  // storytelling.
+  {
+    // Spruce green through emerald and cyan, closing on the violet a bright
+    // aurora hangs against. The cyan is the bridge: green handed straight to
+    // violet meets in the middle at grey, and a sky is never grey.
+    id: 'aurora',
+    name: 'aurora',
+    dark: [
+      [18, 18, 18],
+      [10, 52, 40],
+      [22, 128, 96],
+      [110, 200, 205],
+      [206, 190, 250],
+    ],
+    light: [
+      [255, 255, 255],
+      [212, 240, 224],
+      [104, 194, 178],
+      [42, 104, 128],
+      [58, 32, 104],
+    ],
+  },
+  {
+    // Deep indigo through magenta to the peach-gold of star glow.
+    id: 'nebula',
+    name: 'nebula',
+    dark: [
+      [18, 18, 18],
+      [34, 24, 88],
+      [110, 40, 150],
+      [214, 80, 150],
+      [255, 216, 180],
+    ],
+    light: [
+      [255, 255, 255],
+      [244, 218, 196],
+      [222, 110, 160],
+      [120, 50, 150],
+      [30, 20, 80],
+    ],
+  },
+  {
+    // Navy through teal and emerald to gold - the eye of the feather.
+    id: 'peacock',
+    name: 'peacock',
+    dark: [
+      [18, 18, 18],
+      [24, 40, 100],
+      [16, 120, 130],
+      [70, 190, 120],
+      [244, 208, 110],
+    ],
+    light: [
+      [255, 255, 255],
+      [246, 228, 168],
+      [110, 188, 130],
+      [22, 116, 126],
+      [20, 32, 86],
+    ],
+  },
+  {
+    // Aubergine through green to yellow - the viridis idea, which earns its
+    // reputation: the hue travel matches the lightness climb so closely that
+    // every band stays legible at any palette size.
+    id: 'meadow',
+    name: 'meadow',
+    dark: [
+      [18, 18, 18],
+      [70, 10, 90],
+      [50, 100, 142],
+      [60, 180, 110],
+      [248, 230, 80],
+    ],
+    light: [
+      [255, 255, 255],
+      [238, 240, 170],
+      [110, 196, 120],
+      [52, 110, 140],
+      [58, 16, 76],
+    ],
+  },
 ];
 
-let rampId = 'grey';
+// A different palette each load. The picker is half the point of the demo,
+// and a visitor who always lands on greyscale never learns that it is there.
+let rampId = RAMPS[Math.floor(Math.random() * RAMPS.length)].id;
 let dithering = true;
 let polar = false;
 
@@ -797,9 +978,18 @@ const BEER_DIALS: Dial[] = [
     max: 6,
     step: 0.1,
     value: BEER_DEFAULTS.waveSpeed,
-    note: 'sets the slosh period too',
+    note: 'at the poured line - sets gravity and the slosh period',
   },
   { key: 'waveDamping', label: 'waveDamping', min: 0.1, max: 5, step: 0.1, value: BEER_DEFAULTS.waveDamping },
+  {
+    key: 'shear',
+    label: 'shear',
+    min: 0,
+    max: 0.01,
+    step: 0.0002,
+    value: BEER_DEFAULTS.shear,
+    note: 'kills ripples, spares the slosh',
+  },
   {
     key: 'splash',
     label: 'splash',
@@ -807,16 +997,52 @@ const BEER_DIALS: Dial[] = [
     max: 0.5,
     step: 0.01,
     value: BEER_DEFAULTS.splash,
-    note: 'surface kick per burst - the idle shimmer',
+    note: 'push per burst - the idle shimmer',
   },
   {
     key: 'slosh',
     label: 'slosh',
     min: 0,
-    max: 30,
+    max: 40,
     step: 0.5,
     value: BEER_DEFAULTS.slosh,
-    note: 'drag along the surface to plough a wave',
+    note: 'drag sideways to set the beer sloshing',
+  },
+  {
+    key: 'beerSites',
+    label: 'sites',
+    min: 0,
+    max: 20,
+    step: 1,
+    value: BEER_DEFAULTS.sites,
+    note: 'nucleation streams per unit width',
+  },
+  { key: 'streaming', label: 'streaming', min: 0, max: 1, step: 0.05, value: BEER_DEFAULTS.streaming },
+  {
+    key: 'spray',
+    label: 'spray',
+    min: 0,
+    max: 2,
+    step: 0.1,
+    value: BEER_DEFAULTS.spray,
+    note: 'droplets off breaks, bursts and presses',
+  },
+  {
+    key: 'pour',
+    label: 'pour',
+    min: 0,
+    max: 1,
+    step: 1,
+    value: 0,
+    note: '1 opens on an empty glass - remount to see it',
+  },
+  {
+    key: 'pourRate',
+    label: 'pourRate',
+    min: 0.05,
+    max: 1,
+    step: 0.05,
+    value: BEER_DEFAULTS.pourRate,
   },
   { key: 'stirReach', label: 'stirReach', min: 0.02, max: 0.6, step: 0.02, value: BEER_DEFAULTS.stirReach },
   { key: 'stirStrength', label: 'stirStrength', min: 0, max: 20, step: 0.5, value: BEER_DEFAULTS.stirStrength },
@@ -884,6 +1110,7 @@ function mount() {
           rotate: values.polarRotate,
           radius: values.polarRadius,
           seam: values.polarSeam >= 0.5 ? ('wrap' as const) : ('mirror' as const),
+          reverse: values.polarReverse >= 0.5,
         }
       : null,
     random,
@@ -954,11 +1181,17 @@ function mount() {
         foamScale: values.foamScale,
         waveSpeed: values.waveSpeed,
         waveDamping: values.waveDamping,
+        shear: values.shear,
         splash: values.splash,
         slosh: values.slosh,
+        sites: values.beerSites,
+        streaming: values.streaming,
+        spray: values.spray,
+        pourRate: values.pourRate,
         stirReach: values.stirReach,
         stirStrength: values.stirStrength,
       },
+      pour: values.pour >= 0.5,
     });
     if (!handle) fpsOut.textContent = 'no 2D context';
     return;
@@ -1168,6 +1401,15 @@ const POLAR_DIALS: Dial[] = [
     step: 1,
     value: 0,
     note: '0 mirrors the join away, 1 wraps',
+  },
+  {
+    key: 'polarReverse',
+    label: 'polar reverse',
+    min: 0,
+    max: 1,
+    step: 1,
+    value: 0,
+    note: '1 reads the radius inside-out - the centre wears the rim',
   },
   {
     key: 'polarCentreX',

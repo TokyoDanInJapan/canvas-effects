@@ -1,4 +1,4 @@
-// Beer: a glass filled to a set level, fizzing.
+// Beer: a glass that pours itself, fizzes, and sloshes like a liquid.
 //
 // Four things stacked in one field, and the order is the whole picture: air at
 // the top, a head of foam, the liquid line, and the beer itself with bubbles
@@ -13,32 +13,35 @@
 // is imported from `metaballs.ts` rather than copied for that reason: these are
 // metaballs, and it should be the same kernel or the claim is not true.
 //
-// THE SURFACE IS A WAVE FIELD
-// ---------------------------
-// The liquid line is a one-dimensional wave equation: one height and one
-// velocity per column, stepped every frame. Everything the surface does falls
-// out of that single system. A bursting bubble splashes it, a drag ploughs a
-// bow wave through it, and what reads as sloshing is the waves reflecting
-// between the walls - the slosh is the field's fundamental mode, not a thing
-// that is animated. An earlier version had a procedural ripple and a single
-// tilted-cosine rock bolted together; the wave field replaced both with less
-// state and the right behaviour, and the idle shimmer now stops when the fizz
-// does, because the fizz is what was causing it.
+// THE SURFACE IS SHALLOW WATER
+// ----------------------------
+// The liquid line is a one-dimensional shallow-water solve: a height per column
+// and a depth-averaged flow on the faces between them, stepped every frame.
+// The first version was a plucked string - one wave speed everywhere and a
+// restoring force pulling every column back to the same line - and it had no
+// notion of how much beer any of it stood for. Shallow water does: waves cross
+// a full glass faster than the dregs, a sideways stir drives the *flow* and the
+// beer piles against the leading wall on its own, and volume is conserved
+// because every drop that leaves a column arrives in the next one. The slosh is
+// still the field's fundamental mode, not a thing that is animated - it is just
+// a better field now.
 //
 // A LOOP, NOT A SET OF ANIMATIONS
 // -------------------------------
-// Bubbles nucleate at the bottom, rise and grow, fuse when they overlap enough,
-// and pop when they reach the surface. A pop is what feeds the head: it hands
-// over its own area as foam, and the head drains exponentially and levels
-// sideways in the meantime. So the head's thickness is not animated anywhere. It
-// is what the fizz rate and the drain rate settle at, which is why turning
-// `rate` down thins it without any other dial being touched.
+// Bubbles stream up from fixed nucleation sites, rise and grow, fuse when they
+// overlap enough, and pop when they reach the surface. A pop is what feeds the
+// head: it hands over its own area as foam, and the head drains exponentially
+// and levels sideways in the meantime. So the head's thickness is not animated
+// anywhere. It is what the fizz rate and the drain rate settle at, which is why
+// turning `rate` down thins it without any other dial being touched. A crest
+// driven too steep breaks, and a breaking crest is where foam comes from in the
+// first place - which is why stirring the glass hard thickens the head.
 //
 // STATEFUL IN TIME
 // ----------------
 // Every position accumulates, so this needs a fixed timestep like the rain and
-// the smoke, and a settling run before the first paint - a glass with no bubbles
-// in it and no head on it does not read as beer.
+// the smoke, and either a settling run before the first paint or a pour - a
+// glass with no bubbles in it and no head on it does not read as beer.
 //
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // beer-background.ts.
@@ -51,8 +54,11 @@ export interface BeerParams {
   /**
    * How much of the height is liquid, 0 to 1, measured to the liquid line.
    *
-   * The head sits *above* it, so the beer reaches a little higher than this -
-   * `fill + headMax` is the top of the foam at its thickest.
+   * This is the level the glass is poured to, not the level it necessarily
+   * holds this frame: `Beer.level` is the live reading, and it climbs to
+   * `fill` at `pourRate` when the glass starts short. The head sits *above*
+   * the line, so the beer reaches a little higher than this - `fill + headMax`
+   * is the top of the foam at its thickest.
    */
   fill: number;
   /** Brightness of the body of the liquid, 0 to 1. */
@@ -68,39 +74,72 @@ export interface BeerParams {
   surfaceWidth: number;
 
   /**
-   * How fast surface waves travel, in height units a second.
+   * How fast surface waves travel *at the poured line*, in height units a
+   * second.
    *
-   * This also sets the slosh, because the surge after a stir is the wave
-   * field's fundamental mode and its period is `2 * aspect / waveSpeed` -
-   * about 1.8 seconds on a 16:9 window at the default, which is roughly what a
-   * pint glass does. A wider window sloshes slower, which is true of real
-   * glasses too.
+   * Gravity is derived from it - `waveSpeed^2 / fill` - because in shallow
+   * water there is no such thing as a wave speed of its own: how fast a wave
+   * crosses the glass is settled by gravity and by how deep the beer is. So a
+   * glass poured to `fill` sloshes with a period of `2 * aspect / waveSpeed`,
+   * about 1.8 seconds on a 16:9 window at the default, and a glass still
+   * pouring carries its waves slower - the shallow-water result the old
+   * plucked string could not give.
    */
   waveSpeed: number;
-  /** How fast the surface calms, as a proportion of its motion lost a second. */
+  /** How fast the flow calms, as a proportion of its motion lost a second. */
   waveDamping: number;
-  /** Ceiling on how far the surface can leave level, in height units. */
-  waveMax: number;
   /**
-   * The kick a bursting bubble gives the surface, in height units a second,
+   * Viscosity proper, in height units squared a second: the flow smoothing
+   * sideways into itself.
+   *
+   * Drag alone holds every wavelength back by the same amount, which is not
+   * how a liquid loses a ripple: a short wave shears itself far harder than a
+   * long one and dies in a fraction of the time. This falls on a wave by the
+   * square of its wavenumber, so the patter of bursting bubbles fades in a
+   * shake while the slosh across the whole glass is barely touched.
+   */
+  shear: number;
+  /**
+   * The push a bursting bubble gives the surface, in height units a second,
    * scaled by the bubble's size.
    *
-   * This is where an idle surface's motion comes from - there is no procedural
-   * ripple. Turn the fizz off and the glass goes glassy still, which is
-   * correct: it is the fizz that keeps a real pint's surface alive.
+   * The push sets the beer *moving* rather than moving it - it lands on the
+   * flow and has to travel before it shows, which is what keeps two dozen
+   * arrivals a second reading as a live surface rather than a tremor. This is
+   * where an idle surface's motion comes from; there is no procedural ripple.
+   * Turn the fizz off and the glass goes glassy still, which is correct: it is
+   * the fizz that keeps a real pint's surface alive.
    */
   splash: number;
   /**
-   * How hard a stir pushes the surface, per second of pushing.
+   * How hard a stir grips the body of the beer, per second of stirring.
    *
-   * The push is shaped like a bow wave - risen ahead of the drag, dipped
-   * behind it - and the shape is antisymmetric, so a stir moves beer about
-   * without adding any. See `stirBubbles`.
+   * A sideways drag accelerates the flow under it rather than raking the
+   * surface into a shape: the beer piles against the leading wall because it
+   * was set moving towards it, and the bow wave - risen ahead of the drag,
+   * dipped behind it - emerges from the flow instead of being drawn. The old
+   * code pushed the surface directly, which is the answer rather than the
+   * cause, and made the beer lean without ever moving.
    */
   slosh: number;
 
   /** Bubbles nucleating a second, per unit width - so a wide window fizzes more. */
   rate: number;
+  /**
+   * Nucleation sites per unit width - the fixed rough spots the fizz streams
+   * up from, each with its own pace and bubble size.
+   *
+   * Real: a bubble needs somewhere to start, and in a real glass those
+   * somewheres are scratches that do not move. The standing columns of fizz
+   * they produce are most of what makes a glass read as carbonated rather
+   * than as static.
+   */
+  sites: number;
+  /**
+   * The share of the fizz that rises from the sites, 0 to 1; the rest
+   * nucleates anywhere. With no sites at all, everything is anywhere.
+   */
+  streaming: number;
   /** Ceiling on live bubbles. */
   maxBubbles: number;
   /** Mean bubble radius at nucleation, in height units. */
@@ -142,6 +181,22 @@ export interface BeerParams {
   shoulder: number;
   /** How much brightness a bubble adds to the liquid it is in. */
   bubble: number;
+  /**
+   * How readily the glass throws droplets, 0 to disable.
+   *
+   * Three things throw them: a crest breaking hard, a big bubble bursting, and
+   * a press on the surface. A droplet is ballistic under the same gravity the
+   * waves answer to, and it splashes the surface it lands on - so a hard stir
+   * is followed by its own spray coming back down.
+   */
+  spray: number;
+  /**
+   * How fast an unfilled glass fills, in height units a second. The pour: the
+   * level climbs to `fill` at this rate, fizzing harder on the way - a glass
+   * being poured is when the carbonation is liveliest. Zero or less fills it
+   * at once.
+   */
+  pourRate: number;
 
   /** Brightness of the foam. The brightest thing on the canvas. */
   head: number;
@@ -185,30 +240,41 @@ export const BEER_DEFAULTS: BeerParams = {
   // Under half, because this is a background: the body of the beer is the large
   // flat area, and it is the one thing here that has to stay quiet.
   liquid: 0.42,
-  depthFade: 0.35,
+  // A pronounced fade: the bottom of the pour at under half the brightness of
+  // the top. At the old five-grey palette this had a band or two to show
+  // itself in and read as subtle; at the 64-level default it is a gradient,
+  // and it is what gives the glass a bottom.
+  depthFade: 0.55,
   surfaceWidth: 0.012,
 
-  // Sets the slosh period as well as how fast a stir's wake crosses the glass;
-  // see the note on the option. Doubling it halves the slosh period.
+  // The wave speed at the poured line, which fixes gravity; see the note on
+  // the option. Doubling it halves the slosh period.
   waveSpeed: 2.0,
-  // The surge from a good stir takes two or three swings to die away, and the
-  // constant patter of splashes reads as a live surface rather than as chop.
-  waveDamping: 1.1,
-  waveMax: 0.05,
-  // Tuned against the shimmer it produces: at the default fizz the line
-  // wanders by a few thousandths of the height - about what the retired
-  // procedural ripple faked, only now it has a cause and stops with it.
-  splash: 0.02,
+  // Lower than the old blanket damping, because the shear now takes the
+  // ripples: the drag only has to bring the slosh to rest over a few swings,
+  // and holding it higher deadened exactly the motion worth keeping.
+  waveDamping: 0.9,
+  shear: 0.0012,
+  // Tuned against the shimmer it produces, like its predecessor - only the
+  // push now lands on the flow and spreads before it shows, so the same
+  // wander of a few thousandths of the height needs a larger figure here.
+  splash: 0.05,
   // Sized against the swing it produces rather than reasoned about: a brisk
-  // drag along the surface leaves it a few hundredths of the height out of
-  // level and sloshing, and a slow sweep barely disturbs it.
-  slosh: 20,
+  // drag along the surface sets the beer piling up the leading wall and
+  // sloshing back, and a slow sweep barely disturbs it.
+  slosh: 14,
 
   rate: 26,
+  // Half a dozen streams per unit width: enough that a wide window reads as
+  // several standing columns of fizz, few enough that each one is its own.
+  sites: 6,
+  // Most of the fizz through the streams, with enough scattered anywhere that
+  // the beer between them still sparkles.
+  streaming: 0.65,
   maxBubbles: 220,
-  // Small - two or three cells at the default resolution - because fizz is
-  // fizz. The merging is what produces the occasional large one.
-  radius: 0.022,
+  // Small - a few cells at the default resolution - because fizz is fizz. The
+  // merging is what produces the occasional large one.
+  radius: 0.01,
   radiusVariance: 0.5,
   rise: 0.34,
   growth: 0.16,
@@ -221,6 +287,10 @@ export const BEER_DEFAULTS: BeerParams = {
   // and dithers rather than showing as a flat disc.
   shoulder: 0.42,
   bubble: 0.5,
+  spray: 1,
+  // A brisk first pour: two seconds or so to the default fill line, which is
+  // the pace a pint arrives at rather than the pace a tap fills one.
+  pourRate: 0.35,
 
   head: 1,
   // A ceiling rather than a working depth. The head settles at about half this,
@@ -228,17 +298,21 @@ export const BEER_DEFAULTS: BeerParams = {
   // flattening against the limit - which is what a head at its ceiling looks
   // like, and it reads as a painted bar rather than as foam.
   headMax: 0.18,
-  // A bubble makes rather more foam than its own area: it arrives at the surface
-  // as a shell of liquid that stays up there with its neighbours. Tuned against
-  // the head this settles at, which is what anyone would actually judge it by -
-  // at the default fizz that is about 0.08 of the height, against a ceiling of
-  // 0.18, with the busiest columns reaching two thirds of the way to it.
-  headGain: 1.1,
+  // A bubble makes far more foam than its own area: it arrives at the surface
+  // as a shell of liquid that stays up there with its neighbours, and at a
+  // hundredth-of-the-height radius the shell is most of what the head is made
+  // of. Tuned against the head this settles at, which is what anyone would
+  // actually judge it by - at the default fizz that is about 0.09 of the
+  // height, against a ceiling of 0.18, with the busiest columns reaching two
+  // thirds of the way to it.
+  headGain: 5.2,
   drain: 0.32,
-  // Levels foam about seven percent of the height sideways in a second: fast
-  // enough that a burst of pops reads as the head thickening rather than as a
-  // spike, slow enough to leave the lumps that make it look like foam.
-  spread: 0.0025,
+  // Levels foam about a sixth of the height sideways in a second - six times
+  // what it was when pops landed anywhere. The fizz arrives up standing
+  // streams now, and at the old rate the head was a range of hills over the
+  // busy streams with bare glass between them. Fast enough to join the hills
+  // into a band, still slow enough to leave the lumps that make it foam.
+  spread: 0.015,
   foamTexture: 0.85,
   foamScale: 26,
   foamDrift: 0.6,
@@ -258,6 +332,26 @@ export interface Bubble {
   /** Where it is in its zigzag, and how fast it goes round. */
   phase: number;
   wobble: number;
+}
+
+/** A fixed rough spot on the glass that fizz streams up from. */
+export interface Site {
+  x: number;
+  /** Its share of the streamed rate. The shares sum to one across the sites. */
+  weight: number;
+  /** The size character of its bubbles, as a multiple of the mean radius. */
+  size: number;
+  /** Fractional bubbles owed by its rate, carried between steps. */
+  owed: number;
+}
+
+/** A droplet in flight above the surface, in field-height units. */
+export interface Drop {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
 }
 
 /**
@@ -284,27 +378,81 @@ export interface Beer {
   raw: Float32Array;
   /** Head thickness per column, in height units. */
   head: Float32Array;
-  /** Scratch for the sideways levelling, which cannot be done in place. */
+  /** Scratch for the sideways levelling and the splash profile. */
   headNext: Float32Array;
   /** The liquid line per column, in height units. Refilled every render. */
   line: Float32Array;
   /**
-   * The surface: height deviation from the pour line per column, and how fast
-   * each column is moving, both in height units. Positive is downward, to
-   * match `y`. Together they are the wave field the liquid line is read from.
+   * The surface: height deviation from the pour line per column, in height
+   * units, positive downward to match `y`.
    */
   wave: Float32Array;
-  waveV: Float32Array;
+  /**
+   * The depth-averaged sideways flow of the beer, in height units a second, on
+   * the faces *between* the columns - `flow[k]` sits between columns `k` and
+   * `k + 1`. Staggering it against the heights is what keeps a shallow-water
+   * solve from ringing: pressure is read across a face, and the flux it drives
+   * is carried through that same face, so neighbouring columns cannot drift
+   * into the sawtooth a collocated grid allows.
+   */
+  flow: Float32Array;
+  /** Scratch for the face fluxes, kept to avoid reallocating. */
+  flux: Float32Array;
+  /**
+   * The surface the foam rides, as a deviation like `wave`. The head is a raft
+   * a finger thick, not a skin: it follows the swell and ignores the pricking
+   * of the bubbles under it. See `stepRaft`.
+   */
+  raft: Float32Array;
+  /** The raft's smoothing kernel, normalised. Built once per width. */
+  raftKernel: Float32Array;
+  /**
+   * How much of the height is liquid right now, 0 to 1. Starts at `fill`;
+   * a poured glass starts at nothing and climbs there.
+   */
+  level: number;
   bubbles: Bubble[];
+  drops: Drop[];
+  sites: Site[];
   /** Elapsed seconds, for the foam's crawl. */
   time: number;
-  /** Fractional bubbles owed by the nucleation rate, carried between steps. */
+  /** Fractional bubbles owed by the anywhere-rate, carried between steps. */
   owed: number;
   /** Seed for the foam's mottling, so a seeded background is repeatable. */
   seed: number;
 }
 
+/**
+ * The shallowest beer the waves run in, in height units. Below it there is
+ * nothing to represent - a film on the bottom of a glass does not slosh - and
+ * the arithmetic would be dividing by the film's depth.
+ */
+const MIN_DEPTH = 0.02;
+
+/**
+ * Gravity, in height units a second squared, derived so that a glass poured to
+ * `fill` carries its waves at exactly `waveSpeed` - see the note on the option.
+ */
+function gravityOf(params: BeerParams): number {
+  const depth = Math.max(params.fill, MIN_DEPTH);
+  return (params.waveSpeed * params.waveSpeed) / depth;
+}
+
+/** The raft's smoothing radius for a glass this wide. */
+function raftRadius(w: number): number {
+  // About an eighth of the glass either side: several times a pop's dimple,
+  // and a small part of a slosh's width.
+  return Math.min(12, Math.max(2, Math.round(w * 0.12)));
+}
+
 export function createBeer(w: number, h: number, rand: () => number = Math.random, params = BEER_DEFAULTS): Beer {
+  const faces = Math.max(1, w - 1);
+  const r = raftRadius(w);
+  const kernel = new Float32Array(2 * r + 1);
+  let sum = 0;
+  for (let k = -r; k <= r; k++) sum += kernel[k + r] = Math.exp(-2 * (k / r) * (k / r));
+  for (let k = 0; k < kernel.length; k++) kernel[k] /= sum;
+
   const beer: Beer = {
     w,
     h,
@@ -314,15 +462,80 @@ export function createBeer(w: number, h: number, rand: () => number = Math.rando
     headNext: new Float32Array(w),
     line: new Float32Array(w),
     wave: new Float32Array(w),
-    waveV: new Float32Array(w),
+    flow: new Float32Array(faces),
+    flux: new Float32Array(faces),
+    raft: new Float32Array(w),
+    raftKernel: kernel,
+    level: params.fill,
     bubbles: [],
+    drops: [],
+    sites: [],
     time: 0,
     owed: 0,
     seed: Math.floor(rand() * 0x7fffffff),
   };
 
+  rollSites(beer, params, rand);
   seedBubbles(beer, params, rand);
   return beer;
+}
+
+/**
+ * Rolls the glass's nucleation sites: where they are, how briskly each one
+ * streams, and the size of bubble it makes.
+ *
+ * The weights are normalised to sum to one, so `rate` stays the total fizz and
+ * the sites only decide where it comes up - adding sites never adds bubbles.
+ */
+export function rollSites(beer: Beer, params: BeerParams, rand: () => number): void {
+  const aspect = aspectOf(beer);
+  const count = Math.max(0, Math.round(params.sites * aspect));
+  beer.sites.length = 0;
+
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    // A spread of paces, so the streams read as individuals - but held within
+    // a factor of three, because the head is fed where the streams run and
+    // the levelling can only carry foam so far: wider odds than this left the
+    // head a range of hills over the lucky sites.
+    const weight = 0.5 + rand();
+    total += weight;
+    // Jittered within its own slot rather than dropped anywhere. Placed at
+    // uniform random, a third of the glass routinely came up siteless, and
+    // the head - fed where the streams run - was bare over the gap. A real
+    // glass is scratched all over.
+    beer.sites.push({ x: ((i + rand()) / count) * aspect, weight, size: 0.7 + rand() * 0.6, owed: 0 });
+  }
+  for (const site of beer.sites) site.weight /= total;
+}
+
+/**
+ * Where the next bubble starts across the glass: usually over a site, with its
+ * size character, and sometimes anywhere.
+ *
+ * Shared by the seeding and the loop, so the streams are standing there from
+ * the first frame rather than developing over the first climb.
+ */
+function nucleate(beer: Beer, params: BeerParams, rand: () => number): { x: number; scale: number } {
+  const aspect = aspectOf(beer);
+  if (beer.sites.length > 0 && rand() < params.streaming) {
+    // Weighted pick, walked rather than tabulated: there are a handful of
+    // sites, and the weights sum to one by construction.
+    let at = rand();
+    let site = beer.sites[beer.sites.length - 1];
+    for (const s of beer.sites) {
+      at -= s.weight;
+      if (at <= 0) {
+        site = s;
+        break;
+      }
+    }
+    // A couple of radii of jitter, or the stream is a bead chain rather than
+    // a column of fizz.
+    const x = site.x + (rand() - 0.5) * 4 * params.radius;
+    return { x: x < 0 ? 0 : x > aspect ? aspect : x, scale: site.size };
+  }
+  return { x: rand() * aspect, scale: 1 };
 }
 
 /**
@@ -343,21 +556,33 @@ export function seedBubbles(beer: Beer, params: BeerParams, rand: () => number =
     // Uniform through the liquid, not all at the bottom, or the first seconds
     // are a rising front rather than a fizz.
     const depth = rand();
-    const bubble = addBubble(beer, params, rand, rand() * aspect, 1 - depth * params.fill);
+    const start = nucleate(beer, params, rand);
+    const bubble = addBubble(beer, params, rand, start.x, 1 - depth * params.fill, start.scale);
     // Grown by however far up it already is, so the size gradient is there from
     // the first frame rather than developing over the first few seconds.
     if (bubble && params.rise > 0) bubble.radius *= Math.exp(params.growth * ((depth * params.fill) / params.rise));
   }
 }
 
-/** Adds one bubble at a point, or returns null if the glass is already full of them. */
-export function addBubble(beer: Beer, params: BeerParams, rand: () => number, x: number, y: number): Bubble | null {
+/**
+ * Adds one bubble at a point, or returns null if the glass is already full of
+ * them. `scale` is the site's size character - the mean this bubble varies
+ * about, as a multiple of `radius`.
+ */
+export function addBubble(
+  beer: Beer,
+  params: BeerParams,
+  rand: () => number,
+  x: number,
+  y: number,
+  scale = 1
+): Bubble | null {
   if (beer.bubbles.length >= params.maxBubbles) return null;
 
   const bubble: Bubble = {
     x,
     y,
-    radius: params.radius * (1 - params.radiusVariance + rand() * params.radiusVariance * 2),
+    radius: params.radius * scale * (1 - params.radiusVariance + rand() * params.radiusVariance * 2),
     vx: 0,
     vy: 0,
     phase: rand() * Math.PI * 2,
@@ -384,16 +609,16 @@ function sampleColumn(values: Float32Array, spanX: number, x: number): number {
 }
 
 /**
- * The liquid line at `x`, in height units: the pour line plus whatever the
- * wave field is doing there, interpolated between columns.
+ * The liquid line at `x`, in height units: the level the glass currently holds
+ * plus whatever the wave field is doing there, interpolated between columns.
  *
  * The waves live per column, so this is the one place their heights become a
  * continuous line - the renderer, the pop test and the drag's scrape check all
  * read the surface through it.
  */
-export function surfaceAt(beer: Beer, params: BeerParams, x: number): number {
+export function surfaceAt(beer: Beer, x: number): number {
   const [spanX] = cellSpansOf(beer);
-  return 1 - params.fill + sampleColumn(beer.wave, spanX, x);
+  return 1 - beer.level + sampleColumn(beer.wave, spanX, x);
 }
 
 /** The head's thickness at `x`, interpolated between columns. */
@@ -404,121 +629,351 @@ export function headAt(beer: Beer, x: number): number {
 
 /**
  * Ceiling on wave substeps in one frame, so a very fine field cannot make the
- * surface the expensive part of the frame. Past it the waves travel slower
- * than `waveSpeed` asks for, which is a great deal better than the field going
- * unstable - see the cap inside `stepWaves`.
+ * surface the expensive part of the frame. When it bites, the flow is clamped
+ * and gravity eased until the substeps can carry both stably - the waves run
+ * slower than `waveSpeed` asks for, which is a great deal better than the
+ * field going unstable. See the budget arithmetic in `stepWaves`.
+ *
+ * Raised from 48 when the budget became honest: at 48 a 1080p field could not
+ * carry the default `waveSpeed` and a stir's flow inside the stability bound
+ * at once. The count only runs to the ceiling when the motion demands it, so
+ * a quiet glass does not pay for the headroom.
  */
-const MAX_WAVE_SUBSTEPS = 48;
+const MAX_WAVE_SUBSTEPS = 96;
 
 /**
- * Advances the surface by `dt`: a one-dimensional wave equation over the
+ * The fraction of a cell a wave may cross per substep. Under the half-cell
+ * the old plucked string ran at, because the momentum term steepens fronts
+ * and needs headroom - and no lower, because every hundredth here is another
+ * substep on a fine field.
+ */
+const CFL = 0.45;
+
+/**
+ * The steepest face the surface may stand in, as a slope in height units per
+ * height unit - about fifty degrees. A slosh across the whole glass runs at a
+ * small fraction of this at its steepest, so the limit only ever meets the
+ * front of a wave being driven hard, and holding it there keeps nearly all of
+ * the swing. See `breakCrests`.
+ */
+const MAX_FACE = 1.2;
+
+/** How much of the beer a breaking crest lets down comes off as foam. */
+const BREAK_FOAM = 0.8;
+
+/** The gentlest break that leaves foam behind, in height units let down. */
+const BREAK_FOAM_LEAST = 0.004;
+
+/** The gentlest break that can throw a droplet, in height units let down. */
+const BREAK_SPRAY_LEAST = 0.012;
+
+/**
+ * Lets a too-steep face down, handing beer from the crest to the trough below
+ * it - which is what breaking is.
+ *
+ * The surface is one height per column, so it can lean at any angle up to
+ * vertical and nothing past it. Beer driven hard at a wall does not stop there
+ * - it climbs, curls and comes apart - but the height field has no way to say
+ * so, and the steepening the flow does on its own would carry the front over
+ * in a single column instead: a hard edge standing off the glass. So the front
+ * is held to a slope beer can actually stand in, the exchange is symmetric so
+ * it moves beer about without inventing any, and what comes over the top is
+ * thrown as foam and the odd droplet, since a breaking crest is where both
+ * come from in the first place.
+ */
+export function breakCrests(beer: Beer, params: BeerParams, rand: () => number = Math.random): void {
+  const { w, wave, head, flow } = beer;
+  if (w < 2) return;
+  const [spanX] = cellSpansOf(beer);
+  const limit = MAX_FACE * spanX;
+
+  // A front steep over several columns has to be let down one column at a
+  // time, so the sweep is repeated until it finds nothing left to do.
+  for (let pass = 0; pass < 4; pass++) {
+    let quiet = true;
+    for (let k = 0; k < w - 1; k++) {
+      const d = wave[k + 1] - wave[k];
+      const over = Math.abs(d) - limit;
+      if (over <= 0) continue;
+      quiet = false;
+
+      // Enough beer to bring the face back to the limit, and no more. The
+      // crest is the column standing higher, which is the *smaller* height -
+      // `wave` is positive downward.
+      const move = over / 2;
+      const crest = d > 0 ? k : k + 1;
+      const trough = d > 0 ? k + 1 : k;
+      wave[crest] += move;
+      wave[trough] -= move;
+
+      // Only on the first pass, or a front let down over several sweeps pays
+      // for the same beer more than once.
+      if (pass === 0 && over > BREAK_FOAM_LEAST) {
+        const fed = head[crest] + over * BREAK_FOAM;
+        head[crest] = fed > params.headMax ? params.headMax : fed;
+
+        if (params.spray > 0 && over > BREAK_SPRAY_LEAST && rand() < 0.5) {
+          // Thrown with the flow that broke it, and up by roughly the height
+          // it was let down from.
+          const g = gravityOf(params);
+          addDrop(beer, {
+            x: crest * spanX,
+            y: 1 - beer.level + wave[crest] - params.radius,
+            vx: flow[k] * 0.7,
+            vy: -Math.sqrt(2 * g * over) * (0.7 + rand() * 0.6),
+            radius: params.radius * (0.5 + rand() * 0.7),
+          });
+        }
+      }
+    }
+    if (quiet) break;
+  }
+}
+
+/**
+ * Advances the surface by `dt`: one-dimensional shallow water over the
  * columns, with reflecting walls. The reflections are the slosh.
  *
- * Three decisions worth recording:
+ * `wave` holds the surface as a depression below the level, positive downward
+ * to match the screen; `flow` holds the depth-averaged sideways speed of the
+ * beer on the faces between the columns. Each substep does momentum first -
+ * the surface slope drives the flow, the flow carries itself along, shear
+ * smooths it and drag holds it back - and then continuity: what each face
+ * carries is the depth on whichever side the flow is coming from, and the
+ * upwind choice is what keeps a steep crest steep instead of smearing it into
+ * a hump. Volume is conserved because every drop that leaves a column through
+ * a face arrives in its neighbour: there is nothing to fudge.
  *
- * - It is substepped to a CFL limit. An explicit wave step is only stable
- *   while a wave crosses less than a cell per step, and `waveSpeed` is in
- *   height units, so the finer the field the more substeps the same speed
- *   needs. Half a cell rather than the full cell the stability bound allows,
- *   because at the bound the scheme is maximally dispersive and a sharp splash
- *   audibly rings as it spreads. Damping is exponential per substep, so the
- *   decay over a frame is `exp(-waveDamping * dt)` however the frame is
- *   chopped.
+ * Substepped to a CFL limit sized on the wave's speed *and* the flow's,
+ * because beer already moving carries the disturbance with it - sized on the
+ * wave alone, a hard enough flick sets the pour outrunning the step and the
+ * momentum term doubles every substep until the whole surface is NaN.
  *
- * - The velocity is updated first and the position from the new velocity - the
- *   semi-implicit ordering, for the usual reason: the explicit form feeds
- *   energy into an oscillator, and the surface would slowly work itself rough
- *   rather than settling.
- *
- * - The mean height is subtracted every frame. Stirs and splashes push volume
- *   about and nothing guarantees their sum is zero, so without this the glass
- *   would slowly fill or drain. Subtracting the mean is exact rather than a
- *   fudge: every travelling wave and the slosh itself are zero-mean shapes, so
- *   removing the mean removes only the conjured beer, never the motion.
+ * The frame has a speed budget - the most the capped substeps can carry at
+ * the scheme's stability edge - and it is split in a fixed order. The flow is
+ * clamped first, because it is the one input a pointer can make arbitrarily
+ * large, to a few times the wave speed and never more than half the budget;
+ * gravity is then eased to whatever the flow left, which is always at least
+ * the other half. The order is the fix for a real failure: easing gravity
+ * alone let a savage swirl carry flow the substeps could not represent, the
+ * advection shredded the surface into a grid-scale sawtooth, and the sawtooth's
+ * own slopes pumped the flow straight back up whenever gravity returned - a
+ * boil that never settled, held together but never let go by the clamps and
+ * the breaker. With both halves budgeted, the arithmetic always fits inside
+ * the substeps, and if it is ever ruined anyway the surface is started over
+ * rather than handed to the renderer, because a surface of NaN draws as
+ * nothing and poisons every frame after it.
  */
-export function stepWaves(beer: Beer, params: BeerParams, dt: number): void {
+export function stepWaves(beer: Beer, params: BeerParams, dt: number, rand: () => number = Math.random): void {
   if (dt <= 0 || beer.w < 2) return;
-  const { w, wave, waveV } = beer;
+  if (params.waveSpeed <= 0 || beer.level <= MIN_DEPTH) return;
+  const { w, wave, flow, flux } = beer;
   const [spanX] = cellSpansOf(beer);
-  if (spanX <= 0 || params.waveSpeed <= 0) return;
 
-  const crossings = (params.waveSpeed * dt) / spanX;
-  const steps = Math.min(MAX_WAVE_SUBSTEPS, Math.max(1, Math.ceil(crossings / 0.5)));
-  // If the cap bit, slow the wave to what the substeps can carry stably.
-  const speed = Math.min(params.waveSpeed, (0.5 * steps * spanX) / dt);
+  const depth = beer.level;
+  let g = gravityOf(params);
+  let speed = Math.sqrt(g * depth);
+
+  // The frame's speed budget: the most the capped substeps can carry without
+  // the arithmetic outrunning them. Nine tenths of a cell per substep - the
+  // scheme's real stability edge - rather than the CFL target below, which is
+  // an accuracy choice the step count aims for when it has the room.
+  const budget = (0.9 * MAX_WAVE_SUBSTEPS * spanX) / dt;
+
+  // The flow's share comes off the top, because the flow is the one input a
+  // pointer can make arbitrarily large: a few times the wave speed - beer
+  // does not go faster however it is hit - and never more than half the
+  // budget. Clamped here, before the substeps are sized, so a wild stir
+  // cannot poison the sizing it is about to be stepped with.
+  const uCap = Math.min(2.5 * speed, budget * 0.5);
+  let uMax = 0;
+  for (let k = 0; k < w - 1; k++) {
+    const u = flow[k] > uCap ? uCap : flow[k] < -uCap ? -uCap : flow[k];
+    flow[k] = u;
+    const a = u < 0 ? -u : u;
+    if (a > uMax) uMax = a;
+  }
+
+  // Gravity is eased to what the flow left - never to nothing, because the
+  // flow may never take more than half.
+  if (speed > budget - uMax) {
+    speed = budget - uMax;
+    g = (speed * speed) / depth;
+  }
+
+  const steps = Math.min(MAX_WAVE_SUBSTEPS, Math.max(1, Math.ceil((dt * (speed + uMax)) / (spanX * CFL))));
   const sub = dt / steps;
-  const pull = (speed * speed * sub) / (spanX * spanX);
-  const keep = Math.exp(-params.waveDamping * sub);
+  const fric = params.waveDamping;
+  const nu = params.shear;
+  // The only bounds on the swing are the glass's own: a crest may climb to
+  // the very top of the frame and a trough may fall to a film on the base.
+  // There used to be an amplitude ceiling here, and it was the one thing
+  // holding a hard swirl back that a real glass would not.
+  const most = depth - MIN_DEPTH;
+  const least = -(1 - depth);
 
   for (let s = 0; s < steps; s++) {
-    for (let i = 0; i < w; i++) {
-      // Mirrored at the walls, so waves reflect rather than draining out - and
-      // the reflection coming back is what a reader calls the slosh.
-      const left = wave[i > 0 ? i - 1 : 0];
-      const right = wave[i < w - 1 ? i + 1 : w - 1];
-      waveV[i] = (waveV[i] + pull * (left - 2 * wave[i] + right)) * keep;
+    for (let k = 0; k < w - 1; k++) {
+      const u = flow[k];
+      const slope = (wave[k + 1] - wave[k]) / spanX;
+      // The slope of the flow is read from whichever side the flow is arriving
+      // from - downstream of itself it has no say in where it is going.
+      const du = u > 0 ? u - (k > 0 ? flow[k - 1] : 0) : (k < w - 2 ? flow[k + 1] : 0) - u;
+      const adv = (u * du) / spanX;
+      // No slip through the walls: the mirror is what reflects a wave back
+      // into the glass instead of draining it out of the array.
+      const uL = k > 0 ? flow[k - 1] : -u;
+      const uR = k < w - 2 ? flow[k + 1] : -u;
+      const smooth = (nu * (uL - 2 * u + uR)) / (spanX * spanX);
+      const pushed = (u + sub * (g * slope - adv + smooth)) / (1 + fric * sub);
+      flow[k] = pushed > uCap ? uCap : pushed < -uCap ? -uCap : pushed;
     }
-    for (let i = 0; i < w; i++) wave[i] += waveV[i] * sub;
+
+    for (let k = 0; k < w - 1; k++) {
+      const u = flow[k];
+      const carried = depth - (u > 0 ? wave[k] : wave[k + 1]);
+      flux[k] = u * (carried > 0 ? carried : 0);
+    }
+    let steepest = 0;
+    for (let i = 0; i < w; i++) {
+      const fR = i <= w - 2 ? flux[i] : 0;
+      const fL = i >= 1 ? flux[i - 1] : 0;
+      const moved = wave[i] + (sub * (fR - fL)) / spanX;
+      const held = moved > most ? most : moved < least ? least : moved;
+      wave[i] = held;
+      if (i > 0) {
+        const gap = held > wave[i - 1] ? held - wave[i - 1] : wave[i - 1] - held;
+        if (gap > steepest) steepest = gap;
+      }
+    }
+
+    // Let the face down every substep rather than once a frame. Left to the
+    // end of the frame the flow has already carried the front past vertical,
+    // and the limiter is pulling it back from somewhere it should never have
+    // reached. Skipped outright while no face is steep - which is nearly
+    // every substep of a quiet glass, and the steepness was measured for
+    // nothing above - because a sweep that finds nothing to do still costs a
+    // pass over the columns.
+    if (steepest > MAX_FACE * spanX) breakCrests(beer, params, rand);
   }
 
-  // Held inside the glass, and levelled to conserve the beer.
-  let mean = 0;
   for (let i = 0; i < w; i++) {
-    if (wave[i] > params.waveMax) {
-      wave[i] = params.waveMax;
-      if (waveV[i] > 0) waveV[i] = 0;
-    } else if (wave[i] < -params.waveMax) {
-      wave[i] = -params.waveMax;
-      if (waveV[i] < 0) waveV[i] = 0;
-    }
-    mean += wave[i];
+    if (Number.isFinite(wave[i])) continue;
+    wave.fill(0);
+    flow.fill(0);
+    return;
   }
+
+  // The flux form conserves volume exactly; the clamps and the limiter above
+  // are what can cost or conjure a hair of it. Levelling the mean hands that
+  // hair back, and removes nothing else: every travelling wave and the slosh
+  // itself are zero-mean shapes.
+  let mean = 0;
+  for (let i = 0; i < w; i++) mean += wave[i];
   mean /= w;
   for (let i = 0; i < w; i++) wave[i] -= mean;
 }
 
 /**
- * The bow wave a stir ploughs into the surface: risen ahead of the motion,
- * dipped behind it, which is what a finger pulled through liquid does. The
- * shape is antisymmetric about the stir, so a drag moves beer about without
- * adding any; a vertical pull is a plain push, because dragging up towards the
- * surface lifts it.
+ * Presses the surface at `x`: down for a positive `force`, up for a negative
+ * one, over a Gaussian about `radius` wide. `force` is the rate the surface is
+ * pressed at, in height units a second.
+ *
+ * The push is given to the flow, not the surface. Pressed straight into the
+ * heights, every one of the two dozen bubbles bursting each second shows up
+ * the same instant and the pour carries a tremor at the rate they arrive - the
+ * glass answering the bubbles rather than the beer. A push on the flow has to
+ * travel before it shows, and the surface adds the arrivals up as a liquid
+ * does. What the flow has to be is read straight off the surface it must
+ * produce: each face carries away everything the columns behind it are
+ * shedding, so the flux is the running total of the push - taken off its own
+ * mean, so a press moves beer about without adding or removing any.
+ */
+export function splashSurface(beer: Beer, params: BeerParams, x: number, force: number, radius: number): void {
+  const { w, flow, headNext } = beer;
+  if (w < 2 || beer.level <= MIN_DEPTH) return;
+  const [spanX] = cellSpansOf(beer);
+
+  const depth = beer.level;
+  const g = gravityOf(params);
+  const uCap = Math.sqrt(g * depth) * 2.5;
+  const centre = x / spanX;
+  const span = Math.max(1, radius / spanX);
+
+  // `headNext` is scratch here exactly as it is in `settleHead`: nothing reads
+  // it between steps.
+  let mean = 0;
+  for (let i = 0; i < w; i++) {
+    const d = (i - centre) / span;
+    mean += headNext[i] = Math.exp(-d * d * 1.6);
+  }
+  mean /= w;
+
+  let carried = 0;
+  for (let k = 0; k < w - 1; k++) {
+    carried += force * (headNext[k] - mean) * spanX;
+    const pushed = flow[k] + carried / depth;
+    flow[k] = pushed > uCap ? uCap : pushed < -uCap ? -uCap : pushed;
+  }
+}
+
+/**
+ * Drives the body of the beer with a stir: the sideways speed of the drag
+ * accelerates the flow under it, and the vertical speed presses the surface.
+ *
+ * Driving the flow is the difference between stirring beer and drawing on it.
+ * The beer piles against the leading wall because it was set moving towards
+ * it; the bow wave - risen ahead of the drag, dipped behind - is the flux
+ * converging ahead of the driven patch and diverging behind it, which is what
+ * a finger pulled through liquid actually does to the liquid rather than a
+ * shape painted onto its surface.
  *
  * Attenuated by depth, over twice `stirReach` - the pressure a moving hand
  * makes carries further than its grip does. A stir well below the surface
  * hardly moves it, and one above it - in the air, or in the foam - not at all.
  */
-function plough(beer: Beer, params: BeerParams, stir: Stir, fade: number, dt: number): void {
-  const { w, wave, waveV } = beer;
+function stirFlow(beer: Beer, params: BeerParams, stir: Stir, fade: number, dt: number): void {
+  const { w, wave, flow } = beer;
+  if (w < 2 || beer.level <= MIN_DEPTH) return;
   const [spanX] = cellSpansOf(beer);
   const reach = params.stirReach;
-  if (spanX <= 0 || reach <= 0) return;
+  if (reach <= 0) return;
 
-  const base = 1 - params.fill;
-  const carry = reach * 2;
-  const i0 = Math.max(0, Math.ceil((stir.x - reach) / spanX));
-  const i1 = Math.min(w - 1, Math.floor((stir.x + reach) / spanX));
+  const base = 1 - beer.level;
+  const below = stir.y - (base + sampleColumn(wave, spanX, stir.x));
+  if (below < 0) return;
+  const grip = falloff(below * below, reach * 2);
+  if (grip <= 0) return;
 
-  for (let i = i0; i <= i1; i++) {
-    const dx = i * spanX - stir.x;
-    const shape = falloff(dx * dx, reach);
-    if (shape <= 0) continue;
+  if (stir.vx !== 0) {
+    // Wider than the bubble grip, because the flow is a body of beer rather
+    // than a thing at a point: a finger's wake is broader than its touch.
+    const wide = reach * 1.5;
+    const k0 = Math.max(0, Math.ceil((stir.x - wide) / spanX - 0.5));
+    const k1 = Math.min(w - 2, Math.floor((stir.x + wide) / spanX - 0.5));
+    const push = stir.vx * params.slosh * grip * fade * dt;
+    // Held to a few times the wave speed at the point it is added, the same
+    // ceiling the solver holds it to: a flick can be arbitrarily fast, and
+    // beer cannot.
+    const cap = 2.5 * Math.sqrt(gravityOf(params) * beer.level);
+    for (let k = k0; k <= k1; k++) {
+      const dx = (k + 0.5) * spanX - stir.x;
+      const pushed = flow[k] + push * falloff(dx * dx, wide);
+      flow[k] = pushed > cap ? cap : pushed < -cap ? -cap : pushed;
+    }
+  }
 
-    const below = stir.y - (base + wave[i]);
-    if (below < 0) continue;
-    const depth = falloff(below * below, carry);
-    if (depth <= 0) continue;
-
-    // `y` grows downward, so a negative contribution raises the surface: the
-    // antisymmetric term is negative ahead of the motion, and an upward drag -
-    // negative `vy` - lifts the whole reach.
-    waveV[i] += (stir.vy - stir.vx * (dx / reach)) * shape * params.slosh * depth * fade * dt;
+  // A downward drag presses the surface, an upward one lifts it. A fraction
+  // of the sideways coupling, because a hand moving down a glass mostly
+  // parts the beer rather than sinking the line.
+  if (stir.vy !== 0) {
+    splashSurface(beer, params, stir.x, stir.vy * params.slosh * 0.06 * grip * fade, reach * 0.8);
   }
 }
 
 /**
  * Applies the live stirs: bubbles near one are carried along with it, and the
- * surface takes a bow wave from it.
+ * beer takes a drive from it.
  *
  * A bubble is eased *towards* the stir's speed rather than shoved by it. A shove
  * accumulates - hold the pointer still over a bubble and it accelerates without
@@ -526,11 +981,11 @@ function plough(beer: Beer, params: BeerParams, stir: Stir, fade: number, dt: nu
  * speed means the fizz can be carried at the speed of the drag and never faster,
  * however long it is held there.
  *
- * The surface is ploughed by the newest sample only. Every live stir is a
- * sample of the same pointer, so letting each of them push would have a fast
- * drag plough twice over - once through its speed, and once through the extra
- * samples that speed produced. One sample pushing per frame makes the impulse
- * what it should be: the speed of the drag times how long it lasted.
+ * The flow is driven by the newest sample only. Every live stir is a sample of
+ * the same pointer, so letting each of them push would have a fast drag drive
+ * twice over - once through its speed, and once through the extra samples that
+ * speed produced. One sample pushing per frame makes the impulse what it should
+ * be: the speed of the drag times how long it lasted.
  */
 export function stirBubbles(beer: Beer, params: BeerParams, stirs: readonly Stir[], dt: number, lifetime = 1): void {
   if (dt <= 0 || stirs.length === 0) return;
@@ -542,7 +997,7 @@ export function stirBubbles(beer: Beer, params: BeerParams, stirs: readonly Stir
     const fade = lifetime > 0 ? Math.max(0, 1 - stir.age / lifetime) ** 2 : 0;
     if (fade <= 0) continue;
 
-    if (stir === newest) plough(beer, params, stir, fade, dt);
+    if (stir === newest) stirFlow(beer, params, stir, fade, dt);
 
     for (const bubble of beer.bubbles) {
       const dx = bubble.x - stir.x;
@@ -690,9 +1145,27 @@ export function fuseBubbles(beer: Beer, params: BeerParams): number {
   return fused;
 }
 
+/** Ceiling on droplets in flight. A hard swirl throws a good many at once. */
+const MAX_DROPS = 48;
+
+/**
+ * The height a thrown droplet is sized against, in height units: its launch
+ * speed is what gravity turns into about this much climb.
+ */
+const SPRAY_RISE = 0.06;
+
+/** Adds one droplet, or lets it go if the air is already full of them. */
+function addDrop(beer: Beer, drop: Drop): void {
+  if (beer.drops.length >= MAX_DROPS) return;
+  beer.drops.push(drop);
+}
+
+/** A pop this many mean radii across may throw a droplet as it bursts. */
+const SPRAY_POP_SIZE = 1.8;
+
 /**
  * Pops the bubbles that have reached the surface, handing their area to the
- * head and their arrival to the wave field. Returns how many went.
+ * head and their arrival to the flow. Returns how many went.
  *
  * The foam lands over the bubble's own footprint rather than in the one column
  * under its centre, and that is not a refinement - it is what makes the head the
@@ -703,16 +1176,16 @@ export function fuseBubbles(beer: Beer, params: BeerParams): number {
  * the columns the bubble covers it is the same foam either way, and nothing is
  * clipped.
  */
-export function popBubbles(beer: Beer, params: BeerParams): number {
+export function popBubbles(beer: Beer, params: BeerParams, rand: () => number = Math.random): number {
   const bubbles = beer.bubbles;
   const [spanX] = cellSpansOf(beer);
   const aspect = aspectOf(beer);
   const column = spanX > 0 ? spanX : aspect > 0 ? aspect : 1;
   let popped = 0;
 
-  for (let i = 0; i < bubbles.length;) {
+  for (let i = 0; i < bubbles.length; ) {
     const bubble = bubbles[i];
-    const line = surfaceAt(beer, params, bubble.x);
+    const line = surfaceAt(beer, bubble.x);
 
     // Its top edge, not its centre: a bubble bursts when it breaks the surface,
     // not when it has climbed halfway out of the beer.
@@ -733,14 +1206,27 @@ export function popBubbles(beer: Beer, params: BeerParams): number {
     const width = (i1 - i0 + 1) * column;
     const thickness = (params.headGain * bubble.radius * bubble.radius) / width;
 
-    // The burst splashes the surface it broke: the bubble leaves a cavity, and
+    for (let c = i0; c <= i1; c++) {
+      const fed = beer.head[c] + thickness;
+      beer.head[c] = fed > params.headMax ? params.headMax : fed;
+    }
+
+    // The burst presses the surface it broke: the bubble leaves a cavity, and
     // the dip and rebound that spread from it are what keep an idle pint's
     // surface moving. There is no other ambient motion anywhere.
-    const kick = params.splash * (params.radius > 0 ? bubble.radius / params.radius : 1);
+    const ratio = params.radius > 0 ? bubble.radius / params.radius : 1;
+    splashSurface(beer, params, bubble.x, params.splash * ratio, Math.max(bubble.radius * 2, column * 2));
 
-    for (let c = i0; c <= i1; c++) {
-      beer.head[c] = Math.min(params.headMax, beer.head[c] + thickness);
-      beer.waveV[c] += kick;
+    // A big enough burst throws a fleck of its shell into the air.
+    if (params.spray > 0 && ratio > SPRAY_POP_SIZE && rand() < 0.35 * Math.min(1, params.spray)) {
+      const g = gravityOf(params);
+      addDrop(beer, {
+        x: bubble.x,
+        y: line - bubble.radius,
+        vx: (rand() - 0.5) * 0.2,
+        vy: -Math.sqrt(2 * g * SPRAY_RISE) * (0.6 + rand() * 0.8) * params.spray,
+        radius: bubble.radius * 0.55,
+      });
     }
 
     bubbles[i] = bubbles[bubbles.length - 1];
@@ -749,6 +1235,132 @@ export function popBubbles(beer: Beer, params: BeerParams): number {
   }
 
   return popped;
+}
+
+/**
+ * Flies the droplets by `dt`: ballistic under the same gravity the waves
+ * answer to, held between the walls, and landing with a splash.
+ *
+ * The shared gravity is the point rather than a convenience - spray that hangs
+ * longer than the slosh it came from swings, or drops faster than it, reads as
+ * belonging to some other liquid.
+ */
+export function stepDrops(beer: Beer, params: BeerParams, dt: number): void {
+  if (dt <= 0 || beer.drops.length === 0) return;
+
+  const aspect = aspectOf(beer);
+  const [spanX] = cellSpansOf(beer);
+  const g = gravityOf(params);
+  const drops = beer.drops;
+
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const drop = drops[i];
+    drop.vy += g * dt;
+    drop.x += drop.vx * dt;
+    drop.y += drop.vy * dt;
+
+    // The walls again, damped rather than lively: a droplet hitting glass
+    // sticks more than it bounces.
+    if (drop.x < 0) {
+      drop.x = 0;
+      drop.vx = -drop.vx * 0.4;
+    } else if (drop.x > aspect) {
+      drop.x = aspect;
+      drop.vx = -drop.vx * 0.4;
+    }
+
+    // Falling and back at the surface: it lands, presses the beer it rejoins,
+    // and is gone. Only falling - a droplet still on its way up passes the
+    // line it was thrown through.
+    if (drop.vy > 0 && drop.y >= surfaceAt(beer, drop.x)) {
+      const ratio = params.radius > 0 ? drop.radius / params.radius : 1;
+      splashSurface(beer, params, drop.x, params.splash * ratio * 2, Math.max(drop.radius * 2, spanX * 2));
+      drops.splice(i, 1);
+    }
+  }
+}
+
+/**
+ * A press on the surface: the splash, the spray it throws, and the fizz it
+ * knocks loose. The one gesture a click is.
+ *
+ * Nothing happens to a press in the air - there is no beer up there to press.
+ * The reach below the surface is generous, because pressing *into* the beer is
+ * how anyone actually clicks on it.
+ */
+export function pressBeer(beer: Beer, params: BeerParams, rand: () => number, x: number, y: number): void {
+  const line = surfaceAt(beer, x);
+  if (y < line - params.stirReach * 0.6) return;
+
+  splashSurface(beer, params, x, params.splash * 40, params.stirReach * 0.7);
+
+  if (params.spray > 0) {
+    const g = gravityOf(params);
+    const thrown = 3 + Math.floor(rand() * 3);
+    for (let i = 0; i < thrown; i++) {
+      addDrop(beer, {
+        x: x + (rand() - 0.5) * params.stirReach * 0.6,
+        y: line - params.radius,
+        vx: (rand() - 0.5) * 0.5,
+        vy: -Math.sqrt(2 * g * SPRAY_RISE) * (0.8 + rand() * 1.2) * params.spray,
+        radius: params.radius * (0.5 + rand() * 0.8),
+      });
+    }
+  }
+
+  // Knocked loose under the press, the way the drag's scrape does along its
+  // path - a jolt is a very good rough spot.
+  for (let i = 0; i < 5; i++) {
+    addBubble(beer, params, rand, x + (rand() - 0.5) * params.stirReach, line + rand() * (1 - line));
+  }
+}
+
+/** How quickly the raft comes to the beer when it is all but there... */
+const RAFT_SLOW = 2.5;
+/** ...and when the beer has plainly moved out from under it. */
+const RAFT_FAST = 30;
+/** The gap, in height units, past which the raft is plainly behind. */
+const RAFT_REACH = 0.01;
+
+/**
+ * Moves the surface the foam rides towards the beer's.
+ *
+ * A head is a raft a finger thick, not a skin: it has weight and it holds
+ * together, so it rides the swell the beer is on and ignores the pricking of
+ * the bubbles coming up under it. Drawn straight off the beer's surface, every
+ * bubble that broke poked the whole top of the head as it went - dozens a
+ * second, and the head juddered at the rate the glass was fizzing.
+ *
+ * What the raft leaves behind is decided by width, not by speed: its surface
+ * is the beer's smoothed sideways, over a span wide enough to swallow a
+ * dimple and far narrower than the glass. Being a smoothing in space rather
+ * than in time it has no memory, so a swirl reaches the head in full. And it
+ * comes to that smoothed line at a pace that depends on how far behind it is -
+ * the two things it must tell apart differ in size as much as in speed, and
+ * followed at one rate there is no setting that does both: slow enough to
+ * lose the fizz takes half the slosh with it, and quick enough to keep the
+ * slosh keeps the fizz. Read as a distance instead, the raft ignores what it
+ * is barely behind and goes with what it is plainly behind, which is a raft
+ * of foam either way round.
+ */
+export function stepRaft(beer: Beer, dt: number): void {
+  if (dt <= 0) return;
+
+  const { w, wave, raft, raftKernel } = beer;
+  const r = (raftKernel.length - 1) >> 1;
+  const near = RAFT_SLOW * dt;
+  const far = RAFT_FAST * dt;
+
+  for (let i = 0; i < w; i++) {
+    let smoothed = 0;
+    for (let j = -r; j <= r; j++) {
+      const at = i + j;
+      smoothed += wave[at < 0 ? 0 : at > w - 1 ? w - 1 : at] * raftKernel[j + r];
+    }
+    const gap = smoothed - raft[i];
+    const t = Math.min(1, Math.abs(gap) / RAFT_REACH);
+    raft[i] += gap * Math.min(1, near + (far - near) * t * t);
+  }
 }
 
 /**
@@ -809,8 +1421,12 @@ export function settleHead(beer: Beer, params: BeerParams, dt: number): void {
   for (let i = 0; i < w; i++) head[i] *= drained;
 }
 
+/** How much livelier the fizz is while the glass is still being poured. */
+const POUR_FIZZ = 2.6;
+
 /**
- * One frame of the loop: waves, stir, rise, fuse, pop, settle, nucleate.
+ * One frame of the loop: pour, waves, stir, rise, fuse, pop, spray, raft,
+ * settle, nucleate.
  *
  * The order matters in two places. Popping comes after rising, or a bubble
  * spends a frame sticking out of the surface. And the stir comes after the
@@ -829,49 +1445,86 @@ export function stepBeer(
 
   beer.time += dt;
 
-  stepWaves(beer, params, dt);
+  // The pour: a glass below its fill line climbs to it. A glass at the line
+  // stays there; params are fixed for a mount, so it never has to fall.
+  const pouring = beer.level < params.fill;
+  if (pouring) {
+    beer.level = params.pourRate > 0 ? Math.min(params.fill, beer.level + params.pourRate * dt) : params.fill;
+  }
+
+  stepWaves(beer, params, dt, rand);
   stirBubbles(beer, params, stirs, dt, stirLifetime);
   driftBubbles(beer, params, dt);
   fuseBubbles(beer, params);
-  popBubbles(beer, params);
+  popBubbles(beer, params, rand);
+  stepDrops(beer, params, dt);
+  stepRaft(beer, dt);
   settleHead(beer, params, dt);
 
   // Nucleation. The debt is carried between steps rather than rounded, so a rate
   // that works out at less than one bubble a frame still produces bubbles at the
-  // right rate instead of none at all.
+  // right rate instead of none at all. A glass being poured fizzes harder -
+  // pouring is when the carbonation is liveliest.
   const aspect = aspectOf(beer);
-  beer.owed += params.rate * aspect * dt;
-  while (beer.owed >= 1) {
+  const supply = params.rate * aspect * dt * (pouring ? POUR_FIZZ : 1);
+  const streamed = beer.sites.length > 0 ? Math.min(1, Math.max(0, params.streaming)) : 0;
+
+  beer.owed += supply * (1 - streamed);
+  for (const site of beer.sites) site.owed += supply * streamed * site.weight;
+
+  let full = false;
+  while (beer.owed >= 1 && !full) {
     beer.owed -= 1;
+    const start = nucleate(beer, params, rand);
     // Off the floor of the glass, and a radius *below* the bottom edge rather
     // than on it. Nucleating exactly on the last row draws every new bubble at
     // half strength along the bottom of the canvas, which reads as a dotted
     // line rather than as fizz coming up off the base.
-    if (!addBubble(beer, params, rand, rand() * aspect, 1 + params.radius)) {
-      // Full. The debt is dropped rather than banked, or the moment a bubble
-      // pops the backlog fires as a burst.
-      beer.owed = 0;
-      break;
+    full = !addBubble(beer, params, rand, start.x, 1 + params.radius, start.scale);
+  }
+  for (const site of beer.sites) {
+    while (site.owed >= 1 && !full) {
+      site.owed -= 1;
+      const jitter = site.x + (rand() - 0.5) * 4 * params.radius;
+      const x = jitter < 0 ? 0 : jitter > aspect ? aspect : jitter;
+      full = !addBubble(beer, params, rand, x, 1 + params.radius, site.size);
     }
+  }
+  if (full) {
+    // The debts are dropped rather than banked, or the moment a bubble pops
+    // the backlog fires as a burst.
+    beer.owed = 0;
+    for (const site of beer.sites) site.owed = 0;
   }
 }
 
 /**
- * Carries a glass over to a resized one: the bubbles and the clock as they are,
- * the per-column state resampled.
+ * Carries a glass over to a resized one: the bubbles, the droplets, the level
+ * and the clock as they are, the per-column state resampled.
  *
  * The bubbles are in height units and so mean the same thing at any resolution,
- * which is why a window drag does not have to empty the glass. The head and the
- * wave field are per column - a column means a different place at a new width -
- * so they are resampled rather than dropped: losing the head on every resize is
- * a visible flash of flat beer, and losing the waves mid-slosh is a surface
- * snapping level for no reason a viewer can see.
+ * which is why a window drag does not have to empty the glass. The head, the
+ * waves, the raft and the flow are per column or per face - a column means a
+ * different place at a new width - so they are resampled rather than dropped:
+ * losing the head on every resize is a visible flash of flat beer, and losing
+ * the waves mid-slosh is a surface snapping level for no reason a viewer can
+ * see. The sites are rescaled to the new width rather than carried or rerolled:
+ * a site is a spot on the glass, and the glass got wider - carried straight
+ * across, every stream on a narrowed window piles up on the right-hand wall.
  */
 export function carryBeer(from: Beer, to: Beer): void {
   to.bubbles = from.bubbles;
+  to.drops = from.drops;
+  to.level = from.level;
   to.time = from.time;
   to.owed = from.owed;
   to.seed = from.seed;
+
+  const fromAspect = aspectOf(from);
+  const toAspect = aspectOf(to);
+  to.sites = from.sites;
+  const stretch = fromAspect > 0 ? toAspect / fromAspect : 1;
+  for (const site of to.sites) site.x *= stretch;
 
   const [toSpan] = cellSpansOf(to);
   const [fromSpan] = cellSpansOf(from);
@@ -879,7 +1532,12 @@ export function carryBeer(from: Beer, to: Beer): void {
     const x = i * toSpan;
     to.head[i] = sampleColumn(from.head, fromSpan, x);
     to.wave[i] = sampleColumn(from.wave, fromSpan, x);
-    to.waveV[i] = sampleColumn(from.waveV, fromSpan, x);
+    to.raft[i] = sampleColumn(from.raft, fromSpan, x);
+  }
+  // The flow lives on the faces, half a span in from the columns on either
+  // side, so its samples are taken half a span over on both grids.
+  for (let k = 0; k < to.w - 1; k++) {
+    to.flow[k] = sampleColumn(from.flow, fromSpan, (k + 0.5) * toSpan - fromSpan * 0.5);
   }
 }
 
@@ -901,10 +1559,10 @@ function ramp(value: number, low: number, high: number): number {
 }
 
 /**
- * How much foam is at a point, 0 to 1, given the head's thickness and the liquid
- * line in that column.
+ * How much foam is at a point, 0 to 1, given the head's thickness and the line
+ * the raft rides in that column.
  *
- * Density falls off from the liquid line to the top of the head, and the noise
+ * Density falls off from the raft's line to the top of the head, and the noise
  * is added *before* the threshold rather than multiplied in afterwards. That is
  * what gives the head a ragged top edge rather than a fading one: near the top,
  * density and threshold are close enough that the noise decides which side of it
@@ -914,7 +1572,7 @@ function ramp(value: number, low: number, high: number): number {
 export function foamAt(beer: Beer, params: BeerParams, x: number, y: number, thickness: number, line: number): number {
   if (thickness <= 0) return 0;
 
-  // 0 at the liquid line, 1 at the top of the head. Slightly negative is
+  // 0 at the raft's line, 1 at the top of the head. Slightly negative is
   // allowed: foam floats a little way into the beer, and letting it do so is
   // what hides the join.
   const depth = (line - y) / thickness;
@@ -938,7 +1596,8 @@ export function foamAt(beer: Beer, params: BeerParams, x: number, y: number, thi
  *
  * The renderer only pays full price where the picture is. Three lanes:
  *
- * - Rows above the surface band are air: one `fill(0)` for the whole block.
+ * - Rows above the surface band are air: one `fill(0)` for the whole block,
+ *   with the droplets in flight drawn over it.
  * - Rows below it are wet in every column, so a row is its depth shade - one
  *   number - written with a fill, plus the bubbles, applied over their own
  *   bounding boxes only.
@@ -955,29 +1614,36 @@ export function foamAt(beer: Beer, params: BeerParams, x: number, y: number, thi
  * of the frame, and cells no bubble touched were never written at all.
  *
  * One approximation makes the fast lane possible: the depth shading is measured
- * from the pour line rather than the wavy instantaneous surface, so a row's
- * shade is one number rather than per-column. The error is the wave height
- * times `depthFade` - under two hundredths of full scale at the defaults, a
- * fraction of one palette level.
+ * from the level rather than the wavy instantaneous surface, so a row's shade
+ * is one number rather than per-column. The error is the wave height times
+ * `depthFade` - under two hundredths of full scale at the defaults, a fraction
+ * of one palette level.
  */
 export function renderBeer(beer: Beer, params: BeerParams): void {
-  const { w, h, field, raw, head, line, bubbles, wave } = beer;
+  const { w, h, field, raw, head, line, bubbles, wave, raft, drops } = beer;
   const [spanX, spanY] = cellSpansOf(beer);
-  const base = 1 - params.fill;
+  const base = 1 - beer.level;
   const halfEdge = params.surfaceWidth / 2;
 
   for (let i = 0; i < w; i++) line[i] = base + wave[i];
 
   // The surface band: the rows in which anything other than plain liquid or
   // plain air can appear, across all columns - from the top of the tallest
-  // foam to the bottom of the deepest surface ramp.
+  // foam, measured off the raft it rides, to the bottom of the deepest surface
+  // ramp. The raft and the line differ by at most a ripple, and the band takes
+  // in both.
   let top = Infinity;
   let bottom = -Infinity;
   for (let i = 0; i < w; i++) {
-    const above = Math.max(1.3 * head[i], halfEdge);
-    const below = Math.max(0.2 * head[i], halfEdge);
-    if (line[i] - above < top) top = line[i] - above;
-    if (line[i] + below > bottom) bottom = line[i] + below;
+    const rides = base + raft[i];
+    const foamTop = rides - Math.max(1.3 * head[i], halfEdge);
+    const foamFoot = rides + Math.max(0.2 * head[i], halfEdge);
+    const wetTop = line[i] - halfEdge;
+    const wetFoot = line[i] + halfEdge;
+    if (foamTop < top) top = foamTop;
+    if (wetTop < top) top = wetTop;
+    if (foamFoot > bottom) bottom = foamFoot;
+    if (wetFoot > bottom) bottom = wetFoot;
   }
 
   let bandFrom = 0;
@@ -1019,7 +1685,7 @@ export function renderBeer(beer: Beer, params: BeerParams): void {
   for (let j = bandFrom; j <= bandTo; j++) {
     const y = j * spanY;
     const row = j * w;
-    // Held at zero above the pour line, which the foam reaches over. It needs
+    // Held at zero above the level, which the foam reaches over. It needs
     // no ceiling: `y` cannot exceed 1 and the denominator is what is left of
     // the glass below the line, so the ratio arrives at 1 at the very bottom
     // and no further.
@@ -1044,7 +1710,7 @@ export function renderBeer(beer: Beer, params: BeerParams): void {
         if (strength > low) value += ramp(strength, low, high) * params.bubble * wet;
       }
 
-      const foam = foamAt(beer, params, i * spanX, y, head[i], surface);
+      const foam = foamAt(beer, params, i * spanX, y, head[i], base + raft[i]);
       // Over the top rather than added to it: the head sits on the beer, and
       // adding the two would blow the brightest bubbles out to white.
       if (foam > value) value = foam;
@@ -1055,8 +1721,8 @@ export function renderBeer(beer: Beer, params: BeerParams): void {
 
   // Below the band every column is wet and foamless, so a row is one number.
   // The depth needs no clamping at either end down here: the band reaches at
-  // least to the deepest column's liquid line, and the waves are zero-mean so
-  // the deepest line is never above the pour line, which puts every row below
+  // least to the deepest column's liquid line, and the waves are levelled so
+  // the deepest line is never above the level, which puts every row below
   // the band between the line and the bottom of the glass.
   for (let j = bandTo + 1; j < h; j++) {
     const depth = (j * spanY - base) / denominator;
@@ -1091,6 +1757,36 @@ export function renderBeer(beer: Beer, params: BeerParams): void {
         if (strength > low) {
           const value = field[k] + ramp(strength, low, high) * params.bubble;
           field[k] = value > 1 ? 1 : value;
+        }
+      }
+    }
+  }
+
+  // The droplets, over everything: they are in the air, where the field is
+  // zero, and a droplet crossing the band on its way down is *in front of*
+  // the foam it passes. Each one is drawn alone rather than summed into `raw`
+  // - spray is spray, not a metaball - as bright as a lit bubble, which is
+  // what a bead of the same beer catching the same light would be.
+  if (drops.length > 0) {
+    const bright = Math.min(1, params.liquid + params.bubble);
+    for (const drop of drops) {
+      const i0 = spanX > 0 ? Math.max(0, Math.ceil((drop.x - drop.radius) / spanX)) : 0;
+      const i1 = spanX > 0 ? Math.min(w - 1, Math.floor((drop.x + drop.radius) / spanX)) : w - 1;
+      const j0 = spanY > 0 ? Math.max(0, Math.ceil((drop.y - drop.radius) / spanY)) : 0;
+      const j1 = spanY > 0 ? Math.min(h - 1, Math.floor((drop.y + drop.radius) / spanY)) : h - 1;
+
+      for (let j = j0; j <= j1; j++) {
+        const dy = j * spanY - drop.y;
+        const dy2 = dy * dy;
+        const row = j * w;
+
+        for (let i = i0; i <= i1; i++) {
+          const dx = i * spanX - drop.x;
+          const strength = falloff(dx * dx + dy2, drop.radius);
+          if (strength <= low) continue;
+          const value = ramp(strength, low, high) * bright;
+          const k = row + i;
+          if (value > field[k]) field[k] = value;
         }
       }
     }

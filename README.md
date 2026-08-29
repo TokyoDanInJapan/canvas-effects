@@ -3,7 +3,7 @@
 Eight animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**. They modulate the
 page colour rather than becoming a picture, and stay quiet enough that a reader should not consciously notice them.
 
-No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All eight together are 21.0 kB
+No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All eight together are 23.0 kB
 minified and gzipped.
 
 The `canvas-effects` name on the npm registry belongs to an unrelated package, so this one installs from GitHub. npm
@@ -68,12 +68,16 @@ _Press and drag to aim it._
 
 ![Beer](docs/screens/beer.png)
 
-**Beer** - `createBeerBackground`. A glass filled to a set level, fizzing. Bubbles nucleate on the bottom, rise, swell
-as the pressure above them drops, and burst at the surface. They are metaballs, so two that pass close fuse into one.
-The head is not drawn: a bursting bubble hands its own area to the foam, the foam drains and levels sideways, and the
-thickness you see is where those two rates balance. The surface is a simulated wave field - bursts splash it, and the
-slosh after a stir is only the waves reflecting between the walls. _Drag to stir it - the fizz follows the pointer, the
-drag scrapes loose more of it, and a sweep along the surface ploughs a bow wave through it._
+**Beer** - `createBeerBackground`. A glass poured to a set level, fizzing. Bubbles stream up from fixed nucleation
+sites, swell as the pressure above them drops, and burst at the surface. They are metaballs, so two that pass close
+fuse into one. The head is not drawn: a bursting bubble hands its own area to the foam, the foam drains and levels
+sideways, and the thickness you see is where those two rates balance. The surface is shallow water - a height per
+column and a flow between them - so waves cross a full glass faster than a half-poured one, a hard-driven crest breaks
+into foam and spray, and the slosh after a stir is the beer itself piling against a wall and swinging back, as high as
+the window if you drive it. Set `pour: true` and the glass opens empty and fills itself. Colour it the way you colour
+any effect here - a `shading` with a `ramp` pours it amber. _Drag to stir it - the fizz follows the pointer, the drag
+scrapes loose more of it, and the sweep sets the beer sloshing. Click to jab it: a splash, a burst of spray, and the
+fizz it knocks loose._
 
 ## Quick start
 
@@ -201,7 +205,7 @@ screen, and the ramp decides which. `buildPalette(shading, levels)` is exported 
 | Metaballs  | Picks the nearest blob up, carries it, and throws it when you let go.                                        |
 | Tunnel     | Steers the vanishing point towards the pointer, easing back on release.                                      |
 | Mandelbrot | Aims the zoom at the nearest filigree to the pointer, on the way in.                                         |
-| Beer       | Stirs it: the fizz follows the drag, more of it comes loose, and a bow wave sloshes off through the surface. |
+| Beer       | Stirs it: the fizz follows the drag, more of it comes loose, and the beer piles up the leading wall and sloshes back. A press jabs it - splash, spray and fresh fizz. |
 
 `interactive: false` turns any of them off. Emissions are spaced by _distance_ along the drag rather than throttled by
 time, so a slow careful drag lays down as densely as a fast one. Each effect also caps how many disturbances run at
@@ -243,8 +247,9 @@ in it. The dither shrinks itself out of the way as the palette fills: at 256 lev
 
 `polar` bends the lookup rather than the field. Each effect goes on drawing its rectangle exactly as before, and one
 axis of that rectangle is then read as the angle about a centre and the other as the distance from it. The rain falls
-outwards from the middle of the page, the ridges stack into rings, the tunnel comes back round on itself. It works with
-all eight because none of them is involved.
+outwards from the middle of the page, the ridges stack into rings, the tunnel comes back round on itself - and with
+`reverse: true` the whole thing turns inside-out, so the rain falls *in* and the beer pools round the centre with its
+head ringing it. It works with all eight because none of them is involved.
 
 ```js
 createRainBackground(canvas, { polar: true });
@@ -262,6 +267,7 @@ createRidgesBackground(canvas, {
 | `radius`    | `1`          | How far out the field reaches. `1` is exactly to the corners.                                         |
 | `seam`      | `'mirror'`   | `'mirror'` folds the join away; `'wrap'` keeps the field the right way round and shows it.            |
 | `angleAxis` | `'x'`        | Which axis carries the angle. `'x'` sends the field's rows out as rings, `'y'` its columns as spokes. |
+| `reverse`   | `false`      | Reads the radius inside-out: what sat at the centre wears the rim, and everything that travelled outwards travels in. |
 
 **The seam is the choice worth making deliberately.** A field is a rectangle, and its left and right edges have no
 reason to meet: wrap one round a circle and there is a join along a radius. The default reflects at each edge instead,
