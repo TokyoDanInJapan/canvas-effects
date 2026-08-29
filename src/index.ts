@@ -1,13 +1,13 @@
-// canvas-effects: six animated, ordered-dithered greyscale backgrounds for a
+// canvas-effects: eight animated, ordered-dithered greyscale backgrounds for a
 // 2D canvas. See the README for what they are and how they work.
 //
 // Three layers, and you can enter at any of them:
 //
-//   • The mounts - `createSmokeBackground` and the five beside it. A canvas in,
+//   • The mounts - `createSmokeBackground` and the seven beside it. A canvas in,
 //     a handle out, everything wired up.
 //   • The rendering - `createSurface` and the dither and noise it is built on,
-//     plus `mountBackground` if you would rather write a seventh effect than use
-//     one of these six. Use these to shade a field of your own.
+//     plus `mountBackground` if you would rather write a ninth effect than use
+//     one of these eight. Use these to shade a field of your own.
 //   • The maths - the fluid solver, the domain warp, the projections. All
 //     DOM-free and usable on their own.
 //
@@ -50,7 +50,9 @@ export {
   type MandelbrotBackgroundOptions,
 } from './mandelbrot-background.js';
 
-// The mount harness the six above are built on, for writing a seventh.
+export { createBeerBackground, BEER_BACKGROUND_DEFAULTS, type BeerBackgroundOptions } from './beer-background.js';
+
+// The mount harness the eight above are built on, for writing a ninth.
 export {
   mountBackground,
   createAgeingList,
@@ -191,6 +193,39 @@ export {
   type MandelbrotPhase,
   type MandelbrotState,
 } from './mandelbrot.js';
+
+// The glass, the fizz and the head.
+export {
+  BEER_DEFAULTS,
+  addBubble,
+  breakCrests,
+  carryBeer,
+  createBeer,
+  driftBubbles,
+  foamAt,
+  fuseBubbles,
+  headAt,
+  headVolume,
+  popBubbles,
+  pressBeer,
+  renderBeer,
+  rollSites,
+  seedBubbles,
+  settleHead,
+  splashSurface,
+  stepBeer,
+  stepDrops,
+  stepRaft,
+  stepWaves,
+  stirBubbles,
+  surfaceAt,
+  type Beer,
+  type BeerParams,
+  type Bubble,
+  type Drop,
+  type Site,
+  type Stir,
+} from './beer.js';
 
 export { withDefaults } from './options.js';
 

@@ -90,7 +90,8 @@ export interface CommonBackgroundOptions {
    * effect, because the effect is not involved: it draws its rectangle exactly
    * as before and only the lookup that reads it is bent. The rain falls out
    * from the centre, the ridges stack into rings, the tunnel comes back round
-   * on itself.
+   * on itself - and `reverse` turns any of them inside-out, so the rain falls
+   * in instead.
    *
    * Two things to know before turning it on. The centre is where the transform
    * is weakest - one pixel there covers every angle at once, so the innermost
