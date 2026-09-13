@@ -346,10 +346,23 @@ export interface Polar {
    *
    * `'x'` - the default - lays the field's rows out as rings, so anything
    * travelling down the field travels outwards: rain falls away from the
-   * centre. `'y'` lays its columns out as spokes, and the same motion becomes a
+   * centre. `'y'` lays its columns as spokes, and the same motion becomes a
    * rotation about the centre instead.
    */
   angleAxis?: 'x' | 'y';
+  /**
+   * Read the radius the other way round - inside-out. The edge of the field
+   * that normally sits at the centre sits at the rim instead, and everything
+   * that travelled outwards travels in: the rain falls in towards the middle,
+   * the ridges stack towards it, the beer pools round the centre with its
+   * head ringing it and the air at the rim.
+   *
+   * The far corners clamp to the end of the radius exactly as they do the
+   * right way round - only now that end is the field's *first* row, so a
+   * field whose quiet edge is its top wears this best with `radius` at 1 or
+   * above.
+   */
+  reverse?: boolean;
 }
 
 /** A polar setting, or the two ways of saying there is not one. */
@@ -364,6 +377,7 @@ export const POLAR_DEFAULTS: Required<Polar> = {
   // radial join is the one thing here that a reader's eye does catch.
   seam: 'mirror',
   angleAxis: 'x',
+  reverse: false,
 };
 
 /**
@@ -439,7 +453,11 @@ export function polarSample(
   // Clamped rather than allowed past the end: `radius` above 1 puts the corners
   // beyond the field, and reading its last row there beats reading past it.
   const distance = Math.hypot(dx, dy);
-  const radius = reach > 0 ? (distance < reach ? distance / reach : 1) : 0;
+  const outward = reach > 0 ? (distance < reach ? distance / reach : 1) : 0;
+  // `reverse` turns the picture inside-out, and it is one subtraction here
+  // rather than anything anywhere else: the lookup table and the pointer both
+  // come through this function, so both are turned together.
+  const radius = polar.reverse ? 1 - outward : outward;
 
   // `atan2` runs -pi..pi. The half turn added is what makes `rotate: 0` put the
   // field's leading edge at nine o'clock. `rotate` comes off the *revolution*

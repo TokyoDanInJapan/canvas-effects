@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as index from './index.js';
 import * as background from './background.js';
+import * as beer from './beer.js';
 import * as dither from './dither.js';
 import * as driver from './driver.js';
 import * as mandelbrot from './mandelbrot.js';
@@ -29,6 +30,7 @@ import * as ridges from './ridges.js';
 import * as smoke from './smoke.js';
 import * as tunnel from './tunnel.js';
 
+import * as beerBackground from './beer-background.js';
 import * as mandelbrotBackground from './mandelbrot-background.js';
 import * as metaballsBackground from './metaballs-background.js';
 import * as plasmaBackground from './plasma-background.js';
@@ -44,6 +46,8 @@ import * as tunnelBackground from './tunnel-background.js';
  */
 const MODULES: Array<{ name: string; module: Record<string, unknown> }> = [
   { name: 'background', module: background },
+  { name: 'beer', module: beer },
+  { name: 'beer-background', module: beerBackground },
   { name: 'dither', module: dither },
   { name: 'driver', module: driver },
   { name: 'mandelbrot', module: mandelbrot },
@@ -84,7 +88,7 @@ describe('index', () => {
     expect(missing).toEqual([]);
   });
 
-  it('exports the seven mounts and their defaults', () => {
+  it('exports the eight mounts and their defaults', () => {
     // The documented entry points, spelled out rather than derived: this is the
     // list the README promises.
     for (const name of [
@@ -95,6 +99,7 @@ describe('index', () => {
       'createMetaballsBackground',
       'createTunnelBackground',
       'createMandelbrotBackground',
+      'createBeerBackground',
     ]) {
       expect(typeof index[name as keyof typeof index]).toBe('function');
     }
@@ -107,6 +112,7 @@ describe('index', () => {
       'METABALLS_BACKGROUND_DEFAULTS',
       'TUNNEL_BACKGROUND_DEFAULTS',
       'MANDELBROT_BACKGROUND_DEFAULTS',
+      'BEER_BACKGROUND_DEFAULTS',
     ]) {
       expect(index[name as keyof typeof index]).toBeTypeOf('object');
     }

@@ -1,885 +1,841 @@
 # How it works
 
-The [README](../README.md) is the short version. This is the long one: what each effect actually does, why it does it
-that way, and where the numbers came from.
+This document describes what each effect does, why, and where the numbers come from. The [README](../README.md) is
+the short version.
 
-Most of it was arrived at by measuring rather than by reasoning, and the places where the obvious approach turned out to
-be wrong are recorded as such - they are the parts worth reading before changing anything.
-
-The source carries the same reasoning at closer range. Every parameter is documented where it is declared, with a note on
-what it does and where its default came from.
+Most numbers come from measurement. Where the obvious approach failed, this document records the failure. Read those
+parts before you change the code. The source gives the same reasons in more detail, next to each parameter.
 
 ---
 
-## The shared half: two resolutions and a dither
+## Shared rendering: two resolutions and a dither
 
-All seven render at two scales at once, and this is what makes them cheap enough to leave running:
+All eight effects render at two resolutions. This keeps them cheap enough to run all the time.
 
-- The **field** - the expensive part, whatever generates it - is computed at `pixelSize × fieldScale` CSS pixels per
-  cell. The smoke and plasma fields are soft and low-frequency and gain nothing from more samples, so they run at half
-  the output resolution. The rain runs at 1:1 for a reason of its own, below. This is where all the real work happens.
-- The **output** is `pixelSize` CSS pixels per pixel, bilinearly interpolated up from that field and then dithered. Per
-  pixel that is a handful of multiply-adds and a table lookup.
+- The **field** is the expensive part. Each field cell is `pixelSize × fieldScale` CSS pixels. Soft fields, such as the
+  smoke and the plasma, use half the output resolution. The rain uses the full resolution, for a reason given below.
+- The **output** is `pixelSize` CSS pixels per pixel. The library interpolates it from the field and then dithers it.
+  Each pixel costs a few multiply-adds and a table lookup.
 
-Then the output is posterised to five greys - and that is where the dither earns its place.
+The output then has five greys only. The dither makes this work.
 
-**Why dither at all?** A five-level palette on its own gives five flat plateaus with visible steps between them. Nudging
-each pixel by its 4×4 Bayer threshold before rounding means a value halfway between two levels lands on the lower one
-for half the pixels in the cell and the higher one for the other half. The region reads as the intermediate shade, and a
-gradient crossing it breaks into texture rather than a band.
+**Why dither?** Five levels alone give five flat areas with visible steps. The dither moves each pixel by its 4×4 Bayer
+threshold before rounding. A value halfway between two levels then rounds down in half the cell and up in the other
+half. The area looks like the shade between them, and a gradient becomes texture, not bands.
 
-**At one CSS pixel a cell it turns itself off**, which `dither: 'auto'` does by default - and that is a choice about
-look rather than a correction. The obvious reasoning for it is wrong: at that size the Bayer pattern sits at the
-display's own pitch, which is where dithering works best, and rendering the same view both ways shows it blending into a
-genuinely smooth gradient. What turning it off buys is the other look - crisp posterised regions with clean curved
-boundaries between them, which is only available at native resolution, since at any coarser size undithered output is
-just visible steps. `dither: true` keeps the smooth version at any size. See "Running at native resolution" in the
-README for the cost, which is considerable.
+**At one CSS pixel per cell, the dither turns off.** `dither: 'auto'` does this to give a different look. The Bayer
+pattern works best at the pitch of the display. With the dither off, you get crisp flat areas with clean curved edges,
+which is possible only at native resolution. `dither: true` keeps the smooth look at any size.
 
-**Seeing it for yourself.** `dither: false` posterises flat instead. The palette is identical either way - only the
-distribution changes - so it is the cleanest demonstration of what the Bayer threshold is doing. Measured on the demo,
-switching it off takes the proportion of horizontally adjacent pixels that differ from 47.5% to 10.4% on the smoke and
-from 53.1% to 4.7% on the plasma: texture becomes plateaus. It is not a performance dial. Both paths quantise once per
-pixel and the dither adds an array lookup and an add.
+**To compare, set `dither: false`.** The palette stays the same, and only the distribution of levels changes. On the
+demo, the fraction of neighbouring pixels that differ falls from 47.5% to 10.4% on the smoke, and from 53.1% to 4.7% on
+the plasma. The dither does not change performance, because both paths quantise once per pixel.
 
-The Bayer matrix is normalised to `(m + 0.5) / 16`, which averages to **exactly 0.5**. That is the property the whole
-effect rests on: the offset it adds averages to nothing, so dithering changes _which_ level a pixel lands on without
-changing the average brightness of a region. There is a unit test pinning it.
+The Bayer matrix is normalised to `(m + 0.5) / 16`, which averages to exactly 0.5. As a result, the offset averages to
+zero. The dither changes the level of each pixel but not the average brightness. A unit test checks this.
 
-Finally, every pixel is `base + level × amplitude`. That is what makes these usable behind text: the effect modulates a
-page colour over a narrow range instead of replacing it.
+Each pixel is `base + level × amplitude`. The effect changes the page colour over a narrow range and does not replace
+it, so text on top stays readable.
 
 ## Smoke: a fluid solver
 
-`src/smoke.ts`. Each frame:
+`src/smoke.ts`. Each frame has six steps:
 
-1. **forces** - buoyancy from the smoke's own density, plus a light noise stir
-2. **confinement** - put back the small-scale swirl the solver eats
-3. **advect** - carry the velocity field through itself
-4. **project** - remove the divergence, so the fluid stops compressing
-5. **advect** - carry the density through the corrected velocity
-6. **replenish** - feed a little source back in
+1. **Forces**: buoyancy from the smoke's own density, and a light noise stir.
+2. **Confinement**: add back the small swirls that the solver removes.
+3. **Advect**: move the velocity field along itself.
+4. **Project**: remove the divergence, so the fluid does not compress.
+5. **Advect**: move the density along the corrected velocity.
+6. **Replenish**: add a little smoke back in.
 
-The grid wraps in both directions, which makes the boundary conditions periodic - both the easiest case to solve and the
-one with no edges for a reader to notice.
+The grid wraps in both directions. Periodic boundaries are the easiest to solve, and they have no edges to notice.
 
 ### Why a solver and not curl noise
 
-A curl-noise flow is divergence-free, swirls convincingly, and is far cheaper. What it does not have is **momentum**.
-Its eddies are prescribed by a noise field rather than caused by anything, so they cannot be spun up by the smoke,
-cannot persist once whatever made them has gone, and cannot interact. A real solver gets vortices shedding off shear
-layers, plumes that overturn because they are heavy, and structure with a history. That is the difference between
-something that looks like smoke in a still frame and something that behaves like it in motion.
+Curl noise has no divergence, makes good swirls and costs much less. It has no **momentum**, however. Its eddies come
+from a noise field, so the smoke cannot create them, they cannot outlast their cause and they cannot interact. A real
+solver sheds vortices from shear layers and turns heavy plumes over. Curl noise looks like smoke in a still image, but a
+solver also moves like smoke.
 
-### Step 4 is the whole thing
+### Step 4 is the most important
 
-Advection on its own lets the fluid compress: density piles up, and it reads as a texture being stretched. Solving for
-the pressure whose gradient cancels the divergence, and subtracting it, is what makes it a fluid rather than a warp.
-`smoke.test.ts` asserts the projection removes ~90% of the divergence in one go, and that more iterations removes more.
+Advection alone lets the fluid compress. Density collects in places, and the result looks like a stretched texture. The
+projection finds the pressure whose gradient cancels the divergence, and subtracts that gradient. This step makes the
+effect a fluid and not a warp. `smoke.test.ts` checks that one projection removes about 90% of the divergence, and that
+more iterations remove more.
 
-### Four things that were not obvious, all found by measuring
+### Four results from measurement
 
-**Central differences for both the divergence and the gradient is wrong**, and wrong in a way that looks like a physics
-problem rather than a discretisation one. They compose into a Laplacian spanning two cells, which is not the compact
-five-point stencil the pressure is solved against - so odd and even cells decouple and most of the divergence survives
-the projection. Backward differences for the divergence and forward for the gradient telescope into exactly
-`p[l] + p[r] + p[u] + p[d] - 4p[c]`. That one change took the residual from 35% to under 10%.
+**Central differences for both the divergence and the gradient are wrong.** Together they give a Laplacian that spans
+two cells. The pressure is solved against the compact five-point stencil, so odd and even cells separate, and most of
+the divergence stays. Backward differences for the divergence and forward differences for the gradient give exactly
+`p[l] + p[r] + p[u] + p[d] - 4p[c]`. That change reduced the remaining divergence from 35% to less than 10%.
 
-**Plain semi-Lagrangian advection is too diffusive to hold smoke together.** It resamples every cell every step, so the
-field smooths itself out even where the flow is only carrying it - and smoke without sharp edges is fog. MacCormack
-advection (advect forward, advect back, subtract half the round-trip error) is what keeps the edges. The clamp to the
-cells the trace actually read is not optional: without it the correction overshoots at exactly the edges it exists to
-preserve, pushing densities outside 0..1 and eventually blowing the field up.
+**Plain semi-Lagrangian advection blurs too much.** It resamples every cell every step, so the field smooths itself
+even where the flow only moves it. Smoke without sharp edges looks like fog. MacCormack advection keeps the edges. It
+advects forwards, advects back, and subtracts half the difference. The clamp to the cells that the trace read is
+necessary. Without the clamp, the correction overshoots at the edges and the field eventually blows up.
 
-**Drag dominates the look.** It sets the flow speed, which sets how fast the smoke mixes itself towards uniform. Fast
-flow looks livelier frame to frame and reads as fog within seconds. It has to serve both sides: low enough that a jet's
-momentum crosses the field, high enough that the ambient does not mix itself to fog between jets. It is paired with
-`replenish`, which keeps re-establishing the structure the flow is mixing away - re-sweep the two together if you touch
-either.
+**Drag controls the look.** Drag sets the flow speed, and the flow speed sets how fast the smoke mixes to an even grey.
+Drag must be low enough for a jet's momentum to cross the field. It must also be high enough that the background does
+not become fog between jets. `replenish` rebuilds the structure that the flow mixes away, so change drag and
+`replenish` together.
 
-**Cap the simulation grid, not just the output.** The solver touches every cell a dozen times a frame where shading
-touches each pixel once, so `maxSimCells` matters far more than `maxPixels`.
+**Limit the simulation grid, not only the output.** The solver uses every cell a dozen times a frame, and the shading
+uses each pixel once. `maxSimCells` matters much more than `maxPixels`.
 
 ### Jets
 
-Every ten seconds or so a nozzle opens on a random edge and fires across the field for a second or two. About half are
-dark: a pale jet drives the density up and paints a bright plume, a dark one drives it to nothing and carves a clear
-channel through whatever is there. The momentum is identical either way - the difference is only what the nozzle emits,
-which is why both distort the smoke by the same amount.
+About every ten seconds, a nozzle opens on a random edge and fires across the field. About half the jets are dark. A
+light jet paints a bright plume, and a dark jet cuts a clear channel. Both have the same momentum, so both disturb the
+smoke equally.
 
-The point is momentum, not smoke: it drives the fluid hard enough to shove what is already there aside, and the hole it
-opens and the vortices rolling off its edges are the effect. The velocity is _driven towards_ the jet's rather than
-added to it, so the nozzle behaves like an inflow boundary. It holds a fixed speed however hard the surrounding fluid
-and the drag push back. Adding would make its strength depend on the frame rate and on how long it had been running.
+A jet exists to add momentum. The nozzle moves the velocity *towards* the jet's speed and does not add to it. As a
+result, the nozzle acts as an inflow boundary and keeps a fixed speed against the drag. If the jet added velocity, its
+strength would depend on the frame rate and on how long it had run.
 
-Two things this got wrong on the way, both instructive. A jet is not a puff: the first version dropped a blob of
-_density_ in, which barely showed, because density added to an already-dense field is mostly clamped away and adds no
-motion at all. And a jet needs something to distort - the ambient was briefly thinned right down to give that blob
-headroom, which left the jets tearing through nothing.
+Two early attempts failed. A blob of density did not show, because the field was already dense, so most of the new
+density was clamped away, and a blob adds no motion. Thinner background smoke gave the blob more room, but then the jets
+had nothing to disturb.
 
-### The cursor stirs it
+### The pointer stirs it
 
-Dragging with a button held pushes the fluid along the drag. The listener is on `window` rather than the canvas, because
-a background canvas is `pointer-events: none` so that it never intercepts anything meant for the page - which also means
-it never sees a pointer itself. Idle movement is ignored on purpose: reacting to every twitch would mean the background
-is permanently disturbed by a reader who is only moving the cursor off the text.
+A drag with a button pressed pushes the fluid along the drag. The listener is on `window`, because a background canvas
+has `pointer-events: none` and gets no pointer events. Movement without a press does nothing, because a background that
+reacts to every small movement is never calm.
 
-Velocity is _added_ here rather than driven towards a target as the jet nozzle does - a drag is an impulse, and what
-happens after the reader lets go should be the fluid's business. `strokeMaxSpeed` caps it, so a fast flick stays
-emphatic rather than tearing a hole that takes seconds to settle.
+Unlike the jet nozzle, a drag *adds* velocity. A drag is an impulse, and after release the fluid continues on its own.
+`strokeMaxSpeed` limits the speed, so a fast flick has a strong effect but does not tear a hole.
 
-Measured: a hard drag produces 4.9 mean shade change along the corridor it swept, against 1.8 for the same corridor left
-alone, and 2.4 away from it - the surroundings move too, which is the pressure projection doing its job.
+In a measurement, a hard drag changed the shade along its path by 4.9 on average. The same path without a drag changed
+by 1.8, and areas away from the path changed by 2.4. The areas around the drag also move, because the projection spreads
+the effect.
 
-Pass `interactive: false` to turn it off.
+`interactive: false` turns this off.
 
 ## Plasma: a domain warp
 
-`src/plasma-warp.ts`. Fractal Brownian motion folded into itself, in two stages: the first displaces the sampling
-position, the second is evaluated at that displaced position, and the result is where a seamless plasma tile gets read
-from. Folding it twice is what turns plain cloudy noise into something with filaments and swirls in it.
+`src/plasma-warp.ts`. Fractal Brownian motion is folded into itself twice. The first stage moves the sampling position,
+the second stage is evaluated at that position, and the result is a position in a seamless plasma tile. The double fold
+turns cloudy noise into threads and swirls.
 
-Time enters twice, and it needs to. `drift` slides the whole domain, which on its own would look like a photograph being
-panned. `churn` moves the inner fields against each other, which is what makes it evolve in place.
+Time is used in two places. `drift` moves the whole domain, which alone looks like a moving photograph. `churn` moves
+the inner fields against each other, so the pattern changes in place.
 
-The warp is evaluated on a coarse 36×28 grid and interpolated per pixel, so the noise runs ~1,000 times a frame instead
-of once per pixel. That grid is rectangular because the domain it samples is. x is stretched by 4/3 so the field does
-not look squashed on a wide window, and the grid has to be wider by the same factor. Otherwise each cell covers a third
-more domain in x than in y, and the warp reads as smeared sideways. 36×28 puts the cells within 2.8% of square, where a 32×32
-grid at the same cost would be 33% out. The two are a pair - change one and the other has to follow. The tile it samples has every frequency at an integer number of cycles across it, which is what makes
-it wrap without a seam - and it has to wrap, because warped coordinates wander a long way outside `[0, 1]`.
+The library evaluates the warp on a coarse 36×28 grid and interpolates it for each pixel. As a result, the noise runs
+about 1,000 times a frame, not once per pixel. The grid is rectangular because the domain is. The x axis is stretched by
+4/3 so that the field is not squashed on a wide window, so the grid must be wider by the same factor. With 36×28, the
+cells are within 2.8% of square. A 32×32 grid has the same cost but is 33% out of square. If you change one, change the
+other. Every frequency in the tile has a whole number of cycles, so the tile wraps without a seam. The tile must wrap,
+because warped coordinates go far outside `[0, 1]`.
 
-Domain warping is a well-known technique. The layers under it are an integer hash, value noise on the hash, and fbm on
-the noise. The hash mixes with MurmurHash3's public-domain finalising constants, credited in the source.
+Domain warping is a well-known technique. It uses an integer hash, value noise and fbm. The hash uses the public-domain
+finalising constants of MurmurHash3, and the source credits them.
 
-**Click to ripple.** A click sends a ring of radial displacement out from where it landed, added to the finished warp
-coordinate. Two details make it behave:
+**Click to send a ripple.** A click sends a ring of radial displacement out from the point. Two details are important:
 
-- It is anchored in **screen** space, not the warp's domain. The domain drifts, so a ripple placed in domain coordinates
-  would slide across the page and not stay where it was clicked.
-- Its age runs on a **real-time** clock, deliberately not on animation time. Animation time is scaled by `speed`, so
-  ageing a ripple on it would make one last four times as long at quarter speed. The disturbance would slow down along
-  with the field it is disturbing, which is not how a splash behaves.
+- The ripple is fixed in **screen** space. The domain drifts, so a ripple fixed in domain coordinates would move across
+  the page.
+- The ripple's age uses **real time**, not animation time. Animation time scales with `speed`, so at quarter speed a
+  ripple would last four times as long.
 
-The ring is a Gaussian band about an expanding radius, so the disturbance travels outward rather than the whole disc
-heaving at once, and distances are aspect-corrected so it stays circular on a wide window. Measured in the browser: pixels
-changing per 250ms goes from 508 idle to 2147 just after a click, and back to 471 once the lifetime elapses.
+The ring is a Gaussian band around a growing radius, so the ring travels outwards and the disc inside it stays still.
+Distances are corrected for aspect ratio, so the ring stays circular. In a measurement, the pixels that changed in
+250 ms went from 508 at rest to 2,147 after a click, and back to 471 when the ripple ended.
 
-Listened for on `window` rather than the canvas, for the same reason the smoke's stirring is - a background canvas is
-`pointer-events: none`, so it never sees a pointer itself. `interactive: false` turns it off, and `maxRipples` bounds how many
-run at once, and a click over that is dropped rather than queued, so a burst does not leave a backlog rippling after the
-reader has stopped.
+As for the smoke, the listener is on `window`. `maxRipples` limits how many ripples run at the same time. A click over
+the limit is ignored, so a burst of clicks does not build a queue.
 
-The plasma also carries a motion blur - each frame mixes towards the last - which smooths the underlying field between
-frames so cells drift between palette levels rather than flicking between them. Note that the gamma is applied
-_before_ the blur, so successive frames agree with each other.
+The plasma also has a motion blur. Each frame mixes towards the previous frame, so cells move gradually between palette
+levels and do not flicker. The gamma applies *before* the blur, so that the frames agree.
 
 ## Rain: falling lanes
 
-`src/rain.ts`. One lane per field column. Each frame the whole field is multiplied down by a decay factor, then every
-active head moves down its lane and writes brightness into the cells it crossed. That is the entire simulation.
+`src/rain.ts`. There is one lane per field column. Each frame, the library multiplies the whole field by a decay
+factor. Then every head moves down its lane and writes brightness into the cells it passed. That is the whole
+simulation.
 
-**The trail is a consequence, not a drawing.** The obvious implementation draws a gradient of length `L` behind each
-head. That needs `L` as a parameter, recomputes the gradient every frame, and breaks when a head moves more than one
-cell per frame - the tail either detaches or has to be stitched back on. Decaying the whole field instead costs
-one multiply per cell, and handles any speed without a special case. It gets two things right for free. A fast head
-leaves a **longer** streak than a slow one, because its brightness has had less time to fade over the same distance. And a
-head retiring at the bottom leaves its trail to fade in place rather than vanishing with it.
+**Nothing draws the trail.** The obvious approach draws a gradient of length `L` behind each head. That approach needs
+`L` as a parameter, and it fails when a head moves more than one cell a frame. Decay costs one multiply per cell and
+works at any speed. It also gives two correct results. A fast head leaves a longer streak, because its brightness has
+less time to fade over the same distance. A head that stops leaves its trail to fade where it is.
 
-Trail length is therefore not a parameter but a ratio. A streak reaches `speed × ln(1 / brightness) / fade` cells
-before decaying to that brightness - at the defaults, on a ~90-cell-tall field, still half-lit 15 cells back, a
-fifth-lit at 34, invisible around 64. Change `speed` and `fade` has to move with it or the look changes as much as the
-pace does.
+As a result, trail length is a ratio. A streak reaches `speed × ln(1 / brightness) / fade` cells. At the defaults on a
+90-cell field, the trail is half as bright 15 cells back, a fifth as bright at 34 cells, and invisible at about 64
+cells. If you change `speed`, change `fade` too.
 
-The decay is exponential rather than linear, so it is frame-rate independent: halving `dt` and stepping twice leaves
-the same brightness behind. There is a test pinning that to three decimal places.
+The decay is exponential, so it does not depend on the frame rate. Two half-steps give the same brightness as one full
+step. A test checks this to three decimal places.
 
-### `fieldScale` is 1 here, and that matters
+### `fieldScale` is 1
 
-The smoke, the plasma and the metaballs render the field at half the output resolution and let bilinear interpolation
-smooth it. For a continuous field that is free smoothing. For discrete lanes it is **blur** - neighbouring lanes bleed into each other
-and crisp streaks turn into soft vertical smudges.
-
-At `fieldScale: 1` every output pixel maps to exactly one field cell, the horizontal interpolation weight is zero
-everywhere, and the streaks stay sharp. `maxFieldCells` is matched to `maxPixels` for the same reason: capping the
-field would silently reintroduce the interpolation the scale of one exists to avoid. Raising `fieldScale` is the single
-biggest thing you can do to make this look wrong.
+The smoke, plasma and metaballs render the field at half resolution, and interpolation smooths it. For a continuous
+field, this is free smoothing. For separate lanes, it is **blur**. Neighbouring lanes mix, and sharp streaks become
+smudges. At `fieldScale: 1` each output pixel is one field cell, and the streaks stay sharp. `maxFieldCells` matches
+`maxPixels` for the same reason, because a smaller field would add interpolation back. A larger `fieldScale` does the
+most damage to this effect.
 
 ### Click to distort
 
-A click sends an expanding ring through the rain that _displaces what is already there_ rather than adding light of its
-own - a droplet on glass acting as a lens, bending the streaks as it passes. `distortField` returns the plain field
-untouched when nothing is running, so an idle page pays nothing, not even a copy, and only the cells a ring can reach
-are recomputed.
+A click sends a growing ring that *moves the existing picture* and adds no light, like a lens. When no ring is active,
+`distortField` returns the field unchanged, so an idle page costs nothing. The library recomputes only the cells that a
+ring can reach.
 
-Sampling wraps sideways and clamps vertically. Wrapping in x matches the lanes, so a ring near an edge pulls streaks
-round from the far side. Clamping in y is right for exactly the reason it would be wrong in the smoke. Rain has a top it
-falls from and a bottom it retires at, and wrapping would drag the bottom of the screen back up into the top.
+Sampling wraps horizontally and clamps vertically. Horizontal wrapping matches the lanes, so a ring near an edge pulls
+streaks from the other side. Rain has a top and a bottom, so vertical wrapping would pull the bottom into the top. The
+smoke has no top or bottom, so it wraps in both directions.
 
-**It is subtler than the plasma's ripple, and structurally so.** The plasma is a dense continuous field, so a
-displacement always has something to move. The rain is about 13% covered, so a ring frequently passes through empty space
-with nothing to bend. Measured, a ring mid-flight nearly doubles how much of the screen changes frame to frame - 2191
-pixels against 1169 idle - and it reads better in motion than in a still, where the eye follows the moving
-discontinuity. `distortStrength` is the dial if you want more of it.
+The rain's ripple is less visible than the plasma's. The plasma is a dense field, so a displacement always moves
+something. The rain covers about 13% of the screen, so a ring often passes through empty space. In a measurement, a
+ring almost doubled the changing pixels, from 1,169 at rest to 2,191. For a stronger effect, increase
+`distortStrength`.
 
-### Why no characters
+### Why there are no characters
 
-This is the falling-light half of the Matrix look, not the glyphs. The renderer takes a scalar field and posterises it
-to five greys through a 4×4 Bayer matrix on a 6px cell - at that size a character is about three cells tall and reads
-as noise. Streaks survive the palette, and letterforms do not. Glyphs would need their own renderer and would not share the
-dither at all, which is a different library rather than a fourth effect in this one.
+The rain is the falling light from the Matrix, without the characters. At a 6 px cell, a character is about three cells
+tall and looks like noise. Streaks survive the small palette, but letters do not. Characters would also need a separate
+renderer that does not use the dither.
 
-## Ridges: a landscape flown over
+## Ridges: flying over a landscape
 
-`src/ridges.ts`. Rows of a 2D terrain drawn as stacked 1D curves, with the near rows hiding the far ones.
+`src/ridges.ts`. The effect draws rows of a 2D terrain as a stack of 1D curves. Near rows hide far rows.
 
-**Hidden lines are the effect.** Without occlusion this is a tangle of overlapping squiggles. With it you get depth,
-and the characteristic bitten-out look where a near crest eats into the rows above. It is done with a floating horizon:
-draw from nearest to farthest, keep the highest point covered so far per column, and skip anything at or below it. One
-pass, no z-buffer, no sorting - `rows × width` work for a whole frame.
+**The hidden lines make the effect.** Without them, the effect is a tangle of lines. A floating horizon hides them. The
+library draws from nearest to farthest, keeps the highest covered point in each column and skips anything at or below
+it. This takes one pass, with no z-buffer and no sorting.
 
-**Rows roll off the bottom rather than being deleted at it.** `overscan` keeps rows alive past the near edge. A crest stays
-visible long after its baseline has left the screen, and its silhouette must keep occluding what is behind it. Without
-it the nearest row crept down to `bottomMargin`, popped out of existence the moment `travel` crossed the next whole
-number, and nothing was ever drawn below `bottomMargin` at all.
+**Rows move off the bottom of the screen before they are deleted.** `overscan` keeps rows past the near edge, because a
+crest must continue to hide the rows behind it after its baseline leaves the screen. Without `overscan`, the nearest row
+disappeared each time `travel` passed a whole number.
 
-One subtlety that came with it: `rowAmplitude` freezes a row's size once it passes the near edge. Strict perspective
-would keep enlarging it - you are flying into it - and a row barely past the edge would loom several screen heights
-tall and throw a silhouette across the whole field. Worse, that growth outruns the baseline's, so the row would never
-qualify as fully below the screen and would never leave. Freezing the size lets it simply slide out of frame. Rows that
-are entirely below the edge are skipped, so `overscan` is a bound rather than a workload.
+`rowAmplitude` stops a row growing once it passes the near edge. In strict perspective, the row would continue to grow
+and become several screens tall. It would also grow faster than its baseline moves, so it would never leave the screen.
+With a fixed size, it moves out of the frame. The library skips rows that are fully below the edge, so `overscan` is a
+limit and adds no work.
 
-**Filling and trails**, both off by default. `fill` turns the stack from a pile of lines into a pile of solid
-silhouettes, and it costs nothing to work out where. The floating horizon already knows the topmost point covered by
-nearer rows, so the fill runs from a row's own curve down to that. It is exactly the region belonging to that row. `fillLevel`
-keeps it dimmer than the line so the crest still reads against its own body. Measured: filling takes the lit fraction of
-the screen from 24% to 85%.
+**Fills and trails** are both off by default. `fill` makes the lines into solid shapes. The floating horizon already
+knows the highest covered point, so the fill goes from the row's curve down to that point at no extra cost. With
+`fill`, the lit part of the screen increases from 24% to 85%. `fillLevel` keeps the fill darker than the line, so the
+crest stays visible. Without `fillRandom`, keep `fillLevel` below 1, or the shapes look flat. At the default of 0.34,
+an eight-level ramp still shows eight colours, with a mean channel value of 58 against 106. This keeps the effect
+usable behind text.
 
-`fillLevel` is a ceiling on fill brightness and scales both kinds. Without `fillRandom` it wants to stay below 1, or
-the silhouettes go flat and the ridgelines vanish into them. With `fillRandom` it darkens the whole set without
-flattening it. At the default 0.34 the fills still span every palette colour and are simply dimmer. Measured on an
-eight-level violet ramp: eight distinct colours at both 0.34 and 1.0, with mean channel value 58 against 106. That is
-what keeps it usable behind text.
+`fillRandom` gives each row its own fill value, so each shape has a different palette colour. Use it with a ramp. The
+value comes from a hash of the row's `worldZ`, so a row keeps its colour for its whole life. A new random value each
+frame would make the stack flash. The fill ignores depth, because a fade with distance would make the colours too
+similar.
 
-`fillRandom` gives every profile its own fill value instead, so each silhouette takes a different colour from the
-palette - pair it with a ramp. The value comes from hashing the row's `worldZ` rather than being rolled per frame, which
-is the whole trick: a row keeps its colour for its entire life as it descends, where a per-frame roll would make the
-stack strobe. It ignores depth on purpose, since fading the fills by distance would pull the colours back towards each
-other, though it does respect `fillLevel`. With dithering on, each fill is a mix of two neighbouring palette colours. `dither: false` gives flat single ones.
+`trail` keeps part of the previous frame, so a falling crest leaves a smear. The library fades the previous frame and
+takes the maximum with the new one. A blend would make the lines dimmer. Full brightness must stay exactly 1, or
+one-cell lines do not survive the dither. The trail gives the field a state, which the rest of the effect does not
+have. The trail needs no special handling for hidden lines, because it is above the line, where the horizon does not
+clip.
 
-`trail` keeps a fraction of the previous frame, so a descending crest smears behind itself. It is faded and maxed rather
-than blended, like the rain's trails - a lerp towards the new frame would dim the lines, and full brightness has to stay
-exactly 1 or one-cell line art stops surviving the dither. Note that this makes the field **stateful**, which the rest of
-this effect otherwise is not. It needs no special handling against the occlusion: the profiles descend, so the ghost sits
-above the line, on the side the horizon does not clip.
+**Rows follow `travel`, not screen position.** Each profile belongs to a whole number of `travel`, keeps its shape for
+its whole life, and moves down as you fly past. If profiles belong to screen positions, the terrain changes in place,
+which looks like morphing and not like flight.
 
-**Rows are indexed by travel, not by screen position.** A profile is tied to a whole number of `travel`, so it keeps
-its own shape for its whole life and simply slides down as you fly past it. A new one enters at the top each time
-`travel` crosses an integer. Tying profiles to screen slots instead makes the terrain churn in place without ever
-arriving, which looks like morphing rather than flight.
+The terrain is *ridged* noise. `1 - |2n - 1|` folds fbm about its middle and turns hills into sharp crests. Plain fbm
+gives rounded dunes. A Gaussian window (`focus`) puts most of the activity in a central band and keeps the edges flat.
 
-The terrain is _ridged_ noise - `1 - |2n - 1|` folds fbm about its midpoint and turns smooth hills into sharp crests.
-Plain fbm gives rolling dunes, which read as a landscape rather than as a signal. A Gaussian window (`focus`)
-concentrates the activity into a central band and lets the edges lie flat, which is the signature of the reference.
+### Why lines survive the dither
 
-### Why line art survives the dither
+A small palette usually breaks one-cell lines into dashes. Here, **0 and 1 are fixed points of the ordered dither**. A
+cell at full brightness rounds to the top level at every Bayer position, so a line drawn at 1 stays whole.
 
-Posterising to five greys through a Bayer matrix would normally shred one-cell-wide lines into dashes. It does not
-here, because **0 and 1 are fixed points of the ordered dither** - a cell at full brightness lands on the top level for
-every Bayer position, so a line drawn at 1 comes through intact.
+Values *between* levels break up, and the effect uses this. `depthFade` draws distant rows dimmer, so they fall between
+levels and dither into haze. This gives atmospheric perspective at no cost.
 
-Values _between_ palette levels are the ones that break up, and that is put to work: distant rows are drawn dimmer via
-`depthFade`, land off-level, and dither into haze. Atmospheric perspective for free, from the thing that would
-otherwise be a problem.
-
-Two consequences worth knowing. `fieldScale` is 1, for the same reason as the rain and the tunnel - interpolating between
-cells smears line art. And `pixelSize` defaults to **4** rather than 6: a line is one cell wide, and at 6 the lines are thick
-relative to the gaps between rows, so the stack reads as static rather than as a plot. Four still clears the pixel
-ceiling at 1080p (480 × 270 = 129,600 against a 160,000 cap).
+This has two results. `fieldScale` is 1, as for the rain, because interpolation blurs lines. `pixelSize` defaults to 4,
+not 6, because a line is one cell wide, and at 6 the lines are too thick for the gaps between rows. A `pixelSize` of 4
+stays inside the pixel limit at 1080p (480 × 270 = 129,600, against a limit of 160,000).
 
 ### Click a line to wobble the stack
 
-A click sets a disturbance running from the profile it landed on. It is a **wave packet** - an envelope around a
-travelling front times an oscillation - so the struck line ripples through a few crests rather than heaving once. A lone
-Gaussian would read as a shockwave, which is a different thing.
+A click starts a disturbance from the profile under the pointer. The disturbance is a **wave packet**, which is an
+envelope multiplied by an oscillation, so the line ripples through a few crests. A single Gaussian looks like a shock
+wave instead.
 
-Two decisions carry it:
+Two decisions make it work:
 
-- **It is keyed to the row, not the screen point.** A wobble stores the `worldZ` of the profile it hit, so it travels
-  with the terrain as that profile approaches. Anchored to a screen position instead, it would sit still while rows slid
-  through it, which reads as a stationary distortion rather than as something you did to the landscape.
-- **Distance is measured in a space where a row counts as `wobbleRowSpacing` across.** That is what makes one front
-  spread sideways along the struck line _and_ outward through its neighbours. It is the dial between a wobble that runs
-  along one line and one that crosses the stack. Lower spreads across rows faster.
+- **The wobble belongs to the row, not the screen point.** It stores the `worldZ` of the profile, so it moves with the
+  terrain. A wobble fixed to the screen would stay still while the rows moved through it.
+- **Distance counts one row as `wobbleRowSpacing`.** This setting controls whether a wobble stays on one line or crosses
+  the stack.
 
-Working out which profile was clicked needs `depthAtY`, the inverse of `rowY` - the rows are placed by a perspective
-curve, so it is not a division. The offset is applied to the curve before anything is drawn, so the fill and the
-occlusion follow the wobbled line rather than the flat one.
+To find the profile under the pointer, the library uses `depthAtY`, the inverse of the perspective curve. The offset
+applies before drawing, so the fill and the hidden lines follow the wobbling line.
 
-Measured with the flight slowed right down, so the wobble is the only thing moving: pixels changing per 200ms goes from
-2774 idle to 10901 mid-flight, and back to 2430 once the lifetime elapses.
+In a measurement with the flight stopped, the pixels that changed in 200 ms went from 2,774 at rest to 10,901 during a
+wobble, and back to 2,430.
 
 ## Metaballs: an implicit surface
 
-`src/metaballs.ts`. Each ball adds a falloff to a shared scalar field, and the field is then thresholded to a surface.
+`src/metaballs.ts`. Each ball adds a falloff to a shared field, and a threshold turns the field into a surface.
 
-**The merging is not a drawing trick.** Two balls whose individual contributions both fall short of `iso` can cross it
-together. A bridge appears between them before their outlines touch, thickens as they close, and thins away as they
-part. There is no special case for it anywhere. It is only what a sum does when two falloffs overlap, and
-`metaballs.test.ts` pins exactly that: each ball alone below the threshold at the midpoint, the pair above it.
+**No code draws the joins.** Two balls that are each below `iso` can be above it together. A bridge forms before their
+outlines touch. It gets thicker, and then thinner as the balls move apart. The sum of two overlapping falloffs makes
+this shape. A test checks that at the midpoint each ball alone is below the threshold, and the pair is above it.
 
-**Wyvill's falloff, not Blinn's exponential.** `exp(-b · r²)` never reaches zero, so every ball influences every cell
-and the cost is cells × balls. `(1 - r²/R²)³` is smooth to the second derivative, needs no transcendental, and is
-_exactly_ zero past R. That last property changes the algorithm rather than just trimming it: each ball scatters itself
-over its own bounding box, so the work is the sum of the ball areas. There is a test asserting the optimised scatter
-matches a naive per-cell gather to six decimal places.
+**The falloff is Wyvill's, not Blinn's exponential.** `exp(-b·r²)` never reaches zero, so every ball affects every
+cell, and the cost is cells × balls. `(1 - r²/R²)³` is smooth to the second derivative, needs no exponential and is
+exactly zero past R. As a result, each ball writes only to its own bounding box, and the work is the sum of the ball
+areas. A test compares this with a simple per-cell sum to six decimal places.
 
-**Stateless in time**, like the plasma. Positions are closed-form functions of the clock - Lissajous figures with
-deliberately incommensurable frequencies, so the set never falls back into its starting arrangement on a visible cycle.
-A frame can be drawn at any moment without having drawn the ones before it, which is what makes the reduced-motion path
-a single draw with no settling run. A test checks that stepping to `t` in forty small renders equals jumping there in
-one.
+**The effect has no state**, like the plasma. Positions are functions of the clock. They are Lissajous figures with
+unrelated frequencies, so the pattern does not visibly repeat. Any frame can be drawn without the frames before it, so
+reduced motion needs one draw only. A test checks that forty small steps equal one large step.
 
-**Positions live in height units.** `x` spans `0..aspect` and `y` spans `0..1`, so distance is isotropic and a ball is
-round on any window. Working in `0..1` on both axes would stretch every blob into an ellipse on a wide screen. A test
-measures a lone blob's extent both ways and requires them equal.
+**Positions use height units.** `x` goes from `0` to `aspect`, and `y` from `0` to `1`. As a result, distance is the
+same in both directions, and a ball is round on any window. A test measures one blob in both directions and requires
+the same size.
 
-**Press and drag to carry a blob around.** A dragged ball is just another contribution to the sum, so it reaches for its
-neighbours exactly as the others do. Run it into one and they fuse. Pull away and the neck stretches and parts. It is
-the one interaction here that needs no emissions at all: the held ball simply _is_ wherever the pointer last was, so
-there is nothing to space out or interpolate, and it comes out smooth for free. Measured against the smoke, which is the yardstick
-for that: variability 0.16 against 0.11, with no stalled samples.
+**Press and drag to carry a blob.** A held ball is one more term in the sum, so it joins and stretches like the others.
+It needs no emissions, because the ball is at the last pointer position, so its motion is smooth. Compared with the
+smoke, the variability was 0.16 against 0.11, with no stalled samples.
 
-**Letting go throws it.** The drag's velocity is handed over on release, so the ball coasts on in the direction it was
-moving and _then_ curves back onto its path. Without that it reads as losing momentum: the blend pulls it straight back,
-and a hard flick and a careful placement look identical. Three details make it behave. Damping is exponential, so it works
-the same at 24fps and 60fps. The handover speed is capped, so a violent flick cannot fling the ball off the edge before
-the blend reels it in. And the position is held inside the field, so a throw at an edge slides along it rather than
-vanishing and reappearing.
+**Release to throw it.** On release, the ball keeps the velocity of the drag, so it coasts and then curves back to its
+path. Without this, a fast flick and a slow placement look the same. Three details make it work:
 
-**Releasing has to be a blend, not a handover.** A ball's position is a closed-form function of the clock, so it never
-stopped moving while you held it. Hand control straight back and it jumps from your cursor to wherever its orbit had got
-to. `BallOverride.weight` eases from 1 to 0 instead, so the ball converges on a target that is itself still travelling.
-There is a test that walks the weight down and requires the gap to the free position to shrink monotonically to zero.
+- The damping is exponential, so 24 fps and 60 fps give the same result.
+- The release speed has a limit, so a flick cannot throw the ball off the edge.
+- The position stays inside the field, so a throw at an edge slides along it.
 
-`grabReach` bounds how near a press has to be. Beyond it a press takes hold of nothing rather than yanking a blob in from
-across the screen. `grabEase` and `releaseEase` are both in real seconds, unscaled by `speed`, so picking a blob up does
-not take four times as long because the arrangement happens to be drifting slowly.
+**Release is a blend.** The ball's free position continued to move while you held the ball, so a direct handover makes
+it jump. `BallOverride.weight` goes from 1 to 0, so the ball moves smoothly towards a target that is also moving. A test
+reduces the weight step by step and requires the gap to shrink steadily to zero.
 
-`shoulder` is the look dial. Narrow gives hard-edged classic metaballs - which at five greys means flat silhouettes,
-because a hard threshold produces a two-value field and wastes the palette entirely. Wide, the default, gives shaded
-blobs whose rims cross several palette levels and dither into a gradient.
+`grabReach` limits how near a press must be, so a press does not pull a blob from across the screen. `grabEase` and
+`releaseEase` use real seconds, not `speed`, so a slow drift does not slow down a grab.
+
+`shoulder` controls the look. A narrow shoulder gives classic hard-edged metaballs, which in five greys are flat
+shapes. A wide shoulder (the default) gives edges that cross several palette levels and dither into a gradient.
 
 ---
 
 ## Tunnel: one division
 
-`src/tunnel.ts`. For every cell, convert its position to polar coordinates about a vanishing point and read a wall
-texture at `(angle, depth / radius)`. That reciprocal is the entire perspective: a point on an infinite cylinder's wall
-projects to a screen radius inversely proportional to how far down the cylinder it sits, so sampling at `depth / radius`
-_is_ the projection. No camera, no matrix, no depth buffer.
+`src/tunnel.ts`. For each cell, the effect converts the position to polar coordinates about a vanishing point. Then it
+reads a wall texture at `(angle, depth / radius)`. That division is the whole perspective, because a point on the wall
+of a cylinder projects to a screen radius in inverse proportion to its distance. There is no camera, matrix or depth
+buffer.
 
-Adding to that coordinate walks the viewer forwards. Because the far wall is compressed into the middle, features do not
-translate outward at a constant rate - they **stretch**, moving further the further out they already are. Measured over
-1.4 s at the defaults, a feature at radius 0.15 moves 0.007 while one at 0.5 moves 0.091 - twelve times as far. That is
-the acceleration you feel. It also means no single cross-correlation shift fits a ray. The first test written for the
-forward motion reported zero displacement while the effect was working perfectly, and had to be rewritten against the
-projection itself.
+An increase in that coordinate moves the viewer forwards. Features do not move outwards at a constant rate. They
+**stretch**, and the farther out a feature is, the faster it moves. Over 1.4 s, a feature at radius 0.15 moved 0.007,
+and a feature at 0.5 moved 0.091, twelve times as far. This gives the feeling of speed. It also means that no single
+shift matches the motion. The first test of forward motion measured zero displacement while the effect worked, so the
+test was rewritten against the projection.
 
-### It winds, which is most of the motion
+### The corridor bends
 
-A straight cylinder with a drifting vanishing point reads as the camera wobbling - everything on screen moves together. A
-corridor whose _axis_ winds reads as flight, because the near wall sweeps past while the far end holds still. That is
-`bend`, and it is exact rather than faked.
+A straight cylinder with a moving vanishing point looks like camera shake, because everything moves together. A
+corridor with a bending *axis* looks like flight, because the near wall sweeps past while the far end stays still.
+`bend` controls this, and the result is exact.
 
-Put the wall at radius 1 about an axis at `(X(z), Y(z))` and project through a pinhole. A wall point at depth `z` and
-angle `t` lands at `R · (X(z) + cos t, Y(z) + sin t)`, where `R = f / z` is the radius the wall appears at. Read that
-backwards - which is what sampling the field does - and the screen offset to undo is `R · X(z)`, with `R` the
-**corrected** radius rather than the raw one. So the exact answer is a fixed point, and one pass of it is enough: solve
-the straight tunnel, look up the axis at the depth that gives, subtract, solve again. One extra square root, and no extra
-`atan2` - the first pass needs only the radius.
+Put the wall at radius 1 about an axis `(X(z), Y(z))` and project it through a pinhole. A point on the wall lands at
+`R·(X(z) + cos t, Y(z) + sin t)`, where `R = f / z`. In reverse, the screen offset to remove is `R·X(z)`, where `R` is
+the **corrected** radius. The exact answer is a fixed point, and one pass is enough. Solve for a straight tunnel, look
+up the axis at that depth, subtract, and solve again. This costs one more square root and no more `atan2`.
 
-`R · X`, not `X`, is the part worth holding onto. A lateral offset subtends less the further away it is, so the
-correction vanishes at the centre of the screen and is largest at the edges. That is what makes the near wall sweep while
-the far end sits still, instead of the whole picture sliding sideways. It is also why the obvious test of it fails:
-measured in the depth coordinate the correction looks _biggest_ at the centre, because `dv/dr` runs away there, so the
-test has to be written against the displacement.
+The offset is `R·X`, not `X`. A sideways offset looks smaller the farther away it is, so the correction is zero at the
+centre and largest at the edges. This makes the near wall sweep. It also makes the obvious test fail. In the depth
+coordinate, the correction looks largest at the centre, so the test must measure the displacement.
 
-Two things fell out of building it:
+Two results came from building it:
 
-- **The axis lookup stops at the edge of the vignette**, and that is not an optimisation. `v` runs away towards the
-  middle, so a winding axis sampled there swings by whole cycles between neighbouring cells and the throat fills with
-  churning noise. Nothing is drawn inside the vignette, so holding the lookup at its edge costs no visible detail - a
-  horizon, in effect, and a bent corridor really is blocked by its own wall beyond some depth.
-- **The axis is tabulated, not evaluated.** Two sines per cell measured 3.8 ms a frame on a 160,000-cell field, as much
-  again as the rest of the effect together. The axis depends on nothing but depth, and one frame only ever sees depths
-  between its furthest corner and the edge of the vignette. So a few hundred samples across that span replace every one
-  of those sines with a lerp, for a third off the bend's cost. The same trick as the wall tile, and a test pins the table
-  against the exact function.
+- **The axis lookup stops at the edge of the vignette.** Towards the centre, `v` grows without limit. An axis sampled
+  there swings through whole cycles between neighbouring cells, and the centre fills with noise. The vignette hides the
+  centre, so no visible detail is lost.
+- **The axis comes from a table.** Two sines per cell took 3.8 ms a frame on a 160,000-cell field. The axis depends on
+  depth only, and one frame uses a limited range of depths. A few hundred samples and a lerp replace the sines, and the
+  bend costs a third less. A test compares the table with the exact function.
 
-The bank is rolled by where the axis has got to rather than by how fast it is moving. The derivative is what a vehicle's
-roll actually follows, but it is a quarter-cycle out of phase with the lean, and that reads as the picture
-counter-rotating against its own bend.
+The bank follows the position of the axis, not its speed. A vehicle follows the derivative, but the derivative is a
+quarter-cycle out of phase, so the picture seems to turn against its own bend.
 
-### The wall is built, not sampled from noise
+### The wall is built from sinusoids
 
-It has to wrap seamlessly around the circumference or a seam runs the length of the tunnel. fbm only wraps when the
-angular span happens to land on an integer lattice boundary. That is a constraint on two parameters at once, and it
-quietly breaks when either moves. A tile of sinusoids at whole-number frequencies is periodic by construction, so it
-wraps whatever the parameters do - the same reason the plasma builds one.
+The wall must wrap round the circumference without a seam, or a seam runs along the tunnel. fbm wraps only when the
+angle range ends on a lattice boundary, which fails when parameters change. A tile of sinusoids with whole-number
+frequencies always wraps.
 
-That is also why `repeats` is a whole number, and it has a consequence that looks like a bug: rotating by a whole number
-of repeats is **invisible**, because it maps the tile onto itself. The tunnel has genuine rotational symmetry of order
-`repeats`. A test for `twist` picked 1.5 turns at two repeats - exactly three whole tiles - and failed while the twist
-worked.
+For this reason, `repeats` is a whole number. A rotation by a whole number of repeats is therefore invisible, because
+it maps the tile onto itself. This can look like a bug. A test for `twist` once used 1.5 turns at two repeats, which is
+three whole tiles, and failed while the twist worked.
 
-### The undersampling, which is what the vignette is really for
+### The vignette hides undersampling
 
-`depth / radius` is not a uniform mapping, so evenly spaced cells do not sample it evenly. The coordinate moves by about
-`depth × cell / radius²` between neighbours, which grows without bound towards the middle. So however fine the field,
-there is an inner disc where consecutive cells land more than half a ring apart and the rings become noise. Two things
-follow, and neither was visible in any aggregate metric:
+`depth / radius` is not uniform, so evenly spaced cells do not sample it evenly. Between neighbouring cells, the
+coordinate changes by about `depth × cell / radius²`, which grows without limit towards the centre. At any resolution,
+there is an inner disc where neighbouring cells are more than half a ring apart, and the rings become noise. This has
+two results:
 
-- **`fieldScale` is 1**, as it is for the rain and the ridges. The first version rendered at `fieldScale: 2` with
-  `depth: 0.34` and was flat mottle with no rings in it at all - recognisable as a tunnel only when rendered at four
-  times the resolution. Supersampling puts a number on it: the error against a 4× reference halves, 0.037 to 0.020.
-- **The vignette is sized to cover that disc**, not just the singularity at the exact centre. Against the tile's highest
-  ring frequency the disc reaches r = 0.30 on a 133-row field and r = 0.20 at the pixel ceiling, so `vignette: 0.3`
-  covers both. Take it much below that and what is uncovered is a patch of moiré rather than a bright core.
+- **`fieldScale` is 1.** The first version used 2 and showed flat mottle with no rings. Against a 4× supersampled
+  reference, the error at 1 is half the error at 2 (0.020 against 0.037).
+- **The vignette covers the whole disc**, not only the centre point. The disc reaches r = 0.30 on a 133-row field, so
+  `vignette: 0.3` covers it. A much smaller vignette shows moiré.
 
-`depth` trades directly against this: it is how many rings land on screen at once, and it pushes the undersampled
-boundary outward as its square root. At the original 0.34 the whole visible annulus spanned 0.47 of a tile - 1.4 rings  - 
-which is why it read as mottle rather than as depth. At 1 it spans 2.3 tiles, or seven rings.
+`depth` affects this directly. It sets how many rings are on the screen, and it moves the undersampled disc outwards
+by its square root. At the original 0.34, the visible ring area held 1.4 rings and looked like mottle. At 1, it holds
+seven.
 
-Cost is an `atan2`, a square root and a reciprocal per cell, plus the bend's second square root and table lookup. On a
-full 160,000-cell field that is 3.9 ms a frame straight and 6.2 ms bent, or 9% and 15% of one core at 24 fps. Between the plasma
-and the fluid solver. That ceiling is only reached above about 3200×1800 - at 1280×800 the bend costs nothing measurable
-against the frame clock's own quantisation.
+Each cell costs an `atan2`, a square root and a division, plus the bend's square root and lookup. On a full
+160,000-cell field, that is 3.9 ms straight and 6.2 ms bent, or 9% and 15% of one core at 24 fps. A field reaches that
+size only above about 3200×1800.
 
 ### Drag to steer it
 
-A press pulls the vanishing point towards the pointer and a release eases it back to its own drift. The blend is carried
-between frames, and is the one piece of state in an effect that is otherwise a pure function of the clock. It eases in
-real seconds rather than scaled ones, because taking hold of the tunnel should not take longer just because the flight
-is slow.
+A press pulls the vanishing point towards the pointer. On release, it moves back to its own drift. The blend is the
+only state in the effect, which is otherwise a function of the clock. The blend uses real seconds, so a slow flight
+does not slow down the steering.
 
-The dark centroid of the whole field is **not** a way to measure this, which cost a metric to find out. The wall's own
-dark bands are spread over the entire frame and swamp the vignette. The centroid sits within 0.002 of the middle
-whatever the steer is doing. Comparing mean brightness in a small disc at the pointer against the same disc at the
-geometric centre does show it.
+The dark centroid of the field does **not** measure the steering. The dark bands of the wall are much stronger than the
+vignette, so the centroid stays within 0.002 of the centre. Instead, compare the mean brightness in a small disc at the
+pointer with the same disc at the centre.
 
 ## Mandelbrot: the picture is its own derivative
 
-`src/mandelbrot.ts`. Everyone has written a Mandelbrot. The interesting question here is not the set - it is how you draw
-one in **five greys at a hundred and twenty cells across**, and the usual answer does not survive that at all.
+`src/mandelbrot.ts`. The problem is to draw the Mandelbrot set in five greys at 120 cells across. The usual method does
+not work at that size.
 
-### Escape time cannot be shaded directly
+### Escape time fails
 
-Colour by iteration count and the bands crowd together without limit as you approach the boundary. However fine the
-field, there is always a region where consecutive cells are more than a band apart - and it is not some corner of the
-picture, it is precisely where all the detail is. Posterising that to five levels makes it worse, not better: the aliased
-bands land on different levels from one frame to the next and the boundary boils.
+If you colour by iteration count, the bands crowd together at the boundary, where the detail is. A small palette makes
+this worse. The bands land on different levels each frame, and the boundary flickers.
 
-### The distance estimate, and why it is free
+### The distance estimate costs almost nothing
 
-Write the smooth escape count in the usual way:
+The usual formula for the smooth escape count is:
 
 ```
 mu = n + 1 - log2(log|z|)
 ```
 
-Now notice what that actually is. The exterior potential of the set - the Douady-Hubbard potential, the Green's function
-of the complement - is `G = log|z_n| / 2^n`. So `log2 G = log2 log|z_n| - n`, and therefore
-
-```
-mu = 1 - log2 G      exactly
-```
-
-mu is not an approximate iteration number. It **is** the potential, on a log scale. And the distance from a point to the
-set is `d = G / |grad G|`, which in terms of mu is
+This is not an approximate iteration count. The exterior potential of the set is `G = log|z_n| / 2^n`, so
+`mu = 1 - log2 G` exactly. `mu` is the potential on a log scale. The distance to the set is `d = G / |grad G|`, which in
+terms of `mu` is:
 
 ```
 d = 1 / (ln2 * |grad mu|)
 ```
 
-`grad mu` is a finite difference over a field that has just been computed. So the distance estimate costs one extra pass
-over the grid and nothing per iteration - no derivative carried through the orbit, no second pass over it. The picture is
-its own derivative.
+`grad mu` is a finite difference over the field that the effect already computed. The distance estimate costs one more
+pass and nothing per iteration.
 
-There is a test pinning this down as an arithmetic fact rather than a claim. Render the same view on a grid and on one
-twice as fine, so that cell `(2i, 2j)` samples exactly the complex point cell `(i, j)` did. The cell is half as wide, so
-the distance reported in cells should be twice. Median ratio over the field: **2.004**.
+A test checks the arithmetic. It renders the same view at two grid densities, and the distance in cells must double.
+The median ratio over the field is 2.004.
 
-### It antialiases itself, which is the part that makes it viable
+### It antialiases itself
 
-A filament thinner than a cell is never sampled. The finite difference therefore under-reads the true gradient and
-reports a distance of about one cell rather than zero - and the filament arrives as a soft grey line instead of falling
-between two samples and vanishing. Sub-cell structure fades out rather than flickering, which is exactly what you want
-from a picture that is about to be posterised.
+The grid does not sample a thread thinner than a cell. The finite difference reads the gradient too low and gives a
+distance of about one cell, not zero. As a result, the thread shows as a soft grey line and does not disappear between
+samples. Detail smaller than a cell fades out and does not flicker, which suits a small palette. An exact distance
+estimate would give the true distance and draw the thread black. The thread would then flash as the zoom moved it
+across the grid.
 
-An analytic distance estimate, carried through the iteration, would not do this. It would report the true distance, the
-filament would be black, and it would strobe as the zoom moved it across the sampling grid.
+### Brightness depends on distance in cells
 
-### Brightness is a function of distance in cells
+A cell gets smaller as the zoom goes deeper, so shading by distance in cells gives the same amount of detail at every
+depth. In a measurement, the field used 0.994 to 0.998 of the full range at the start, at eight doublings and at
+sixteen.
 
-Which is what makes it a zoomer rather than a still. A cell shrinks as the view descends, so shading on a distance
-measured in cells cannot get busier or emptier with depth. Measured: the field spans **0.994 to 0.998** of the full 0..1
-range at the home view, eight doublings down and sixteen doublings down alike.
+The set is dark and the boundary glows. A bright picture on a dark set would be too strong for a background. The
+interior uses the same distance estimate as the rest of the picture, which is important below.
 
-The set itself is drawn dark and the boundary is what glows, rather than the other way round. That is a background
-decision, not an aesthetic one: black-set-on-a-blaze-of-colour is a picture, and this has to be a page. The interior goes
-through the same distance estimate as everything else rather than being forced flat - dark where the neighbourhood is
-flat, lit where it is against the boundary - which is what stops the picture flickering. See "The classification must not
-be a cliff" below.
+`glow` is 4 cells. The output is interpolated before dithering, so a one-cell edge mostly disappears on the screen. At
+1.2 the set was a flat shape. Above about 6, the threads merge into a wash.
 
-`glow` is **4 cells**, which is far wider than "enough to see the boundary" and is chosen for what happens *after* this
-field is drawn. The output interpolates between field cells before dithering, so a rim one cell wide is averaged against
-its neighbours and most of it is gone by the time it reaches the screen. At 1.2 the set came out as a flat silhouette
-with no light on it at all. Past about 6, neighbouring filaments' mantles merge into a wash and the filigree stops
-reading as filigree.
+The exterior contours fade according to what the grid can resolve. They need a distance of at least
+`2 / (bandWidth × ln2)` cells. Below that, they alias, and the glow covers them.
 
-The exterior contours are faded out by how resolvable they are rather than by taste. They repeat every `bandWidth`
-iterations and mu changes by `1 / (ln2 * d)` per cell, so they need `d` of at least `2 / (bandWidth * ln2)` cells to
-survive sampling. Below that they are aliasing, and that is exactly where the glow is taking over anyway.
+### The autopilot aims at threads
 
-### The autopilot aims at a filament, not at a lake
+A target chosen at the start is empty space 20 doublings later. For this reason, the autopilot chooses a new target
+from the current frame every `aimInterval` seconds. It scores each candidate by the **area around it**, not by the cell.
+The area with the most variation wins, but the autopilot first rejects three kinds of area:
 
-A target picked in advance is empty space twenty doublings later - whatever was interesting at 1× is a featureless
-interior or a featureless exterior by the time you get there. So the target is re-chosen from the frame on screen every
-`aimInterval` seconds, and it can only ever be somewhere the current picture has something.
+| Rejected                    | What it is                        | Result without the rule                   |
+| --------------------------- | --------------------------------- | ----------------------------------------- |
+| more than 30% interior      | the edge of a lake                | 77–93% interior for ten seconds at a time |
+| mean brightness above 0.65  | threads finer than the grid       | a flat grey wash in 36% of frames         |
+| less than 10% interior      | open exterior, with no set        | nothing to see in 85% of frames           |
 
-**What it picks matters as much as that it re-picks, and the obvious score is wrong.** So a candidate is scored by the
-**patch around it** rather than by the cell itself. That is the right question, because the autopilot is choosing what
-to magnify, not where to stand. What wins is the most varied patch - filigree, and magnifying filigree gives filigree - but
-only among patches that clear three refusals first.
+All three rules are necessary. Without any one of them, the autopilot fails in a different way:
 
-Three, and not as belt and braces. A frame can be worthless in three different ways, and taking out any one of them
-walks the autopilot straight into another. Each figure below is over five seeded runs of a full descent, sampled twice a
-second:
+- A lake edge is a smooth curve. When magnified, it becomes a straight line.
+- In an area that is bright almost everywhere, every thread is thinner than a cell. The few dark cells, where a thread
+  lands on a sample, give a *high* score. The autopilot aims at them and finds more of the same. More depth did not
+  fix this.
+- With only the first two rules, the safest area is always the one farthest from the set.
 
-| Refused          | What it is                                    | Cost of leaving it out           |
-| ---------------- | --------------------------------------------- | -------------------------------- |
-| more than 30% interior | the edge of a lake                      | **77-93% interior** for stretches of ten seconds |
-| mean brightness over 0.65 | hair finer than the sampling         | **36%** of frames a flat grey wash |
-| less than 10% interior | open exterior, the set out of shot      | **85%** of frames with nothing in them |
+With all three rules, 2% of frames fail. One empty scan does not stop the descent. Three in a row do. When the first
+empty scan stopped the descent, a small canvas went down for only four seconds at a time.
 
-The first is the one everybody thinks of: the edge of a lake is a smooth analytic curve, so magnify it and you have a
-straight line dividing dark from light, for ever.
+### Where it turns round
 
-The second is subtler. Brightness runs with nearness to the set, so a patch bright nearly everywhere is one where every
-filament is thinner than a cell. The distance estimate quite correctly reports "within a cell of the set" for the whole
-neighbourhood, and the frame comes out a flat mid-grey - with stray dark cells where a filament happened to land on a
-sample. **Those stray cells are the trap.** They sit at the far end of the range from everything around them, so the
-patch holding one scores a *high* spread and the autopilot aims at it. Arriving there is more of the same. It is a
-feedback loop, and more depth did not clear it.
+A double holds about 16 significant digits, so the plane runs out at about 1e-16. `minSpan` is 1e-11, about 38
+doublings below the start. Precision alone sets this limit.
 
-The third is what the first two leave. With no floor on the interior fraction the safest patch is always the one
-furthest from the set, and the run ends up in open exterior: soft grey blobs, no filigree, nothing to recognise.
+`minSpan` was 1.5e-7, because depth was thought to cost iterations. **That was wrong.** The number of iterations that a
+frame needs depends on how much boundary is on the screen, not on the magnification. The cost was the same from 24
+doublings to 48. The real limit is how many doubles fit across one field cell, because the distance estimate is a
+finite difference and needs room inside the cell:
 
-All three together: **2%** of frames in any of those states. There is also a counter, because one empty scan is a moment
-and not a verdict: three in a row abandons the descent, one does not. Turning round on the first made a small canvas
-descend for four seconds at a time, then spend the rest of its life pulling out again - the patch window is a large
-fraction of a small frame, and harder to satisfy.
+| Doublings | Span    | Doubles per cell |
+| --------- | ------- | ---------------- |
+| 24        | 1.5e-7  | 9,300,000        |
+| 38        | 1e-11   | 568              |
+| 44        | 1.5e-13 | 9                |
+| 48        | 9.2e-15 | 1                |
 
-### Why it turns round, and why the pull-out needed no animating
+At 44 doublings, the picture is a soft blob with no detail. 38 leaves enough room.
 
-A double holds about 16 significant digits and the coordinates are of order 1, so the plane runs out at about 1e-16.
-A view has to be far wider than that, or neighbouring cells land on the same number. `minSpan` is **1e-11**, about 38
-doublings below home, and precision is the only thing that sets it.
+Two metrics did not show the problem. The fraction of identical neighbouring cells was 15% at 42 doublings, because
+exact equality appears long after the detail has gone. The standard deviation of the field was 0.337 at 44 doublings,
+because a dark area next to a light area has contrast but no detail. The number came from looking at rendered frames.
+The only cost is time. A descent takes about 110 s, not 72 s.
 
-It was 1.5e-7 - fourteen doublings and a factor of fifteen thousand shallower - on the reasoning that depth costs
-iterations on every cell of every frame. **That reasoning was wrong.** The budget a frame needs does not grow with depth:
-it is set by how much boundary is in shot, not by magnification. Holding the false-solid fraction under 5% took between
-2,000 and 3,200 iterations at 24 doublings, at 36 and at 48 alike. Flying the autopilot to each of those floors and
-measuring what it renders says the same: cost 3.4-3.9 ms, false-solid 18-26%, contrast 0.30-0.35, flat all the way
-down.
-
-The useful measure of the precision that *does* bind is **how many representable doubles fit across one field cell**. The
-distance estimate is a finite difference between cells, so it needs sub-cell room to work in:
-
-| doublings | span | doubles per cell |
-| --- | --- | --- |
-| 24 | 1.5e-7 | 9,300,000 |
-| 36 | 3.8e-11 | 2,272 |
-| **38** | **1e-11** | **568** |
-| 40 | 2.4e-12 | 142 |
-| 44 | 1.5e-13 | 9 |
-| 48 | 9.2e-15 | 1 |
-
-Rendering the floor at 44 doublings gives a soft-edged blob with no filigree in it anywhere. 38 leaves real room.
-
-**Two metrics missed this, and it is worth knowing which.** Counting adjacent cells that land on bit-identical escape
-counts reads 15% at 42 doublings and only reaches 79% at 51. That is far too blunt: exact equality is the last symptom,
-long after sub-cell structure has gone. The field's standard deviation is no better. It reads **0.337** at the
-44-doubling floor, because a large dark region beside a large light one has plenty of contrast and no structure
-whatever. It was rendering the frame and looking at it that settled the number.
-
-The one real cost is time: a descent takes about 110 seconds rather than 72, so the cycle is about half again as long.
-`speed` buys the old cadence back at the new depth.
-
-Coming back out is a pure function of the span rather than an animation of its own:
+The way back out is a function of the span:
 
 ```
 centre(span) = deep + (home - deep) * (span - minSpan) / (homeSpan - minSpan)
 ```
 
-It is exactly `deep` at the moment of the turn, so there is no jump, and exactly `home` when the span is home, so the
-pull-out lands framed on the whole set without anything having to steer it there. In between, the screen offset of the
-point it left is `(deep - centre) / span`, which is constant for all but the last instant - so the view magnifies about
-that point and never appears to pan. A first-order ease towards home would have done the opposite: exponential in time
-against a span that is also exponential in time, it reads as an enormous sideways slide while still deep.
+The centre is exactly `deep` at the turn and exactly `home` at the top. Between them, the departure point stays at the
+same place on the screen, so the view zooms about that point and does not pan. An ease towards home would look like a
+very large sideways slide while the view was still deep.
 
-### Nothing is switched, because a zoom is one coherent motion
+### A zoom must be smooth
 
-The other six move diffusely - a fluid churns, rain falls in independent lanes - and the eye does not track any of it.
-A zoom is a single motion of the whole frame, the eye locks onto it, and every discontinuity in it is visible. This
-juddered, and it took four fixes.
+The other effects move in many directions at once, so the eye does not follow any one motion. A zoom is one motion of
+the whole frame, so every jump shows. The first version juddered, and it needed four fixes. The measure is the change
+in apparent motion from frame to frame, against the cruise speed, over a full cycle at 24 fps on a 60 Hz display:
 
-The measurement is the frame-to-frame change in the picture's apparent motion, against the speed it is cruising at, over
-a full cycle with a 24fps loop throttled onto a 60Hz refresh the way `driver.ts` actually does it:
+|                  | Mean     | Worst frame |
+| ---------------- | -------- | ----------- |
+| First version    | 48%      | 386%        |
+| All four fixes   | **1.7%** | **45%**     |
 
-| | mean | worst single frame |
-| --- | --- | --- |
-| as first written | 48% | 386% |
-| all four fixed | **1.7%** | **45%** |
+**1. The timestep was fixed.** This caused most of the 48%. The smoke needs a fixed step, because its advection is
+stable only for a limited step. The zoom does not, because the span and the eases are exact for any step. A fixed step
+is wrong when the frame rate does not divide the refresh rate. At 24 fps on 60 Hz, frames show for 33 ms and 50 ms in
+turn, but the animation moves 41.7 ms each frame. The same effect measured 1.0% on a 144 Hz display, which confirmed
+the cause.
 
-**The timestep was the fixed one**, and that is 48% of the 48%. A fixed step hands over `1 / fps` however long the frame
-took, which the smoke needs. Its advection is only stable over a bounded step, so a slow frame has to make the fluid
-drift slower rather than further. Nothing here is like that: the span is `2^(rate * dt)` and the eases are `approach`,
-both exact for any step. And a constant step is *actively wrong* when the frame rate does not divide the refresh rate.
-At 24fps on 60Hz the driver draws every second or third refresh, so frames are on screen for 33ms and 50ms alternately
-while the animation advances the same 41.7ms for each - equal steps of motion shown for unequal times. The same effect
-measured 1.0% on a 144Hz display, where 24 does divide the refresh, which is what pinned the cause down.
+**2. The rate changed in one frame.** At the bottom, the rate changed from half a doubling a second inwards to two
+outwards. The rate now eases, and both turns start *early* by the coasting distance, so the descent still stops at
+`minSpan` without overshoot. The rate is also **damped**, not lagged. A first-order ease gives full deceleration in the
+first frame of a phase, which is a sudden stop. With damping, the deceleration builds up and then decreases. The worst
+jerk over four cycles fell from 102 to 17 doublings per second cubed.
 
-**The rate was switched.** Reversing at the floor swapped half a doubling a second inwards for two outwards in a single
-frame. It is eased now, and both turns are taken *early* by exactly the distance the deceleration coasts through -
-`rate * turnEase` doublings - so the descent still asymptotes onto `minSpan` and the pull-out onto `homeSpan` instead of
-overshooting.
+**3. The aim jumped.** The autopilot chooses a new cell every `aimInterval`. A single lag towards a target that jumps
+has a corner at each new aim. Those frames moved the picture up to 2.4 times as far as the frames next to them. A
+second lag (`aimSmooth`) makes the first derivative of the position smooth, so a new aim gives a curve.
 
-The rate is **damped rather than lagged**, which is a second correction to the same thing. A first-order ease keeps the
-rate continuous but not its derivative: deceleration arrives at full strength on the very first frame after a phase
-changes and only decays from there, which is precisely what a sudden stop is. Entering a cruise, the deceleration used
-to read 1.06 doublings per second squared on frame one and fall away monotonically. Damped, it starts at 0.18, builds to
-a peak of 0.82 half a second in, and eases off - the zoom accelerates and decelerates instead of switching between
-coasting and slowing. Worst jerk over four cycles went from **102 to 17** doublings per second cubed, and the worst
-single frame for overall smoothness came down from 20% to 12% with it.
+**4. A bug.** The way out measured its progress from `minSpan`, but the descent stops a little above `minSpan`. The
+difference is very small in complex units, but it was divided by a span near 1e-7. The view jumped by an eighth of a
+screen in one frame. The way out now measures from the span where the descent stopped, so both ends are exact.
 
-Both integrate to the same coast, `rate * turnEase`, so `turnSpan` is untouched by the change - it is a change in feel
-and not in where the turns land. `turnEase` went from 0.45 to 0.6 to give the new shape room to be seen.
+### No sudden change between interior and boundary
 
-**The aim jumped.** The autopilot picks a different cell every `aimInterval`, and a single lag chasing a target that
-moves in steps has a continuous position and a discontinuous velocity: a corner at every re-aim. Those frames moved the
-picture up to 2.4 times as far as their neighbours. A second lag in front of the first - `aimSmooth`, half the re-aim
-interval - makes the position smooth in its first derivative too, so a re-aim is a curve.
+Cells flickered between black and bright. The cause looked correct. Interior cells were drawn at zero, and their
+neighbours on the boundary were drawn at one. A cell on the line changed class each time the view moved by less than
+one cell, which happened all the time. At fixed points in the plane, 8.5% of consecutive frames showed a flicker.
 
-**And one real bug, which only a deep zoom could show.** The pull-out's `frame` was measured from `minSpan`, but the
-descent stops a little above it, at whatever the coast covered. The difference is nothing in complex units, and is then
-divided by a span of about 1e-7 to reach the screen. It put the view an eighth of a screen from where the descent left
-it, in one frame, measuring as a ten-fold jump. Measuring from the span the descent actually stopped at makes it exact
-at both ends - `deep` at the turn, `home` at the top.
+The fix removed code. An interior cell already has the iteration limit as its escape count, so the difference from its
+neighbours has a meaning. Deep in the interior the difference is flat, so the distance is very large and the cell is
+black. Next to the boundary the difference is steep, so the cell is bright, like its exterior neighbour. The change
+between classes is now gradual, so a change of class does not matter.
 
-### The classification must not be a cliff
+A small problem remained. A central difference cannot see a feature one cell wide, so a one-cell thread had a dark
+speck in its glow. The classification knows that a cell with a neighbour on the other side of the line is *on* the
+boundary, so its distance is limited to half a cell. The worst difference across the line fell from 0.626 to 0.104.
 
-Individual cells used to flicker between black and bright, frame to frame, and the cause was a special case that read as
-obviously correct: an interior cell was drawn at zero, the darkest the palette goes.
+|                                         | Flicker  |
+| --------------------------------------- | -------- |
+| First version                           | 9.7%     |
+| Same estimate everywhere, and the limit | **2.7%** |
 
-Its neighbour, being right against the boundary, comes out at **one**. A cell on the line between them changes
-classification whenever the view shifts by less than its own width - which it does constantly - so it was alternating
-between the two ends of the palette every frame. Measured at fixed points in the *plane* over a recorded camera path, so
-the view's own motion does not count: **8.5%** of consecutive frames at a sample point were an oscillation rather than a
-movement.
+These are averages over eight seeds and two depths. An earlier version of this table gave 0.11%, from one quiet
+recorded path. A number that depends on the path needs an average. Two other causes were checked and rejected. The
+iteration limit changing gave 2.55% on those frames against 2.38% on others. The contours gave 2.43% with bands against
+2.37% without. The rest comes from the finite iteration limit. At 2,000 iterations there is no flicker, but each frame
+costs six times as much.
 
-Nothing had to be added to fix it, only taken away. An interior cell already carries the iteration budget as its escape
-count, so the difference against its neighbours means something. It is flat in the deep interior, so the distance comes
-out enormous and the cell is black. It is steep next to the boundary, so the cell is bright - which is what its exterior
-neighbour is too. The classification stops being a cliff and the flip stops mattering. The contours are the one exception: an interior
-escape count is the same synthetic number everywhere, so banding it would lay a flat tone across the whole set, and they
-fade out as the distance goes to nothing anyway.
+### The camera has mass, and the goal walks
 
-That left a tail, at 2.4%, from a blind spot rather than a cliff. **A central difference cannot see a feature one cell
-wide.** With exterior on both sides of a single interior cell the two halves cancel, so the estimate reports the set as
-nowhere near, and a one-cell filament got a dark speck down the middle of its own glow. The classification knows what
-the arithmetic cannot. A cell with a neighbour on the other side of the line is *on* the boundary, whatever its
-surroundings make of it, so its distance is capped at half a cell. Worst disagreement across the line went from 0.626 to
-0.104, with a median of 0.002.
+**The camera has momentum.** It is a critically damped spring with velocity as state. It works in screen units, because
+the offset is divided by the span on the way in and on the way out. As a result, the spring behaves the same at every
+magnification. Critical damping is the fastest approach with no overshoot, and an overshoot looks like a wobble. The
+way out used to set its position directly, which removed the sideways velocity of the descent in one frame. Every one
+of the worst frames came from this.
 
-| | flicker |
-| --- | --- |
-| as first written | 9.7% |
-| interior lit by the same estimate, plus the one-cell cap | **2.7%** |
+**The goal moves smoothly.** Two influences move it every frame. It eases *towards* the autopilot's choice, which keeps
+the picture good. It also moves along the boundary. The field's gradient points at the set, so the perpendicular
+follows the boundary at a fixed brightness. Both motions are continuous, so neither jumps. Two approaches failed:
 
-Those are averages over eight seeds and two starting depths each. An earlier version of this table read 0.11% for the
-fixed figure, measured on a single recorded path that happened to be a quiet one - a reminder that a path-dependent
-number needs averaging before it means anything. The improvement is real and is threefold, not eightyfold.
+- **Following the contour alone drifts into the glow.** It keeps its distance from the set and ends in soft exterior,
+  with the set off the screen. The standard deviation of the field was 0.237 with the contour alone, 0.334 with the
+  autopilot alone and 0.354 with both.
+- **The test to keep a goal must be looser than the test to choose one.** When the same test was used, the goal was
+  rejected about once a second. The walk stays a little away from the boundary, so its area always fails the choice
+  test. Once chosen, a goal must only stay on the screen and near the boundary.
 
-Two things that were **not** the cause, both checked before the real one was found. The iteration budget steps up about
-six times a second as the view descends, which reclassifies cells - but reversals on the frames where it ticks (2.55%)
-match the frames where it does not (2.38%). And the exterior contours contribute nothing: with `bands` at zero it is
-2.43% against 2.37%.
+### The zoom must centre on the target
 
-What is left is the ordinary marginality of a finite budget - cells that genuinely sit on the edge of escaping within it
-- and the only cure for that is more iterations. At 2,000 the flicker measures zero, and the frame costs six times as
-much.
+A zoom about the centre of the screen multiplies every screen offset by the zoom factor. An off-centre target moves out
+at `2^speed` a second (1.41 at the default), and the spring closes at about 1.11. The zoom was faster, so the view never
+reached the target. The median distance from view to target was 0.21 screen heights, and the 95th percentile was 0.46.
+With the aim held still during the zoom, the picture zooms about a fixed point and does not zoom and move at the same
+time. Flicker also fell, because less of the picture moves across cells.
 
-### The camera is a mass, and the goal is a walk
+The autopilot moved the target off centre in two more ways. `aimBias` makes each run go somewhere different. It never
+stopped, so the zoom always worked against it. It now sets the direction at the start and fades over about six seconds.
+The autopilot also had no hysteresis, so it moved between candidates with almost equal scores. Half the preference now
+goes to the last aim. This removes ties and still allows a better cell.
 
-Two changes, both about the fact that a zoom is one coherent motion the eye tracks.
+|        | View to aim | View to target |
+| ------ | ----------- | -------------- |
+| Before | 0.082       | 0.206          |
+| After  | **0.047**   | **0.136**      |
 
-**The camera carries momentum**, and it is sprung onto the pull-out's framing as well as onto the aim. Assigning that
-position directly dropped whatever lateral velocity the descent had, in a single frame. Every one of the worst frames
-for smoothness over a whole cycle was one of those transitions.
+The values are median screen heights over four descents.
 
-It is a critically damped spring with velocity as state, worked entirely in screen units. The offset is divided by the
-span going in and multiplied by it coming out, so both the spring and the momentum behind it mean the same thing at
-every magnification. A velocity in complex units would be a hundred-thousand
-times faster by the bottom of a descent. Critically damped on purpose: it is the fastest approach that never
-overshoots, and an overshoot in a background reads as a wobble rather than as weight.
+### It stops to look around, and sometimes backs out
 
-**The goal walks instead of jumping.** It used to be replaced every `aimInterval` by whatever `aimAt` picked, which is
-a corner in the motion however well it is filtered afterwards. Now it moves every frame, under two influences at once:
+The descent has pauses. Every `exploreEvery` seconds, it either **cruises** or **retreats**. A cruise stops the zoom
+and moves sideways at one magnification. A retreat backs out a few doublings for a wider view. About two thirds of a
+cycle is descent, an eighth is cruising, a twentieth is retreat and the rest is the way out. The choices come from
+`hash2` over a counter in the state, so a seeded background repeats exactly.
 
-- **Towards the picker.** `aimAt` still runs on the interval and still chooses well, and the goal is *eased* towards its
-  choice rather than teleported to it. This is the half that keeps the picture good.
-- **Along the boundary.** The field's gradient points towards the set, so its perpendicular is a contour. And since
-  brightness is a function of distance in cells, a contour of equal brightness is a curve at a fixed distance from the
-  set. Running along it traces the filigree. This is the half that explores.
+The same two moves also recover from a bad frame. The move depends on the problem:
 
-Both are continuous, so neither shows as a jump. Getting there took two wrong turns worth recording:
+- A **washed-out** frame has threads finer than the grid. The only fix is to back out. Moving outwards helped but was
+  not enough, because the longest wash fell only from 22.7 s to 13.3 s. A retreat reduced it to 4.7 s. With the eased
+  goal there are no washed-out frames.
+- A **dim** frame has nothing near enough to glow, so backing out makes it emptier. The zoom stops, and the walk moves
+  the view towards something.
 
-- **Contour-following alone drifts into the glow.** With no pull towards the picker the walk holds its distance
-  faithfully and ends up in soft exterior with the set out of shot altogether. Measured by the field's standard
-  deviation, which is what separates a crisp frame from a mushy one: **0.237** against **0.334** for views seated the
-  way `aimAt` seats them, and the frames looked it. With the pull it is **0.354** - better than either.
-- **The keep test must be looser than the pick test.** Asking every three quarters of a second whether the goal is
-  still somewhere `aimAt` *would* choose threw it away about once a second. Every one of those is the jump the walk
-  exists to avoid. Worse, it asked the wrong question. The walk deliberately sits a cell and a half off the boundary,
-  so its patch is bright and nearly empty of interior by construction. 24% of the time it fell under the interior
-  floor and 25% over the brightness ceiling. What matters once a goal is chosen is only whether it is still on screen
-  and still near the boundary.
+The first version backed out of *lakes*, which was worse than both. After it gave up two and a half doublings, it went
+back down to the same place. In four of eight seeded runs, it spent 62% of the time in retreat.
 
-### The zoom has to be anchored to the target, or the target never arrives
+### A wrong measurement
 
-Magnifying about the middle of the screen multiplies any screen offset by the zoom factor. So a target that is not
-already dead centre is being pushed outwards at `2^speed` a second - 1.41 at the default - while the spring closes on it
-at about `1 / aimEase`, which is 1.11. **The zoom wins.** Measured over four descents, the view sat a median of 0.21
-screen heights from its target and a 95th percentile of 0.46, which is most of the way to the edge. It was not lagging
-behind on the way to arriving. It was never going to arrive.
+For a time, the autopilot steered on the interior fraction, because a frame full of the set seemed to be a black
+rectangle. That was wrong. The set is dark and its boundary glows, so an 85% interior frame is 85% dark shape. That
+shape often has a bright spike of exterior in it, which is one of the best pictures that the effect draws. The
+autopilot spent a third of each cycle leaving frames that were good.
 
-Holding the aim still under the zoom takes the exponential out of the problem and leaves the spring to converge on what
-remains. It is also the smoother motion - the picture then magnifies about a fixed point rather than magnifying and
-translating at once - and measurably so: flicker came down as well, since less content sweeps across the cells.
+The replacement is `frameTone`, which gives three numbers from one pass:
 
-Two more things were pulling the target off centre, both in the picker:
+- **Lit fraction** shows whether there is anything to see. It never fell below 0.107 over 1,276 frames.
+- **Mean brightness** finds washed-out frames, which the lit fraction cannot.
+- **Interior share** matters only at zero, when the set is off the screen.
 
-- **`aimBias` never stopped.** It is what sends one run somewhere different from the last, and it does that by
-  preferring a target off to one side. That is right at the start of a descent and wrong for the rest of it, because an
-  off-centre target is one the zoom is permanently pulling away from. It decides the heading now, then fades over about
-  six seconds.
-- **The picker had no hysteresis.** Nothing stopped it hopping between two candidates it scored almost equally, and
-  each hop is both a jolt and a target that was never reached. Half the preference is now where it last pointed, which
-  settles it without ever refusing a better cell - the preference only breaks ties.
+### Cost is the real limit
 
-| | view-to-aim | view-to-target |
-| --- | --- | --- |
-| before | 0.082 | 0.206 |
-| after | **0.047** | **0.136** |
+Cost is cells multiplied by iterations, so both need a limit. A 1280×800 window gives a 126×79 field, which is 9,954
+cells against the limit of 10,000. The iteration limit grows from 90 at the start to 300. A frame takes 0.48 ms at the
+start, 4.5 ms at the bottom and 3.2 ms (median) over a descent. Nearly all of this time is interior cells, which use
+the full iteration limit.
 
-Screen heights, median, over four descents.
+Two approaches did **not** work:
 
-### It stops to look around, and sometimes gives ground
+- **Cycle detection.** An interior orbit falls into a cycle, so detecting the cycle should stop early. In a
+  measurement, it made deep frames 55% slower and changed no cells. At depth, the expensive cells are exterior points
+  that need more than the iteration limit, not periodic points.
+- **More iterations at depth.** The fraction of false interior cells (cells that the limit calls interior, but that
+  escape at 20,000 iterations) is 5% to 20%. It depends on how much boundary is on the screen, not on the magnification.
+  It makes the threads a little too thick, which is acceptable. `iterationsPerDoubling` controls it, at linear cost.
 
-The descent is no longer a single uninterrupted fall. Every `exploreEvery` seconds or so it either **cruises** - eases
-the zoom off and keeps walking sideways at one magnification for a few seconds - or **retreats**, giving up a couple of
-doublings for a wider look before descending again. Roughly two thirds of a cycle is descending, an eighth cruising, a
-twentieth retreating, and the rest the pull-out home. Which and how long come from `hash2` over a counter held in the
-state, so a seeded background still replays exactly without threading a generator through every step.
-
-The same two moves double as the recovery when a frame stops being worth looking at, and **which one depends on why**:
-
-- A **washed** frame is under-resolved - every cell within a cell of the set, the flat mid-grey of hair below the
-  sampling - and the one move that fixes under-resolution is to back out. Sending the walk outwards helps and is not
-  enough: in dense hair there is often nowhere in the frame far from the set to walk *to*, and the longest wash only
-  came down from 22.7s to 13.3s. Retreating took it to 4.7s, and with the goal eased towards the picker there are now
-  none at all.
-- A **dim** frame is the opposite, nothing near enough to be lit, and there backing out only makes it emptier. That one
-  stops instead and lets the walk carry the view to something.
-
-Backing out of a *lake* was the first thing tried, and was much worse than either. A rescue that gives up two and a
-half doublings re-descends into the same place. Four of eight seeded runs spent 62% of their time retreating, and never
-got more than five doublings down at all.
-
-### One measurement that was wrong, and what it cost
-
-For a while this steered on the fraction of the frame that is interior, on the obvious reading that a frame full of set
-is a black rectangle. It is not. The set is drawn dark and only its boundary glows, so a frame that is 85% interior is
-85% *silhouette*. Rendering the frames the metric was calling failures showed one of the better things this draws: a lit
-spike of exterior driven into a dark mass. Steering away from those spent a third of the cycle rescuing frames
-that needed no rescue.
-
-What replaced it is three numbers off one pass over the field, in `frameTone`: how much of the frame is lit, how bright
-it is on average, and how much of it is interior. The lit fraction is "is there anything to see" - it never once fell
-below 0.107 over 1,276 frames. The mean catches the wash, which the lit fraction cannot, since both a wash and a good
-frame reach 1.0 lit. The mean separates them at 0.75 against a 95th percentile of 0.72. And the interior share is not a
-quality measure at all, except at zero, which is the set out of shot.
-
-### The cost, which is the real constraint
-
-Cost is cells times iterations and it is the only effect here where both ends have to be capped. A 1280×800 window gives
-a 126×79 field - 9,954 cells, just under the 10,000 ceiling - with a budget rising from 90 iterations at home to 300.
-A frame is **0.48 ms** at the home view, **4.5 ms** at the floor, and **3.2 ms** median across a whole descent, which is
-the figure that matters now that most of a descent is spent at the ceiling. That is 8% of one core at 24fps. Nearly all
-of it is interior cells, which are the ones that spend the whole budget.
-
-Two things that did **not** work, both worth knowing before trying them again:
-
-- **Cycle detection.** An interior point's orbit falls onto an attracting cycle, so keeping a reference point and
-  doubling the interval before replacing it should find it and cut the budget short. Measured on the larger field and
-  budget in use at the time, it made deep frames **55% slower** - 6.0 ms to 9.4 ms - and classified not one cell
-  differently, because the expensive cells at depth are not periodic. They are exterior points that need more iterations
-  than the budget allows and get called interior when it runs out.
-- **More depth.** The false-solid fraction - cells the budget calls interior that a 20,000-iteration reference says
-  escape - sits at 5% to 20% at these budgets and is driven by how much boundary is in frame rather than by depth. It is
-  visible as filigree that is slightly too thick, which is a graceful failure. `iterationsPerDoubling` is the dial for
-  it, and the per-cell cost is linear in it.
-
-The two ceilings pull against each other and the trade is real: half the cells buys twice the iterations, which is a
-thinner, truer boundary in a coarser picture. 10,000 cells is where both are still just about right.
-
-## Tuning
-
-**Run the demo.** `npm run dev` gives you every dial as a live slider with text on top, which is the only sane way to
-tune any of this.
-
-**`amplitude` is the readability dial.** Body text sits directly on this background. The defaults are deliberately at
-the low end so the effect modulates the page rather than becoming a picture. Raise it for a bolder look, then re-read a
-long paragraph before committing.
-
-**`gamma` weights the field dark without changing the palette.** Both ends of the range are fixed points, so it shifts
-the balance between the greys rather than the greys themselves.
-
-Both defaults were solved **offline across several seeds, not measured in the browser**. A single page load rolls one
-noise field, and an fbm field can be locally dark or light, so one load measures that seed rather than the effect. The
-browser numbers came out non-monotonic in gamma before this was noticed.
-
-- Plasma: with no bias 19.9% of the background sits in the lower half of the palette. `1.18` raises that to 30.1%.
-- Smoke: at `1.0` the darkest grey covered 11%. `1.6` takes it to 23% while leaving 9% at the brightest, so the
-  highlights that make it read as smoke survive. Further, if wanted: `2.0` gives 30%, `2.5` gives 38%.
-
-The smoke settles at a mean density of ~0.36, which is where the reference (`geisswerks.com/smoke`) sits. It needs no
-darkening the way the plasma does - smoke is already mostly clear air.
-
-**The palette and grid were matched against a reference.** The defaults land on greys 18/24/30/36/42 in dark mode and
-235-255 in light, on a 6px cell with a 4×4 Bayer repeat of 24px. That came from measuring <https://codapress.co.uk/>,
-whose background runs 12/22/32 over black in runs of five to six pixels. `pixelSize: 3` looked right but measured half
-their size.
+The two limits work against each other. Half the cells allows twice the iterations, which gives a thinner boundary in a
+coarser picture. At 10,000 cells, both are about right.
 
 ---
 
-## Using the pieces on their own
+## Beer: two rates, not a thickness
 
-Everything is exported, and the maths is deliberately DOM-free so it can be used and tested outside a browser.
+`src/beer.ts`. The effect is a glass filled to `fill`, or filling itself to `fill`. Bubbles rise through it, and a head
+of foam sits on top. From top to bottom, the layers are air, foam, the surface and beer.
 
-Shade a field of your own with the same dither and palette:
+**The bubbles are true metaballs.** The effect imports `falloff` from `metaballs.ts` and does not copy it, because the
+claim is true only with the same kernel. Each bubble adds Wyvill's cubic to a shared field, and a threshold gives the
+surface. The physics joins two bubbles only when their centres are closer than `merge` times the sum of their radii. The field
+joins them much earlier, so the join is already on the screen and the change from two bubbles to one is invisible. A
+test checks a pair that is slightly too far apart to merge but already lit between them.
+
+**No code draws the head.** A bubble bursts when its top edge reaches the surface, and adds its area to the foam. The
+foam drains exponentially and spreads sideways. The head is as thick as those two rates allow. With a lower `rate`, the
+head gets thinner. With a lower `drain`, it grows until `headMax` stops it. No parameter sets the thickness, so the
+settings behave like a real glass.
+
+**A burst adds an area, not a thickness.** The first version put the foam into the one column under the centre of the
+bubble. The thickness was then the area divided by the column width. On a fine field this is very large, `headMax`
+removed most of it, and the head was thin. At 384 columns, the head was less than half as thick as at 96 columns. The
+fix spreads the foam over the columns that the bubble covers and divides by their total width. The foam is then the
+same at any resolution. A test bursts one bubble on a 64-column field and on a 512-column field, and requires the same
+volume.
+
+**The spreading must not run at its stability limit.** Explicit diffusion is stable up to a coefficient of 0.5. At
+exactly 0.5, each column becomes the mean of its neighbours. Odd and even columns separate, and a spike leaves a comb
+pattern that does not fill in. The step is limited to 0.25 and runs several times, so `spread` stays a physical rate at
+any window size.
+
+**The surface is shallow water.** Each column has a height, and each face between columns has a depth-averaged flow.
+The walls reflect. The first version was a plucked string, with one wave speed everywhere and no amount of beer.
+Shallow water gives three behaviours at no cost:
+
+- Wave speed is `sqrt(g × depth)`, so waves in a quarter-full glass move at half the speed of waves in a full glass. A
+  test times a pulse in both.
+- The flow carries itself (the momentum term, read upwind), so a hard-driven front gets steeper.
+- Volume is conserved, because all beer that leaves a column through a face goes into the next column.
+
+`waveSpeed` keeps its meaning. Gravity is `waveSpeed² / fill`, so a full glass sloshes with a period of
+`2 × aspect / waveSpeed`. A test checks this. It starts the fundamental wave, waits half a period, and requires the high
+wall to be below level.
+
+The numerical details all have tests:
+
+- **The grid is staggered**, with heights on columns and flow on faces. This prevents the sawtooth that a collocated
+  grid allows.
+- **The substeps follow a CFL limit** based on the wave speed *and* the flow. With the wave speed alone, a hard flick
+  moves faster than the step, and the surface becomes NaN.
+- **The number of substeps has a limit**, so each frame has a limited speed budget. The flow gets it first. The flow is
+  limited to a few times the wave speed and never more than half the budget, because a pointer can make the flow as
+  large as it likes. Gravity is then reduced to fit the rest, which is always at least half.
+- **That order fixed a real failure.** When only gravity was reduced, a hard swirl gave the solver more flow than the
+  substeps could hold. The advection broke the surface into a sawtooth one cell wide. The slopes of the sawtooth then
+  pushed the flow back up when gravity returned, and the surface never settled. A regression test swirls at the worst
+  setting and requires the surface to settle.
+- **A backstop restarts the surface** if the arithmetic fails anyway, so the renderer never gets a NaN.
+- **Drag is plain friction**, but shear reduces a wave by the square of its wavenumber. As a result, the small waves
+  from bursts fade quickly and the slosh continues. A test checks the ratio.
+- **The waves have no height limit** except the glass. A crest can reach the top of the frame, and a trough can fall to
+  a thin film on the bottom. A `waveMax` limit was removed, because it stopped a hard swirl in a way that a real glass
+  does not.
+
+**A crest that is too steep breaks.** The surface has one height per column, so it can lean up to vertical but no
+further. Beer driven against a wall climbs, curls and breaks, and a height field cannot show that. When a face is
+steeper than beer can stand, the effect lowers it, and the crest gives beer to the trough. This is what breaking is.
+The beer that goes over the top becomes foam and a few droplets. For this reason, a hard stir makes the head thicker.
+
+**Bursts push the flow, and this is the only motion at rest.** A burst pushes the *flow*, not the heights. When bursts
+pushed the heights, two dozen bursts a second showed at once, and the surface shook. A push on the flow must travel
+before it shows, and the surface adds the pushes together as a liquid does. The push has its mean removed, so it moves
+beer but adds none. There is no other background motion. Without fizz, the glass is completely still, which is
+correct.
+
+**A drag does three things.**
+
+- Bubbles near the pointer ease *towards* its speed, and never go faster than it.
+- The drag creates new bubbles, as a real disturbance does.
+- The sideways movement pushes the body of the beer.
+
+The old code drew the shape of a bow wave into the surface, which copied the result and not the cause. Now the drag
+pushes the flow, and the bow wave forms by itself. Flow gathers ahead of the pushed area and spreads behind it, and the
+beer piles up against the wall ahead and swings back. The push gets weaker with depth. A press is a jab, with a splash,
+spray and a few bubbles.
+
+**Only the newest sample pushes.** Every active stir samples the same pointer. If each stir pushed, a fast drag would
+push twice, once through its speed and once through the extra samples that the speed made. A test checks that ten
+stirs push exactly as hard as one.
+
+**The fizz rises in fixed columns.** Bubbles start at fixed nucleation sites. Each site has its own position, rate and
+bubble size, and the rest of the rate starts anywhere. The site shares add up to one, so `rate` stays the total fizz.
+Each site is placed at random inside its own section of the width. With fully random positions, a third of the glass
+often had no site, and the head, which the streams feed, was thin above the gap. For the same reason, the site weights
+stay within a factor of three. The initial bubbles use the same sites, so the streams show from the first frame.
+
+**The head moves as one raft.** A real head has weight and holds together, so it rides the waves and ignores the
+bubbles bursting under it. When the head followed the surface directly, it shook at the rate of the fizz. The foam now
+follows its own line. That line is the surface, smoothed sideways over a width that hides the dent from one burst. The
+line follows the surface at a speed that depends on the distance between them. One fixed speed cannot do both jobs,
+because a speed slow enough to ignore the fizz also removes half the slosh. With a distance-based speed, the raft
+ignores small differences and follows large ones.
+
+**Spray is beer in the air, with the same gravity.** A hard break, a large burst and a press all throw droplets. The
+droplets fly ballistically, mostly stick to the walls, and push the surface where they land. They must use the same
+gravity as the waves. Spray that stays in the air longer than the slosh looks like a different liquid. The effect draws
+droplets separately, not in the metaball field. They are as bright as a lit bubble and appear in front of everything.
+
+**The glass can fill itself.** `level` is live state, and everything reads the surface through it. A glass that starts
+below `fill` rises to it at `pourRate`, with two and a half times the fizz on the way. With `pour: true`, the effect
+starts with an empty glass and does not settle it first. A visitor who asks for reduced motion always gets a full,
+settled glass, because a single still frame of an empty glass shows nothing.
+
+**Bubbles rise with the square of their radius**, from Stokes drag. The first version used a linear law. The square
+looks better because of merges. A merge keeps the area, so the radius grows by √2. The merged bubble then rises twice as
+fast, not 1.4 times, and the smallest bubbles almost float. The speed is limited to four times the mean, because merges
+add up, and without a limit a chain of merges makes a bubble jump.
+
+**Merges use a sorted sweep, not every pair.** An insertion sort keeps the bubbles in x order. It takes one pass and no
+allocation, because bubbles move very little between frames. Each bubble checks to the right only until the gap is too
+large for a merge. Merged bubbles are marked and removed after the sweep, because a swap removal would break the order
+during the sweep. The old check of every pair was the only cost that grew with the square of the count.
+
+**`fieldScale` is 1**, as for the rain and ridges, because the bubbles are a few cells across and the mottling is one
+cell. Interpolation would blur both. `pixelSize` is 3, smaller than for any other effect, because a bubble is a
+hundredth of the height. `levels` defaults to 64, not 5, because the depth fade is a smooth gradient and five greys cut
+it into bands.
+
+**The foam noise is added before the threshold.** Near the top of the foam, density and threshold are close, so the
+noise decides which side each cell is on, and the edge breaks into lumps. Deeper down, density is much larger, so the
+noise only changes the brightness. One lookup does both.
+
+**The renderer does full work only where the picture is.** A profile showed that the render loop took 98% of the frame,
+nearly all on cells of plain beer or plain air. The renderer now has three parts:
+
+- Rows above the surface band get one `fill(0)`.
+- Rows below the band are beer in every column. Each row gets one fill at its depth shade, and then the bubbles in their
+  own bounding boxes.
+- Only the surface band processes each cell.
+
+The bubble field is never fully cleared, because the box pass sets each cell to zero as it reads it. The fast path uses
+one approximation. It measures the depth shade from the level, not from the wavy surface, which is wrong by less than
+one palette level. A test draws the same bubble through both paths and requires identical cells. The foam uses the
+raft's line, the beer uses the surface, and the droplets are drawn last in their own boxes.
+
+At 1080p and the default 3 px cell (a 640×360 field), a frame takes about 0.6 ms to render and 0.7 ms of physics. Nearly
+all the physics time is shallow-water substeps. The breaking pass is skipped on any substep with no steep face. The
+continuity pass already measures the steepness, so the check costs almost nothing.
+
+**A resize keeps the glass.** Bubbles, droplets and the level use height units, so they are correct at any resolution.
+The head, waves, raft and flow are stored per column or per face, so the library resamples them. If the head were
+lost, a resize would show a flash of flat beer. The nucleation sites move to fit the new width. A site is a position on
+the glass. Without this, every stream on a narrower window would collect at the right wall.
+
+## Tuning
+
+**Use the demo.** `npm run dev` opens a page with a slider for every setting. This is the best way to tune the effects.
+
+**`amplitude` controls readability.** Body text sits on this background. The defaults are low on purpose, so the
+effect changes the page colour and does not become a picture. For a stronger look, increase it. Then read a long
+paragraph before you keep the change.
+
+**`gamma` makes the field darker without a change to the palette.** Both ends of the range are fixed points, so gamma
+changes the balance between the greys and not the greys themselves.
+
+The defaults for both came from offline calculation over several seeds, not from the browser. One page load uses one
+noise field, which can be dark or light in places. One load therefore measures the seed, not the effect. Before this
+was found, the browser results did not change steadily with gamma.
+
+- **Plasma**: with no gamma, 19.9% of the background is in the lower half of the palette. `1.18` increases this to
+  30.1%.
+- **Smoke**: at `1.0`, the darkest grey covered 11%. `1.6` increases this to 23% and leaves 9% at the brightest grey,
+  so the highlights stay.
+
+The smoke settles at a mean density of about 0.36, which matches the reference (`geisswerks.com/smoke`). Smoke is
+already mostly clear air, so it does not need to be darker.
+
+**The default palette** in dark mode is greys of 18, 24, 30, 36 and 42, on a 6 px cell.
+
+---
+
+## Use the parts on their own
+
+Everything is exported. The maths does not use the DOM, so it runs and can be tested outside a browser.
+
+To shade your own field with the same dither and palette:
 
 ```js
 import { createSurface } from 'canvas-effects';
@@ -897,7 +853,7 @@ const field = new Float32Array(surface.fieldW * surface.fieldH); // fill with 0.
 surface.shade(field, { base: 18, amplitude: 26 }, 1);
 ```
 
-Or drive the fluid solver headlessly:
+To run the fluid solver without a canvas:
 
 ```js
 import { createFluid, stepFluid, randomizeSmoke, SMOKE_DEFAULTS, meanAbsDivergence } from 'canvas-effects';
@@ -906,8 +862,7 @@ const fluid = createFluid(64, 48);
 const state = randomizeSmoke();
 
 for (let i = 0; i < 100; i++) stepFluid(fluid, SMOKE_DEFAULTS, state, i / 24, 1 / 24);
-console.log(meanAbsDivergence(fluid)); // near zero - the projection is working
+console.log(meanAbsDivergence(fluid)); // near zero, so the projection works
 ```
 
-`makeRandom(seed)` gives a small seeded xorshift generator, so passing it as `random` makes a background reproducible.
-
+`makeRandom(seed)` returns a small seeded xorshift generator. Pass it as `random` to get the same background each time.

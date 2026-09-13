@@ -1,13 +1,13 @@
 # canvas-effects
 
-Seven animated, ordered-dithered greyscale backgrounds for a 2D canvas. They are built to sit **behind body text**. They modulate the
-page colour rather than becoming a picture, and stay quiet enough that a reader should not consciously notice them.
+Eight animated greyscale backgrounds for a 2D canvas, with ordered dithering. They sit behind body text. Each one
+changes the page colour slightly and does not become a picture, so a reader should not notice it.
 
-No WebGL, no shaders, no dependencies. A 2D context, some typed arrays and `putImageData`. All seven together are 17.9 kB
-minified and gzipped.
+There is no WebGL, no shaders and no dependencies. The library uses a 2D context, typed arrays and `putImageData`. All
+eight effects together are 23.0 kB minified and gzipped.
 
-The `canvas-effects` name on the npm registry belongs to an unrelated package, so this one installs from GitHub. npm
-aliases a Git URL under the package's own name, so imports stay `from 'canvas-effects'`:
+An unrelated package already uses the name `canvas-effects` on npm, so install this one from GitHub. npm keeps the
+package's own name, so imports are still `from 'canvas-effects'`.
 
 ```bash
 npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.5.0
@@ -15,56 +15,68 @@ npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.5.0
 
 ## The effects
 
-Each takes a canvas and returns a handle. All seven respond to the pointer.
+Each effect takes a canvas and returns a handle. All eight respond to the pointer.
 
 ![Smoke](docs/screens/smoke.png)
 
-**Smoke** - `createSmokeBackground`. A fluid simulation: semi-Lagrangian advection with a Jacobi pressure projection, the
-scheme from Jos Stam's _Stable Fluids_. It has momentum, so eddies get spun up by the flow and persist after whatever made
-them has gone. Every ten seconds or so a jet fires in from a random edge, about half of them dark. _Drag to stir it._
+**Smoke** (`createSmokeBackground`) is a fluid simulation. It uses semi-Lagrangian advection with a Jacobi pressure
+projection, from Jos Stam's _Stable Fluids_. The fluid has momentum, so eddies form in the flow and stay after their
+cause has gone. About every ten seconds a jet fires in from a random edge. About half the jets are dark. _Drag to stir
+it._
 
 ![Plasma](docs/screens/plasma.png)
 
-**Plasma** - `createPlasmaBackground`. A domain warp: fractal Brownian motion folded into itself,
-`fbm(p + fbm(p + fbm(p)))`, sampling a seamless tile. Stateless in time, so a frame can be drawn at any moment without
-having drawn the ones before it. _Click or drag to send ripples out._
+**Plasma** (`createPlasmaBackground`) is a domain warp. Fractal Brownian motion is folded into itself as
+`fbm(p + fbm(p + fbm(p)))`, and the result samples a seamless tile. It has no state, so any frame can be drawn without
+the frames before it. _Click or drag to send ripples out._
 
 ![Rain](docs/screens/rain.png)
 
-**Rain** - `createRainBackground`. One falling lane per column. Each head lights the cells it passes, and the whole field
-fades every frame. So a trail is not drawn at all. It is simply what has not decayed yet. Streaks of falling light, not
-glyphs. _Click or drag to send lens-like distortions through it._
+**Rain** (`createRainBackground`) has one falling lane per column. Each head lights the cells it passes, and the whole
+field fades every frame. Nothing draws the trails. A trail is the part that has not faded yet. The rain is streaks of
+light, with no characters. _Click or drag to send lens-like distortions through it._
 
 ![Ridges](docs/screens/ridges.png)
 
-**Ridges** - `createRidgesBackground`. A landscape flown over as a stack of profiles, each hiding the ones behind it. The
-look is the ridgeline plot made famous by the cover of Joy Division's _Unknown Pleasures_. Optional `fill` makes them
-solid silhouettes, `fillRandom` gives each its own colour. _Click or drag to set wobbles running through the stack._
+**Ridges** (`createRidgesBackground`) flies over a landscape drawn as a stack of profiles. Each profile hides the ones
+behind it, like the cover of Joy Division's _Unknown Pleasures_. `fill` makes the profiles solid, and `fillRandom` gives
+each one its own colour. _Click or drag to send wobbles through the stack._
 
 ![Metaballs](docs/screens/metaballs.png)
 
-**Metaballs** - `createMetaballsBackground`. An implicit surface. Point sources each add a falloff to a shared field, which is
-then thresholded. Blobs bulge towards each other, fuse with a smooth neck, and part without a seam. Nothing in the
-code knows about necks. _Press and drag to pick a blob up and throw it._
+**Metaballs** (`createMetaballsBackground`) is an implicit surface. Each point source adds a falloff to a shared field,
+and a threshold turns the field into a surface. Blobs bulge towards each other, join with a smooth neck and separate
+cleanly. No code draws the necks. _Press and drag to pick up a blob and throw it._
 
 ![Tunnel](docs/screens/tunnel.png)
 
-**Tunnel** - `createTunnelBackground`. The demoscene standby, and it is one division. Read a wall texture at
-`(angle, depth / radius)`, and that reciprocal _is_ the perspective - no camera, no matrix, no depth buffer. The corridor
-winds and the view banks into the turn, which costs one extra pass of a fixed-point iteration. _Press and drag to steer
-it._
+**Tunnel** (`createTunnelBackground`) is the classic demoscene tunnel. It reads a wall texture at
+`(angle, depth / radius)`, and that division gives the perspective. There is no camera, matrix or depth buffer. The
+corridor bends and the view banks into each turn, for the cost of one more pass of a fixed-point iteration. _Press and
+drag to steer it._
 
 ![Mandelbrot](docs/screens/mandelbrot.png)
 
-**Mandelbrot** - `createMandelbrotBackground`. A zoomer, and the interesting part is how you draw one in five greys at a
-hundred and twenty cells across. Escape-time colouring cannot: the bands crowd together without limit at the boundary and
-alias into noise exactly where the detail is. So it shades on a **distance estimate**, taken for free from the
-picture's own gradient. The smooth escape count _is_ the exterior potential on a log scale. So `1 / (ln2 * |grad mu|)`
-is the distance to the set, and a finite difference over a field already computed gives it.
+**Mandelbrot** (`createMandelbrotBackground`) zooms into the Mandelbrot set in five greys, 120 cells across.
+Escape-time colouring fails at that size, because the bands crowd together at the boundary and turn into noise. This
+effect shades on a **distance estimate** instead. The smooth escape count is the exterior potential on a log scale, so
+`1 / (ln2 * |grad mu|)` gives the distance to the set. A finite difference over the field already computed gives
+`grad mu`.
 
-It steers itself, because a target picked in advance is empty space twenty doublings later. Nor does it simply fall. It pauses to trace
-sideways along the boundary at one magnification, and now and then gives up a couple of doublings for a wider look. It descends about 38 doublings, which is where a double runs out rather than where the iterations do.
-_Press and drag to aim it._
+The zoom steers itself, because a target chosen at the start is empty space 20 doublings later. It also pauses to follow
+the boundary sideways, and sometimes backs out a few doublings for a wider view. It goes about 38 doublings deep, which
+is the limit of double precision. _Press and drag to aim it._
+
+![Beer](docs/screens/beer.png)
+
+**Beer** (`createBeerBackground`) is a glass of fizzing beer. Bubbles rise from fixed nucleation sites, grow as the
+pressure drops and burst at the surface. The bubbles are metaballs, so two that pass close together join. Nothing draws
+the head. Each burst adds foam, the foam drains and spreads, and the head is as thick as those two rates allow.
+
+The surface is shallow water, with a height for each column and a flow between columns. As a result, waves cross a full
+glass faster than a half-full one. A crest driven too hard breaks into foam and spray. After a stir, the beer piles up
+against a wall and swings back. Set `pour: true` to start with an empty glass that fills itself. To colour the beer
+amber, give `shading` a `ramp`. _Drag to stir it. Click to splash it._
 
 ## Quick start
 
@@ -92,17 +104,17 @@ _Press and drag to aim it._
 </script>
 ```
 
-Three things there are load-bearing, not decoration:
+Three parts of this example are necessary:
 
-- **`image-rendering: pixelated`** - the canvas is drawn at one pixel per dither cell and stretched up by CSS. Let the
-  browser smooth it and you have undone the entire dither.
-- **`pointer-events: none`** - a full-bleed fixed canvas would otherwise eat every click on the page. It is also why every
-  interaction listens on `window`: the canvas never sees a pointer itself.
-- **`base` must match the colour of the page behind it.** The canvas is opaque and paints the page colour itself. A
-  mismatch shows as a seam at the canvas edge.
+- **`image-rendering: pixelated`**: the canvas has one pixel per dither cell, and CSS stretches it. If the browser
+  smooths it, the dither is lost.
+- **`pointer-events: none`**: without it, the canvas catches every click on the page. For this reason, the library
+  listens for the pointer on `window`.
+- **`base`** must be the colour of the page. The canvas is opaque and paints the page colour itself. If the colours are
+  different, you see a line at the canvas edge.
 
-`create*` returns **`null`** if the browser will not give up a 2D context. That is the one failure worth handling: the
-page should carry on without a background rather than throw.
+Each `create*` function returns `null` if the browser gives no 2D context. Handle this case so that the page continues
+without a background:
 
 ```js
 const handle = createSmokeBackground(canvas, options);
@@ -116,21 +128,21 @@ handle.start(); // resume the loop
 handle.stop(); // pause it, keep the state
 handle.refresh(); // re-read shading and repaint
 handle.destroy(); // stop and remove every listener
-handle.running; // true while it is actually drawing
+handle.running; // true while it is drawing
 handle.still; // true while reduced motion holds it to one frame
 handle.canvas; // the canvas it is mounted on
 ```
 
-`destroy()` removes everything it added, so mounting and unmounting in a single-page app does not leak.
+`destroy()` removes everything that the handle added, so mounting and unmounting in a single-page app does not leak.
 
-`running` and `still` are what a play/pause control wants. `running` is false while the tab is hidden or the loop is
-stopped. `still` says _why_ `start()` may be refusing: the visitor has asked for less motion. The preference is
-watched, not sampled once, so a visitor who changes their mind mid-visit gets the moving version without a reload.
+Use `running` and `still` for a play and pause control. `running` is false while the tab is hidden or the loop is
+stopped. `still` is true when the visitor has asked for reduced motion, which is why `start()` does nothing. The library
+watches that preference, so if the visitor changes it, the animation starts without a reload.
 
 ## Shading
 
-`shading` is either a fixed object or a function returning one. A function is re-read whenever the theme might have
-changed - by default the library watches both the `class` on `<html>` and the OS `prefers-color-scheme`.
+`shading` is an object, or a function that returns one. The library calls the function again when the theme can have
+changed. By default it watches the `class` on `<html>` and the OS `prefers-color-scheme`.
 
 ```js
 createSmokeBackground(canvas, {
@@ -141,24 +153,23 @@ createSmokeBackground(canvas, {
 });
 ```
 
-- **`base`** - the page colour being modulated, 0-255. Must match what is behind the canvas.
-- **`amplitude`** - how far the effect moves that colour. Negative moves it down, which is what a light theme wants.
-  **This is the readability dial.**
-- **`tint`** - optional `[r, g, b]` multipliers on `amplitude`. Only the modulation is tinted, never `base`, so the effect
-  reads as coloured light over the page rather than a coloured rectangle.
-- **`ramp`** - optional colour ramp, below.
-- **`range`** - optional `[min, max]` slice of the spectrum, each 0..1. Pins how dark and how light the two ends are
-  allowed to go without retuning `amplitude`. `[0.15, 0.8]` softens both extremes, and with a `ramp` it reads just
-  that slice of the ramp. A `min` above 0 moves the empty field off the page colour, so the canvas shows as a flat wash -
-  raise it knowingly.
+- **`base`**: the page colour, 0 to 255. It must match the colour behind the canvas.
+- **`amplitude`**: how far the effect moves the colour away from `base`. Use a negative value for a light theme. **This
+  setting controls readability.**
+- **`tint`**: optional `[r, g, b]` multipliers on `amplitude`. The tint applies to the change only, never to `base`. As a
+  result, the effect looks like coloured light on the page.
+- **`ramp`**: an optional list of colours. See [Colour](#colour).
+- **`range`**: an optional `[min, max]` part of the palette, each 0 to 1. It limits how dark and how light the effect
+  goes, without a change to `amplitude`. `[0.15, 0.8]` softens both ends. With a `ramp`, it uses only that part of the
+  ramp. If `min` is above 0, empty areas are no longer the page colour, so the canvas shows as a flat block.
 
-A theme change only re-shades. The field is untouched, because only the greys it maps onto have changed.
+A theme change only changes the greys. The field stays the same.
 
 ### Colour
 
-A tint scales one hue. A **ramp** gives each palette level its own colour, which buys the one thing greyscale cannot: a
-steep perceptual gradient. Five greys separate a rain streak's head from its tail far less sharply than five colours
-climbing from black to white do.
+A tint changes one hue. A **ramp** gives each palette level its own colour. This gives a steeper change in brightness
+than greys can. For example, five colours from black to white separate the head of a rain streak from its tail much
+more clearly than five greys do.
 
 ```js
 createRainBackground(canvas, {
@@ -167,7 +178,7 @@ createRainBackground(canvas, {
     base: 18,
     amplitude: 0,
     ramp: [
-      [18, 18, 18], // has to be your page colour
+      [18, 18, 18], // must be your page colour
       [10, 54, 22],
       [22, 122, 46],
       [60, 200, 88],
@@ -177,113 +188,55 @@ createRainBackground(canvas, {
 });
 ```
 
-Stops are sampled evenly, so ramp length and `levels` are independent. Three stops across a nine-level palette
-interpolates. Nine across three takes the ends and the middle. `levels` decides how many distinct colours reach the
-screen, and the ramp decides which. `buildPalette(shading, levels)` is exported if you want to see what a shading resolves to.
+The library samples the ramp at even steps, so the ramp length and `levels` are independent. Three colours across nine
+levels are interpolated. Nine colours across three levels give the two ends and the middle. `levels` sets how many
+colours reach the screen, and the ramp sets which colours. To see the palette that a shading gives, call
+`buildPalette(shading, levels)`.
 
 ## Interaction
 
-| Effect     | Press or drag                                                           |
-| ---------- | ----------------------------------------------------------------------- |
-| Smoke      | Stirs the fluid along the drag. Idle movement is ignored.               |
-| Plasma     | Sends ripples out. A drag leaves a wake.                                |
-| Rain       | Sends lens-like distortions through it.                                 |
-| Ridges     | Sets wobbles running through the stack.                                 |
-| Metaballs  | Picks the nearest blob up, carries it, and throws it when you let go.   |
-| Tunnel     | Steers the vanishing point towards the pointer, easing back on release. |
-| Mandelbrot | Aims the zoom at the nearest filigree to the pointer, on the way in.    |
+| Effect     | Press or drag                                                                   |
+| ---------- | ------------------------------------------------------------------------------- |
+| Smoke      | Stirs the fluid along the drag. Movement without a press does nothing.          |
+| Plasma     | Sends ripples out. A drag leaves a wake.                                        |
+| Rain       | Sends lens-like distortions through it.                                         |
+| Ridges     | Sends wobbles through the stack.                                                |
+| Metaballs  | Picks up the nearest blob, carries it and throws it when you release.           |
+| Tunnel     | Steers the vanishing point towards the pointer. It moves back when you release. |
+| Mandelbrot | Aims the zoom at the boundary nearest the pointer, while zooming in.            |
+| Beer       | A drag stirs the bubbles and sloshes the beer. A press splashes it.             |
 
-`interactive: false` turns any of them off. Emissions are spaced by _distance_ along the drag rather than throttled by
-time, so a slow careful drag lays down as densely as a fast one. Each effect also caps how many disturbances run at
-once, and retires the **oldest** to make room. A long drag keeps responding instead of going quiet.
+Set `interactive: false` to turn interaction off. A drag adds disturbances by distance moved, not by time. As a result,
+a slow drag has the same effect as a fast one. Each effect limits how many disturbances run at the same time, and
+removes the oldest to make room. A long drag therefore continues to have an effect.
 
-**One thing to know before enabling this on a page of prose.** A drag meant for the background is also a drag meant
-for the browser's text selection, and both happen. The library does not touch `user-select` - whether reading or interacting
-matters more is the page's decision, not a background's. Set it yourself if you want drags to belong to the
-background. The demo does.
+**A drag on the background also selects text.** The library does not change `user-select`, because the page must decide
+whether reading or interaction is more important. If you want drags to go to the background, set `user-select: none`
+yourself. The demo does this.
 
 ## Options
 
-Every effect takes the same shape of options object. These are shared:
+Every effect takes the same options object. These options are shared:
 
-| Option                 | Default       | Does                                                                                                     |
-| ---------------------- | ------------- | -------------------------------------------------------------------------------------------------------- |
-| `pixelSize`            | `6`           | CSS pixels per rendered pixel - one dither cell. Bigger is cheaper. `1` renders at native resolution.    |
-| `fieldScale`           | varies        | How much coarser the field is than the output, per axis.                                                 |
-| `maxPixels`            | `160000`      | Ceiling on rendered pixels. Raises `pixelSize` on large windows.                                         |
-| `levels`               | `5`           | Palette size, up to 256. Small on purpose - the dither makes it look smooth.                             |
-| `dither`               | `'auto'`      | Off posterises flat: same palette, visible bands. `'auto'` is on above one CSS pixel a cell, off at one. |
-| `gamma`                | varies        | Weights the field dark (above 1) or light (below).                                                       |
-| `polar`                | off           | Read the field round a centre rather than across the canvas. `true` for the defaults, or see below.      |
-| `fps`                  | `24`          | Redraw rate.                                                                                             |
-| `shading`              | auto          | The greys. See above.                                                                                    |
-| `interactive`          | `true`        | Respond to the pointer.                                                                                  |
-| `respectReducedMotion` | `true`        | Draw one frame and stop under `prefers-reduced-motion: reduce`.                                          |
-| `pauseWhenHidden`      | `true`        | Stop the loop while the tab is hidden.                                                                   |
-| `watchThemeClass`      | `true`        | Re-read `shading` when the `class` on `<html>` changes.                                                  |
-| `watchColorScheme`     | `true`        | Re-read `shading` when the OS colour scheme changes.                                                     |
-| `random`               | `Math.random` | Pass a seeded generator for a repeatable background.                                                     |
+| Option                 | Default       | Does                                                                                      |
+| ---------------------- | ------------- | ----------------------------------------------------------------------------------------- |
+| `pixelSize`            | varies        | CSS pixels per rendered pixel, which is one dither cell. Larger is faster. `1` is native. |
+| `fieldScale`           | varies        | How much coarser the field is than the output, on each axis.                              |
+| `maxPixels`            | `160000`      | Maximum number of rendered pixels. On large windows, it increases `pixelSize`.            |
+| `levels`               | `5`           | Palette size, up to 256. The dither makes a small palette look smooth.                    |
+| `dither`               | `'auto'`      | `false` gives visible bands. `'auto'` dithers above one CSS pixel per cell.               |
+| `gamma`                | varies        | Above 1 makes the field darker. Below 1 makes it lighter.                                 |
+| `polar`                | off           | Wraps the field round a centre. `true` uses the defaults. See [Polar](#polar).            |
+| `fps`                  | `24`          | Frames per second.                                                                        |
+| `shading`              | auto          | The greys. See [Shading](#shading).                                                       |
+| `interactive`          | `true`        | Responds to the pointer.                                                                  |
+| `respectReducedMotion` | `true`        | Draws one frame and stops under `prefers-reduced-motion: reduce`.                         |
+| `pauseWhenHidden`      | `true`        | Stops the loop while the tab is hidden.                                                   |
+| `watchThemeClass`      | `true`        | Reads `shading` again when the `class` on `<html>` changes.                               |
+| `watchColorScheme`     | `true`        | Reads `shading` again when the OS colour scheme changes.                                  |
+| `random`               | `Math.random` | A seeded generator gives the same background each time.                                   |
 
-**`levels` has a ceiling that is not `levels`.** The palette is bytes, and a greyscale shading only spans `base` to
-`base + amplitude`. At the default amplitude of 26 there are 27 distinct greys to be had, so asking for 64 and asking
-for 256 both give you 27. Raise `amplitude` to suit, or use a `ramp`, which spans three channels and has far more room
-in it. The dither shrinks itself out of the way as the palette fills: at 256 levels its nudge is half a byte.
-
-### Polar
-
-`polar` bends the lookup rather than the field. Each effect goes on drawing its rectangle exactly as before, and one
-axis of that rectangle is then read as the angle about a centre and the other as the distance from it. The rain falls
-outwards from the middle of the page, the ridges stack into rings, the tunnel comes back round on itself. It works with
-all seven because none of them is involved.
-
-```js
-createRainBackground(canvas, { polar: true });
-
-createRidgesBackground(canvas, {
-  polar: { turns: 3, centre: [0.5, 0], radius: 1.2 },
-});
-```
-
-| Field       | Default      | Does                                                                                                  |
-| ----------- | ------------ | ----------------------------------------------------------------------------------------------------- |
-| `centre`    | `[0.5, 0.5]` | The point it turns about, in fractions of the canvas. Outside `0..1` gives a fan, not a wheel.        |
-| `turns`     | `1`          | Copies of the field in one revolution. Keep it whole.                                                 |
-| `rotate`    | `0`          | Turns the picture clockwise, in turns.                                                                |
-| `radius`    | `1`          | How far out the field reaches. `1` is exactly to the corners.                                         |
-| `seam`      | `'mirror'`   | `'mirror'` folds the join away; `'wrap'` keeps the field the right way round and shows it.            |
-| `angleAxis` | `'x'`        | Which axis carries the angle. `'x'` sends the field's rows out as rings, `'y'` its columns as spokes. |
-
-**The seam is the choice worth making deliberately.** A field is a rectangle, and its left and right edges have no
-reason to meet: wrap one round a circle and there is a join along a radius. The default reflects at each edge instead,
-which has no join anywhere and gives a picture symmetric about the fold. Use `'wrap'` where the field is already
-seamless across - the plasma samples a seamless tile - or where you want the join.
-
-Two costs. The centre is where the transform is weakest: one pixel there covers every angle at once, so the innermost
-cells read as a sparkle however fine the field is. Moving `centre` off the canvas avoids it entirely. And the lookup is
-no longer separable, so it is a table of two floats per rendered pixel, rebuilt on resize - about 1.3 MB at the default
-`maxPixels`. The frame itself costs what it did before.
-
-A press or drag is bent through the same transform, so an effect is still disturbed where it looks like it should be.
-
-### Running at native resolution
-
-`pixelSize: 1` gives one rendered pixel per CSS pixel - no fat pixels, and no dither by default. Two things to know
-before reaching for it:
-
-- **`maxPixels` will quietly undo it.** It exists so a 4K window is not four times the work of a 1080p one. At the
-  default of 160,000, a request for `1` on a 1280×800 window comes back as an effective `3`. Raise it to the window's
-  own pixel count if you mean it. The `'auto'` dither follows the size the surface _settled_ at, so a request that got
-  coarsened still dithers.
-- **It is not cheap.** The output pass is one pixel of work per CSS pixel. That is 1,024,000 a frame on a 1280×800
-  window, against 29,000 at the default `pixelSize: 6`. Measured at 18.7 ms a frame for the shading alone, before whatever
-  generates the field.
-
-Turning the dither off at that size is a choice about look, not a correction. The Bayer pattern is at the display's own
-pitch there, which is exactly where dithering works best, and it blends into a genuinely smooth gradient. What `'auto'`
-buys instead is crisp posterised regions with clean curved boundaries. That is unavailable at any coarser size, where
-undithered output is just visible steps. `dither: true` keeps the smooth version at any size.
-
-Three of those differ per effect, and the reasons are worth knowing:
+These defaults are different for each effect:
 
 | Effect     | `fieldScale` | `pixelSize` | `gamma` |
 | ---------- | ------------ | ----------- | ------- |
@@ -294,63 +247,125 @@ Three of those differ per effect, and the reasons are worth knowing:
 | Rain       | **1**        | 6           | 1       |
 | Ridges     | **1**        | **4**       | 1       |
 | Tunnel     | **1**        | 6           | 1       |
+| Beer       | **1**        | **3**       | 1       |
 
-`fieldScale: 1` wherever interpolating between cells would blur line art or smooth away fine structure. For the tunnel
-that is the difference between visible rings and flat mottle. The Mandelbrot spends its `pixelSize` instead. It is the
-one effect here whose subject has detail at every scale, so the dither grid is worth paying for. `gamma` above 1
-weights the field towards its dark end. Below 1 brightens it, which nothing here currently wants but is there if your
-field sits too dark. [How it works](docs/how-it-works.md) has the measurements behind each.
+Beer also defaults to 64 `levels`, because five greys cut its smooth depth gradient into bands.
 
-Each effect also has its own parameter group - `simulation`, `warp`, `rain`, `ridges`, `metaballs`, `tunnel`,
-`mandelbrot` - merged over that effect's defaults. Every parameter is documented where it is declared, with a note on
-what it does and where its default came from. The types are `SmokeParams`, `PlasmaWarpConfig`, `RainParams`,
-`RidgeParams`, `MetaballParams`, `TunnelParams` and `MandelbrotParams`.
+Effects made of lines or fine detail use `fieldScale: 1`, because interpolation blurs them. For the tunnel,
+interpolation removes the rings. The Mandelbrot has detail at every scale, so it uses a smaller `pixelSize`. The ridges
+and the beer use a smaller `pixelSize` because their lines and bubbles are thin. [How it works](docs/how-it-works.md)
+gives the measurements.
 
-`undefined` is ignored rather than overriding a default, so forwarding your own optional config is safe:
+Each effect also has its own group of parameters, which the library merges over that effect's defaults. The groups are
+`simulation`, `warp`, `rain`, `ridges`, `metaballs`, `tunnel`, `mandelbrot` and `beer`. The types are `SmokeParams`,
+`PlasmaWarpConfig`, `RainParams`, `RidgeParams`, `MetaballParams`, `TunnelParams`, `MandelbrotParams` and
+`BeerParams`. The source documents each parameter where it is declared.
+
+An `undefined` value does not replace a default, so you can pass your own optional settings through:
 
 ```js
 createSmokeBackground(canvas, { gamma: config.gamma }); // fine when config.gamma is undefined
 ```
 
+### The limit on `levels`
+
+The palette is made of bytes. A grey shading goes from `base` to `base + amplitude` only. At an amplitude of 26 there
+are 27 greys, so 64 levels and 256 levels both give 27. To get more, increase `amplitude` or use a `ramp`, which has
+three channels. The dither becomes smaller as the palette fills. At 256 levels, it moves a value by half a byte.
+
+### Polar
+
+`polar` changes how the canvas reads the field, and does not change the field. Each effect draws its rectangle as
+usual. Then one axis becomes the angle about a centre, and the other axis becomes the distance from it. The rain falls
+outwards from the centre, the ridges become rings and the tunnel curves back on itself. With `reverse: true` the
+picture turns inside out, so the rain falls inwards. Polar works with all eight effects, because it does not change
+them.
+
+```js
+createRainBackground(canvas, { polar: true });
+
+createRidgesBackground(canvas, {
+  polar: { turns: 3, centre: [0.5, 0], radius: 1.2 },
+});
+```
+
+| Field       | Default      | Does                                                                                      |
+| ----------- | ------------ | ----------------------------------------------------------------------------------------- |
+| `centre`    | `[0.5, 0.5]` | The centre, as fractions of the canvas. A centre outside `0..1` gives a fan.              |
+| `turns`     | `1`          | Copies of the field in one turn. Use a whole number.                                      |
+| `rotate`    | `0`          | Turns the picture clockwise, in turns.                                                    |
+| `radius`    | `1`          | How far out the field reaches. At `1`, it reaches the corners.                            |
+| `seam`      | `'mirror'`   | `'mirror'` hides the join. `'wrap'` keeps the field the right way round, with a join.     |
+| `angleAxis` | `'x'`        | The axis that becomes the angle. `'x'` makes rows into rings. `'y'` makes columns spokes. |
+| `reverse`   | `false`      | Turns the radius inside out, so the centre moves to the edge and the edge to the centre.  |
+
+**Choose the seam carefully.** The left and right edges of a field usually do not match, so a circle made from it has a
+join. `'mirror'` reflects the field at each edge instead. This has no join, and the picture is symmetrical about the
+fold. Use `'wrap'` when the field already wraps (for example, the plasma), or when you want the join.
+
+Polar has two costs:
+
+- **The centre sparkles.** One pixel at the centre covers every angle, so the cells nearest the centre look noisy. To
+  avoid this, move `centre` off the canvas.
+- **It uses more memory.** The lookup is a table of two floats per rendered pixel, rebuilt on resize. At the default
+  `maxPixels` the table is about 1.3 MB. The time per frame does not change.
+
+A press or drag goes through the same transform, so the disturbance appears under the pointer.
+
+### Native resolution
+
+`pixelSize: 1` gives one rendered pixel per CSS pixel, with no dither by default. Before you use it, note two things:
+
+- **`maxPixels` can override it.** `maxPixels` stops a 4K window from costing four times as much as a 1080p window. At
+  the default of 160,000, a `pixelSize` of `1` on a 1280×800 window becomes `3`. To prevent this, set `maxPixels` to the
+  pixel count of the window. The `'auto'` dither uses the final size, so a coarsened surface still dithers.
+- **It is slow.** The output pass does one pixel of work per CSS pixel. On a 1280×800 window that is 1,024,000 pixels a
+  frame, against 29,000 at `pixelSize: 6`. The shading alone took 18.7 ms a frame.
+
+At native resolution, `'auto'` turns the dither off to give crisp areas of flat colour with clean edges. That look is
+possible only at this size. `dither: true` gives a smooth gradient at any size.
+
 ## Performance
 
-All seven draw at `fps` - 24 by default - rather than the refresh rate, and stop entirely when the tab is hidden.
+All eight effects draw at `fps` (24 by default), not at the refresh rate. They stop when the tab is hidden.
 
-What makes them cheap is that they render at **two resolutions**. The expensive field is computed coarsely and
-interpolated up, then ordered-dithered per output pixel. That last part is a few multiply-adds and a table lookup. `maxPixels`
-raises `pixelSize` on large windows, so 2560×1440 renders 147,000 pixels rather than 409,000.
+They are fast because they render at **two resolutions**. The library computes the expensive field at a low resolution
+and interpolates it up. Then it dithers each output pixel, which costs a few multiply-adds and a table lookup.
+`maxPixels` increases `pixelSize` on large windows, so a 2560×1440 window renders 147,000 pixels, not 409,000.
 
-For the smoke, `maxSimCells` is the number to reach for first, not `maxPixels`. The solver touches every cell a dozen
-or more times a frame, where the shading touches each output pixel once. The Mandelbrot's `maxFieldCells` is the same
-dial and matters more still, because it touches each cell a couple of hundred times. That is why its default is 10,000
-where the tunnel's is 160,000.
+The beer renders in three parts. The air is one fill, the deep beer is one fill per row, and only the band around the
+surface costs work per cell. As a result, the cost depends on the surface band, not on the window size. The bubbles find
+merges with a sorted sweep, not by checking every pair, so the cost of more `maxBubbles` is almost linear.
+
+For the smoke, change `maxSimCells` before `maxPixels`. The solver uses every cell a dozen or more times a frame, but
+the shading uses each output pixel once. The Mandelbrot's `maxFieldCells` has the same effect and matters more, because
+the Mandelbrot uses each cell a few hundred times. For this reason its default is 10,000, and the tunnel's is 160,000.
 
 ## Accessibility
 
 - The canvas is decoration. Mark it `aria-hidden="true"`.
-- With `prefers-reduced-motion: reduce` all seven draw a single frame and stop, and pointer interaction is disabled. The
-  stateful ones settle themselves first, so the still frame is smoke or mid-storm rain rather than an empty field. The
-  Mandelbrot's is the whole set, which needs no settling to be worth looking at.
-- With JavaScript off nothing is painted and the page keeps its ordinary background - the other reason `base` has to match
-  your page colour.
-- `amplitude` is the contrast dial. Keep it low enough that text over the background clears whatever contrast ratio you
-  are targeting. A `ramp` or `tint` adds chroma contrast on top of luminance contrast, and colour-blind readers do not
-  all benefit from it equally. Greyscale is the safer default, and is why it is the default.
+- Under `prefers-reduced-motion: reduce`, all eight effects draw one frame and stop, and pointer interaction is off. The
+  effects with state run for a while before that frame, so the frame shows smoke or rain, not an empty field. The
+  Mandelbrot shows the whole set, and the beer shows a full glass.
+- With JavaScript off, the canvas shows nothing and the page keeps its usual background. This is another reason that
+  `base` must match the page colour.
+- `amplitude` controls contrast. Keep it low enough that text on the background meets your contrast target. A `ramp` or
+  `tint` adds colour contrast, but not all colour-blind readers see it. For this reason, greyscale is the default.
 
 ## More
 
-- **[How it works](docs/how-it-works.md)** - what each effect actually does, why, and where the numbers came from.
-- **[`examples/vanilla.html`](examples/vanilla.html)** - the smallest thing that works, no build step.
-- **[`examples/astro/`](examples/astro)** - Astro components, including the view-transitions handling.
-- **[`demo/`](demo)** - the live tuning page, every dial as a slider. `npm run dev`.
+- **[How it works](docs/how-it-works.md)**: what each effect does, why, and where the numbers come from.
+- **[`examples/vanilla.html`](examples/vanilla.html)**: the smallest working example, with no build step.
+- **[`examples/astro/`](examples/astro)**: Astro components, including view transitions.
+- **[`demo/`](demo)**: the tuning page, with a slider for every setting. Run `npm run dev`.
 
-Everything is exported, and the maths is DOM-free so it can be used and tested outside a browser. The fluid solver, the
-warp, the falling lanes, the terrain, the implicit surface, the tunnel projection and the set with the camera that flies
-it are all usable on their own.
+Everything is exported. The maths does not use the DOM, so you can use it and test it outside a browser. You can use the
+fluid solver, the warp, the rain lanes, the terrain, the implicit surface, the tunnel projection, the Mandelbrot camera
+and the beer on their own.
 
-Writing an eighth is `mountBackground`, which is what the seven above are. Hand it a `rebuild`, a `field` and a `step`.
-It does the canvas, the sizing, the dithered shading, the frame loop, the theme watching and the teardown.
-`createSurface` is the layer under that, if you would rather drive the loop yourself.
+To write a new effect, use `mountBackground`. The eight effects use it too. Give it a `rebuild`, a `field` and a `step`.
+It handles the canvas, sizing, dithered shading, frame loop, theme watching and teardown. If you want to run the loop
+yourself, use `createSurface`, which is the layer below.
 
 ## Development
 
@@ -358,19 +373,26 @@ It does the canvas, the sizing, the dithered shading, the frame loop, the theme 
 npm install
 npm run dev      # the demo page
 npm test         # vitest
-npm run check    # types, lint, format
+npm run check    # types, lint, format, package
 npm run build    # dist/, via tsc
 ```
 
-The tests cover the maths, because that is the part with properties worth asserting. The pressure projection really
-does remove the divergence. The Bayer matrix really does average to 0.5. The MacCormack clamp really does keep density
-in range. The canvas and loop code is exercised by the demo page.
+The tests cover the maths, because the maths has properties that a test can check. For example, the pressure projection
+removes the divergence, the Bayer matrix averages to 0.5 and the MacCormack clamp keeps density in range. The demo page
+exercises the canvas and loop code.
 
 ## Licence
 
-MIT - see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
-All seven implement published techniques. Those are Jos Stam's _Stable Fluids_, domain-warped fbm, Wyvill's falloff for
-the metaballs, the demoscene reciprocal tunnel, the Douady-Hubbard potential with the distance estimate that follows
-from it, and ordered dithering on a Bayer matrix throughout. Where a well-known constant is used, it is credited at the
-point of use: MurmurHash3's public-domain finalisers in `hash2`, and the classic 4×4 Bayer matrix.
+All eight effects use published techniques:
+
+- Jos Stam's _Stable Fluids_
+- domain-warped fbm
+- Wyvill's falloff, for the metaballs
+- the demoscene reciprocal tunnel
+- the Douady-Hubbard potential and its distance estimate
+- ordered dithering on a Bayer matrix
+
+The source credits well-known constants where it uses them. These are the public-domain MurmurHash3 finalisers in
+`hash2`, and the classic 4×4 Bayer matrix.
