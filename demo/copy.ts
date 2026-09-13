@@ -12,22 +12,23 @@ export interface Copy {
 
 /** The line every effect shares, kept in one place so it cannot drift. */
 const SHARED =
-  'Everything here is CPU-side: a 2D context, typed arrays and putImageData. No WebGL and no shader. ' +
-  'The controls are live - <code>amplitude</code> is the readability dial, <code>levels</code> is how many ' +
-  'colours the palette holds, and the palette picker swaps the greys for a colour ramp.';
+  'Everything runs on the CPU, with a 2D context, typed arrays and putImageData. There is no WebGL and no shader. ' +
+  'The controls change the effect as you move them. <code>amplitude</code> controls readability, ' +
+  '<code>levels</code> sets how many colours the palette has, and the palette picker replaces the greys with ' +
+  'a colour ramp.';
 
 export const COPY: Record<string, Copy> = {
   smoke: {
     heading: 'Smoke',
     paragraphs: [
-      'An actual fluid simulation - semi-Lagrangian advection with a Jacobi pressure projection, the scheme from Jos ' +
-        "Stam's <em>Stable Fluids</em>. The projection is the whole thing: without it the fluid compresses and you get " +
-        'a texture being stretched rather than smoke.',
-      'Every ten seconds or so a jet fires in from a random edge. About half are dark - a pale jet paints a plume, a ' +
-        'dark one carves a clear channel - and the momentum is identical either way, because the distortion comes ' +
-        'from the velocity rather than from what is being carried.',
-      '<strong>Drag anywhere with a mouse button held down to stir it.</strong> Idle movement is ignored on purpose, ' +
-        'so a reader moving the cursor off the text does not disturb the page.',
+      'This is a real fluid simulation. It uses semi-Lagrangian advection with a Jacobi pressure projection, from ' +
+        "Jos Stam's <em>Stable Fluids</em>. The projection is the most important step. Without it, the fluid " +
+        'compresses and looks like a stretched texture.',
+      'About every ten seconds, a jet fires in from a random edge. About half the jets are dark. A light jet paints ' +
+        'a plume, and a dark jet cuts a clear channel. Both have the same momentum, because the velocity causes the ' +
+        'disturbance, not the smoke that the jet carries.',
+      '<strong>Drag with a mouse button pressed to stir it.</strong> Movement without a press does nothing, so a ' +
+        'reader who moves the pointer away from the text does not disturb the page.',
       SHARED,
     ],
   },
@@ -35,23 +36,23 @@ export const COPY: Record<string, Copy> = {
   tunnel: {
     heading: 'Tunnel',
     paragraphs: [
-      'The demoscene standby, and it is one division. Convert each pixel to polar coordinates about the vanishing ' +
-        'point and read a wall texture at <code>(angle, depth / radius)</code>. That reciprocal <em>is</em> the ' +
-        'perspective - a point on a cylinder wall lands at a radius inversely proportional to how far down it sits, ' +
-        'so there is no camera, no matrix and no depth buffer anywhere in it.',
-      'The corridor <strong>winds</strong>, and that is most of what makes it read as flight rather than as a cylinder ' +
-        'being looked down: its axis wanders, so the near wall sweeps past while the far end holds still, and the view ' +
-        'banks into the turn. It costs one extra pass of a fixed-point iteration - solve the straight tunnel, look up ' +
-        'where the axis had got to at that depth, subtract, solve again.',
-      'Adding to that coordinate walks you forward. Because the far wall is compressed into the middle, features do ' +
-        'not slide outward at a constant rate - they stretch, moving further the further out they already are, which ' +
-        'is the acceleration you feel. The middle is a genuine singularity, so the vignette takes it to nothing: the ' +
-        'place the maths gives up is the place nothing is drawn.',
-      'The wall is built from sinusoids at whole-number frequencies rather than sampled from noise, because it has to ' +
-        'wrap seamlessly around the circumference or a seam runs the length of the tunnel. <code>repeats</code> is ' +
-        'therefore a whole number too - and a rotation of a whole number of repeats is invisible.',
-      '<strong>Press and drag to steer it</strong>, pulling the vanishing point towards the pointer; let go and it ' +
-        'eases back to its own drift.',
+      'This is the classic demoscene tunnel, and it needs one division. Each pixel becomes polar coordinates about ' +
+        'the vanishing point, and the effect reads a wall texture at <code>(angle, depth / radius)</code>. That ' +
+        'division gives the perspective. A point on the wall of a cylinder appears at a radius in inverse proportion ' +
+        'to its distance, so there is no camera, matrix or depth buffer.',
+      'The corridor <strong>bends</strong>, and this makes it look like flight. Its axis moves, so the near wall ' +
+        'sweeps past while the far end stays still, and the view banks into each turn. The bend costs one more pass ' +
+        'of a fixed-point iteration. The effect solves for a straight tunnel, looks up the axis at that depth, ' +
+        'subtracts it and solves again.',
+      'An increase in the depth coordinate moves you forwards. The far wall is compressed into the centre, so ' +
+        'features do not move outwards at a constant rate. They stretch, and the farther out a feature is, the ' +
+        'faster it moves. This gives the feeling of speed. The maths fails at the exact centre, so the vignette ' +
+        'hides the centre.',
+      'The wall is made of sinusoids with whole-number frequencies, not noise, because it must wrap round the ' +
+        'circumference without a seam. For this reason, <code>repeats</code> is also a whole number, and a rotation ' +
+        'by a whole number of repeats is invisible.',
+      '<strong>Press and drag to steer it.</strong> The vanishing point moves towards the pointer. When you ' +
+        'release, it moves back to its own drift.',
       SHARED,
     ],
   },
@@ -59,59 +60,54 @@ export const COPY: Record<string, Copy> = {
   mandelbrot: {
     heading: 'Mandelbrot',
     paragraphs: [
-      'A zoomer, and the interesting question is not the set - it is how you draw one in five greys at a hundred and ' +
-        'twenty cells across. Escape-time colouring cannot: the bands crowd together without limit as you approach the ' +
-        'boundary, so they alias into noise exactly where all the detail is.',
-      'So the shading is a <strong>distance estimate</strong>, and here it comes for nothing. The smooth escape count ' +
-        '<code>mu = n + 1 - log2(log|z|)</code> is not an approximate iteration number, it is the exterior potential on ' +
-        'a log scale - exactly <code>1 - log2 G</code> - and the distance to the set is <code>G / |grad G|</code>. In ' +
-        'terms of what is already on screen that is <code>1 / (ln2 * |grad mu|)</code>: a finite difference over a ' +
-        'field that has just been computed. The picture is its own derivative.',
-      'The interior goes through that same estimate rather than being drawn flat black, and that is what stops ' +
-        'individual cells flickering. Forced to zero, an interior cell sat next to a boundary cell at full brightness - ' +
-        'and a cell on the line between them changes classification whenever the view shifts by less than its own ' +
-        'width, so it alternated between the two ends of the palette every frame. Lit by the same estimate as ' +
-        'everything else it is black deep inside, where the neighbourhood is flat, and bright against the boundary, ' +
-        'which is what its neighbour is too.',
-      'It antialiases itself as a side effect. A filament thinner than a cell is never sampled, so the difference ' +
-        'under-reads the gradient and reports a distance of about one cell instead of zero - and the filament arrives ' +
-        'as a soft grey line rather than falling between two samples. Brightness is a function of distance measured in ' +
-        '<em>cells</em>, so the picture cannot get busier or emptier however far down it goes.',
-      'Where it goes is decided from the frame in front of it, every second or so, because a point chosen in advance ' +
-        'is empty space twenty doublings later. Candidates are scored by the patch around them rather than by the cell ' +
-        'itself - the autopilot is choosing what to <em>magnify</em>, not where to stand.',
-      'A patch has to clear <strong>three</strong> refusals, and that is not belt and braces: a frame can be worthless ' +
-        'in three ways and removing any one of them walks the autopilot into another. Too much interior is the edge of ' +
-        'a lake, which magnifies into a straight line for ever. Too bright is hair finer than the sampling, where every ' +
-        'cell is correctly within a cell of the set and the frame is a flat grey - and the few stray dark cells in it ' +
-        'score a <em>high</em> spread, so it is a feedback loop. Too little interior is open exterior with the set out ' +
-        'of shot, which is exactly where removing the first two sends it.',
-      'It turns round at about 1e-11 because a double runs out - past that, neighbouring cells land on the same number, ' +
-        'and the estimate has no sub-cell room left to work in. Depth costs nothing per frame, as ' +
-        'it turns out: the iteration budget a frame needs is set by how much boundary is in shot rather than by how far ' +
-        'down it is, so it is the same at forty-eight doublings as at twenty-four. Only precision binds. ' +
-        'The pull-out is a function of the span rather than an animation, so it leaves exactly where it was and ' +
-        'arrives framed on the whole set, with the point it left holding still on screen the whole way.',
-      'The view is a <strong>mass, not a lag</strong>: a critically damped spring with velocity as state, worked in ' +
-        'screen units so that the same momentum means the same thing at every magnification. And the point it chases ' +
-        'no longer jumps - it is eased towards whatever the picker likes while walking along the boundary contour, ' +
-        'which is what makes it explore. Contour-following on its own drifts into the soft exterior glow with the set ' +
-        'out of shot; the pull keeps the picture, the walk keeps the motion.',
-      'The descent is not one uninterrupted fall either. Every ten seconds or so it either eases the zoom off and ' +
-        '<strong>traces sideways</strong> at one magnification, or gives up a couple of doublings for a wider look ' +
-        'before carrying on down. The same two moves are how it recovers when a frame stops being worth looking at, ' +
-        'and which one it uses depends on why: a washed-out frame is under-resolved, so it backs out; a frame with ' +
-        'nothing lit in it is the opposite, so it stops and walks instead.',
-      'Nothing in the camera is <em>switched</em>, and that is not fussiness. The other six move diffusely and the eye ' +
-        'does not track any of it; a zoom is one motion of the whole frame, so every discontinuity in it shows. The ' +
-        'rate is damped rather than lagged, so the zoom accelerates and decelerates instead of switching between ' +
-        'coasting and slowing - a plain ease puts full deceleration on the first frame after a change, which is what a ' +
-        'sudden stop is. Each turn is taken early by exactly what the deceleration will coast ' +
-        'through, and the aim is smoothed by a second lag so that re-aiming is a curve rather than a corner. The ' +
-        'timestep is the clock, not a fixed step - at 24fps on a 60Hz screen a fixed step means equal movement shown ' +
-        'for alternating 33ms and 50ms, which is judder you can see.',
-      '<strong>Press and drag to aim it.</strong> The pointer chooses roughly and the autopilot chooses exactly, so ' +
-        'parking it over the middle of a lake steers to the nearest filigree instead of into the dark.',
+      'This zooms into the Mandelbrot set. The problem is to draw it in five greys at 120 cells across. ' +
+        'Escape-time colouring fails at that size, because the bands crowd together at the boundary and turn into ' +
+        'noise where the detail is.',
+      'The shading uses a <strong>distance estimate</strong> instead, and it costs almost nothing. The smooth ' +
+        'escape count <code>mu = n + 1 - log2(log|z|)</code> is exactly the exterior potential on a log scale, ' +
+        '<code>1 - log2 G</code>. The distance to the set is <code>G / |grad G|</code>, which in terms of ' +
+        '<code>mu</code> is <code>1 / (ln2 * |grad mu|)</code>. That is a finite difference over the field that ' +
+        'the effect has already computed.',
+      'The interior uses the same estimate and is not drawn flat black. This stops cells from flickering. When ' +
+        'interior cells were zero, they sat next to boundary cells at full brightness. A cell on the line changed ' +
+        'class each time the view moved by less than one cell, so it flickered between black and white. With the ' +
+        'same estimate, a cell is black deep inside the set and bright next to the boundary, like its neighbour.',
+      'The estimate also antialiases the picture. The grid does not sample a thread thinner than a cell, so the ' +
+        'difference gives a distance of about one cell, not zero. The thread shows as a soft grey line and does ' +
+        'not disappear. Brightness depends on distance in <em>cells</em>, so the picture has the same amount of ' +
+        'detail at every depth.',
+      'About every second, the autopilot chooses a new target from the current frame, because a point chosen at ' +
+        'the start is empty space 20 doublings later. It scores each candidate by the area around it, not by the ' +
+        'cell, because it is choosing what to <em>magnify</em>.',
+      'The autopilot rejects <strong>three</strong> kinds of area, and all three rules are necessary. Without any ' +
+        'one of them, it fails in a different way. An area with too much interior is the edge of a lake, which ' +
+        'becomes a straight line when magnified. An area that is too bright has threads finer than the grid. The ' +
+        'frame is a flat grey, and its few dark cells get a <em>high</em> score, so the autopilot goes deeper into ' +
+        'the same problem. An area with too little interior has no set in it, and the first two rules alone lead ' +
+        'there.',
+      'It turns round at about 1e-11, because double precision runs out. Past that, neighbouring cells get the ' +
+        'same number, and the estimate has no room inside a cell. Depth does not cost more per frame. The number ' +
+        'of iterations depends on how much boundary is on the screen, so it is the same at 48 doublings as at 24. ' +
+        'The way back out is a function of the span, not an animation. It ends on the whole set, and the point ' +
+        'where it turned stays still on the screen all the way.',
+      'The camera <strong>has mass</strong>. It is a critically damped spring with velocity as state, in screen ' +
+        'units, so its momentum behaves the same at every magnification. Its target moves smoothly. The target ' +
+        "eases towards the autopilot's choice and also moves along the boundary, which makes the zoom explore. " +
+        'Movement along the boundary alone drifts into the glow and loses the set. The easing keeps the picture ' +
+        'good, and the movement keeps it interesting.',
+      'The descent has pauses. About every ten seconds it either stops the zoom and <strong>moves ' +
+        'sideways</strong> at one magnification, or backs out a few doublings for a wider view. The same two moves ' +
+        'also recover from a bad frame. A washed-out frame has too much detail for the grid, so the zoom backs ' +
+        'out. A frame with nothing lit has too little, so the zoom stops and moves sideways.',
+      'Nothing in the camera changes suddenly. The other seven effects move in many directions at once, so the ' +
+        'eye follows no single motion. A zoom is one motion of the whole frame, so every jump shows. The zoom rate ' +
+        'is damped, so it speeds up and slows down smoothly. Each turn starts early by the distance that the zoom ' +
+        'coasts. A second lag smooths the aim, so a new aim gives a curve and not a corner. The timestep follows ' +
+        'the clock. At 24 fps on a 60 Hz screen, a fixed step shows equal movement for 33 ms and 50 ms in turn, ' +
+        'which looks like judder.',
+      '<strong>Press and drag to aim it.</strong> The pointer chooses the rough area and the autopilot chooses the ' +
+        'exact point. If you aim at the middle of a lake, the zoom goes to the nearest detail and not into the ' +
+        'dark.',
       SHARED,
     ],
   },
@@ -119,17 +115,16 @@ export const COPY: Record<string, Copy> = {
   plasma: {
     heading: 'Plasma',
     paragraphs: [
-      'A domain warp: fractal Brownian motion folded into itself, <code>fbm(p + fbm(p + fbm(p)))</code>, used to ' +
-        'decide where a seamless plasma tile gets read from. Folding it twice is what turns cloudy noise into ' +
-        'something with filaments in it.',
-      'Time enters twice and needs to. One term slides the whole domain, which alone would look like a photograph ' +
-        'being panned; the other moves the inner fields against each other, which is what makes it evolve in place.',
-      '<strong>Click or drag to send ripples out from the pointer.</strong> It is a ring of radial displacement ' +
-        'added to the finished warp coordinate, anchored in screen space - so it stays where you clicked while the ' +
-        'field drifts underneath it, and it ages on a real-time clock rather than on animation time, so changing ' +
-        '<code>speed</code> does not stretch it out.',
-      'Otherwise stateless in time - the field is a pure function of the clock and the live ripples, so a frame can be ' +
-        'drawn at any moment without having drawn the ones before it.',
+      'This is a domain warp. Fractal Brownian motion is folded into itself as ' +
+        '<code>fbm(p + fbm(p + fbm(p)))</code>, and the result chooses where to read a seamless plasma tile. The ' +
+        'second fold turns cloudy noise into threads.',
+      'Time is used in two places. One term moves the whole domain, which alone looks like a moving photograph. ' +
+        'The other term moves the inner fields against each other, so the pattern changes in place.',
+      '<strong>Click or drag to send ripples out from the pointer.</strong> A ripple is a ring of radial ' +
+        'displacement, fixed in screen space, so it stays where you clicked while the field drifts. Its age uses ' +
+        'real time, not animation time, so a change to <code>speed</code> does not make it last longer.',
+      'Apart from the ripples, the field has no state. It is a function of the clock, so any frame can be drawn ' +
+        'without the frames before it.',
       SHARED,
     ],
   },
@@ -137,17 +132,17 @@ export const COPY: Record<string, Copy> = {
   rain: {
     heading: 'Rain',
     paragraphs: [
-      'One falling lane per column of the field. Each head lights the cells it passes through, and the whole field ' +
-        'fades every frame - so the trail behind a drop is not drawn at all, it is simply what has not decayed yet.',
-      'That turns out to matter. A fast drop leaves a <em>longer</em> streak than a slow one, because its brightness ' +
-        'has had less time to fade over the same distance, and a drop that retires at the bottom leaves its trail to ' +
-        'fade in place instead of taking it along.',
-      '<strong>Click or drag to send distortions through it.</strong> It displaces what is already there rather ' +
-        'than adding light of its own - an expanding ring that bends the streaks as it passes, like a droplet on ' +
-        'glass acting as a lens. Bending the highest-contrast thing on screen reads far better than drawing a faint ' +
-        'new shape among it.',
-      'These are streaks of falling light, not glyphs. At a six-pixel dither cell a character would be about three ' +
-        'cells tall and would read as noise - streaks survive the palette, letterforms do not.',
+      'There is one falling lane per column of the field. Each head lights the cells it passes, and the whole ' +
+        'field fades every frame. Nothing draws the trail behind a drop. The trail is the part that has not faded ' +
+        'yet.',
+      'This has two good results. A fast drop leaves a <em>longer</em> streak than a slow one, because its ' +
+        'brightness has less time to fade over the same distance. A drop that stops at the bottom leaves its trail ' +
+        'to fade where it is.',
+      '<strong>Click or drag to send distortions through it.</strong> A distortion moves the existing picture and ' +
+        'adds no light. It is a growing ring that bends the streaks as it passes, like a lens. The streaks have the ' +
+        'most contrast on the screen, so bending them shows much more than a faint new shape would.',
+      'The rain is streaks of light, with no characters. At a six-pixel dither cell, a character is about three ' +
+        'cells tall and looks like noise. Streaks survive the small palette, but letters do not.',
       SHARED,
     ],
   },
@@ -155,19 +150,18 @@ export const COPY: Record<string, Copy> = {
   ridges: {
     heading: 'Ridges',
     paragraphs: [
-      'A landscape flown over as a stack of horizontal profiles, each one hiding the ones behind it. The look is the ' +
-        "ridgeline plot made famous by the cover of Joy Division's <em>Unknown Pleasures</em> - Peter Saville's " +
-        "design of a figure from Harold Craft's 1970 thesis plotting radio pulses from the pulsar CP 1919.",
-      'Hidden lines are the effect. Without occlusion this is a tangle; with it you get depth, and the notch where a ' +
-        'near crest bites into the rows above. It is done with a floating horizon - draw nearest to farthest, keep ' +
-        'the highest point covered so far per column - which is one pass and no z-buffer.',
-      '<strong>Click or drag across the lines to set wobbles running through the stack.</strong> It is a wave packet - an envelope ' +
-        'around a travelling front times an oscillation - so the struck profile ripples through a few crests rather ' +
-        'than heaving once, and the disturbance spreads outward to its neighbours as it goes. It is keyed to the row ' +
-        'it hit rather than to the point on screen, so it travels with the terrain instead of sitting still while ' +
-        'rows pass through it.',
-      'Rows are tied to whole numbers of travel rather than to screen positions, so a profile keeps its own shape, ' +
-        'slides down as you pass it, and rolls off the bottom edge instead of vanishing at it.',
+      'This flies over a landscape drawn as a stack of horizontal profiles. Each profile hides the ones behind it. ' +
+        "The look comes from the cover of Joy Division's <em>Unknown Pleasures</em>, Peter Saville's design of a " +
+        "figure from Harold Craft's 1970 thesis. The figure plots radio pulses from the pulsar CP 1919.",
+      'The hidden lines make the effect. Without them, the lines are a tangle. With them, you see depth, and each ' +
+        'near crest cuts into the rows above. A floating horizon hides the lines. The effect draws from nearest to ' +
+        'farthest and keeps the highest covered point in each column. This takes one pass, with no z-buffer.',
+      '<strong>Click or drag across the lines to send wobbles through the stack.</strong> A wobble is a wave ' +
+        'packet, which is an envelope multiplied by an oscillation. The line ripples through a few crests, and the ' +
+        'wobble spreads to the rows next to it. The wobble belongs to the row, not the screen point, so it moves ' +
+        'with the terrain.',
+      'Each row belongs to a whole number of travel, not to a screen position. As a result, a profile keeps its ' +
+        'shape, moves down as you pass it and goes off the bottom edge before it is removed.',
       SHARED,
     ],
   },
@@ -175,20 +169,17 @@ export const COPY: Record<string, Copy> = {
   metaballs: {
     heading: 'Metaballs',
     paragraphs: [
-      'An implicit surface. Several point sources each add a falloff to a shared scalar field, and the field is ' +
-        'thresholded - so blobs bulge towards each other as they approach, fuse with a smooth neck, and part again ' +
-        'without ever showing a seam.',
-      'The merging is not a drawing trick. Nothing in the code knows about blobs or necks: two balls whose ' +
-        'contributions each fall short of the threshold cross it together, and the neck is only what a sum does when ' +
-        'two falloffs overlap.',
-      '<strong>Press and drag to pick a blob up and carry it about.</strong> A dragged ball is just another ' +
-        'contribution to the sum, so it reaches for its neighbours exactly as the others do - run it into one and they ' +
-        'fuse, pull away and the neck stretches and parts. Let go and it eases back onto its own path, which has to be ' +
-        'a blend rather than a handover: its natural position never stopped moving while you held it. Flick it and it ' +
-        "carries on in the direction you threw it before curving back, because the drag's velocity goes with it.",
-      'The falloff is a cubic with compact support rather than an exponential, which is exactly zero past its ' +
-        'radius. That changes the algorithm rather than trimming it - each ball scatters over its own bounding box, ' +
-        'so the cost is the sum of the ball areas instead of cells times balls.',
+      'This is an implicit surface. Each point source adds a falloff to a shared field, and a threshold turns the ' +
+        'field into a surface. Blobs bulge towards each other, join with a smooth neck and separate cleanly.',
+      'No code draws the joins. Two balls that are each below the threshold can be above it together. The neck ' +
+        'is the sum of two overlapping falloffs.',
+      '<strong>Press and drag to pick up a blob and carry it.</strong> A held ball is one more term in the sum, ' +
+        'so it joins other balls in the same way. Move it into another ball and they join. Pull it away and the ' +
+        'neck stretches and breaks. When you release it, it moves smoothly back to its own path, because that path ' +
+        'continued to move while you held the ball. If you flick it, it keeps moving in that direction before it ' +
+        'curves back.',
+      'The falloff is a cubic that is exactly zero past its radius. As a result, each ball writes only to its own ' +
+        'bounding box, and the cost is the sum of the ball areas, not cells multiplied by balls.',
       SHARED,
     ],
   },
@@ -196,27 +187,22 @@ export const COPY: Record<string, Copy> = {
   beer: {
     heading: 'Beer',
     paragraphs: [
-      'A glass poured to a set level, fizzing. Bubbles stream up from fixed nucleation sites - the scratches a real ' +
-        'glass keeps its fizz on - rise, swell as the pressure above them drops, and burst at the surface. They are ' +
-        'metaballs - the same falloff the blobs use, summed into the same kind of field - so two that pass close ' +
-        'bulge towards each other and fuse into one, and nothing in the code knows what a merge looks like.',
-      '<strong>The head is not drawn.</strong> A bursting bubble hands its own area to the foam above it, the foam ' +
-        'drains away exponentially and levels sideways, and what you see is where those two rates balance. Turn ' +
-        '<code>rate</code> down and the head thins on its own; turn <code>drain</code> down and it climbs until it ' +
-        'hits its ceiling. Nothing anywhere sets a thickness - and a breaking crest throws foam too, which is why ' +
-        'stirring the glass hard thickens the head.',
-      '<strong>Drag to stir it, click to jab it.</strong> The bubbles under the pointer are carried at the speed ' +
-        'you are moving - eased towards it rather than shoved, so they never outrun the cursor. The drag scrapes ' +
-        'fresh bubbles off the glass as it passes, which is how a bubble gets started in the first place. And the ' +
-        'sideways sweep drives the body of the beer, so it piles up the leading wall - all the way to the top of ' +
-        'the frame if you mean it - throws spray, and sloshes back. A press is a jab: a splash, a burst of ' +
-        'droplets, and the fizz it knocks loose.',
-      'The surface is shallow water: a height per column, a flow on the faces between them, stepped every frame. ' +
-        'Nothing animates the slosh - it is the fundamental mode of that field, its period follows from gravity and ' +
-        'the depth of the pour exactly as it does for a real glass, and a half-poured glass sloshes slower. ' +
-        'Bursting bubbles push the same flow, which is where the idle shimmer comes from; turn the fizz off and ' +
-        'the glass goes glassy still. Set <code>pour</code> to 1 and remount to watch it fill. The palette picker ' +
-        'colours it exactly as it colours every other effect - try amber terminal.',
+      'This is a glass of fizzing beer. Bubbles rise from fixed nucleation sites, like the scratches in a real ' +
+        'glass. They grow as the pressure drops and burst at the surface. The bubbles are metaballs, with the same ' +
+        'falloff as the blobs, so two that pass close together join. No code draws the join.',
+      '<strong>No code draws the head.</strong> Each burst adds its area to the foam. The foam drains and spreads ' +
+        'sideways, and the head is as thick as those two rates allow. With a lower <code>rate</code>, the head gets ' +
+        'thinner. With a lower <code>drain</code>, it grows until it reaches its limit. A breaking wave also adds ' +
+        'foam, so a hard stir makes the head thicker.',
+      '<strong>Drag to stir it. Click to splash it.</strong> The bubbles near the pointer move towards its speed, ' +
+        'but never faster. The drag creates new bubbles as it passes. The sideways movement also pushes the beer, ' +
+        'so the beer piles up against the wall ahead, throws spray and swings back. A hard drag can push it to the ' +
+        'top of the frame. A click makes a splash, throws droplets and starts new bubbles.',
+      'The surface is shallow water, with a height for each column and a flow between columns. No code animates ' +
+        'the slosh. Gravity and the depth of the beer set its period, as in a real glass, so a half-full glass ' +
+        'sloshes more slowly. Bursting bubbles push the same flow, and this is the only motion at rest. Without ' +
+        'fizz, the glass is completely still. To watch the glass fill, set <code>pour</code> to 1 and remount. The ' +
+        'palette picker colours the beer as it colours every effect. Try amber terminal.',
       SHARED,
     ],
   },
