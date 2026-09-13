@@ -827,9 +827,7 @@ was found, the browser results did not change steadily with gamma.
 The smoke settles at a mean density of about 0.36, which matches the reference (`geisswerks.com/smoke`). Smoke is
 already mostly clear air, so it does not need to be darker.
 
-**The palette and grid match a reference.** In dark mode on a 6 px cell, the defaults give greys of 18, 24, 30, 36 and
-42. The reference is <https://codapress.co.uk/>, whose background uses greys of 12, 22 and 32 in groups of five or six
-pixels. `pixelSize: 3` looked correct, but its cells measured half the size of the reference.
+**The default palette** in dark mode is greys of 18, 24, 30, 36 and 42, on a 6 px cell.
 
 ---
 
