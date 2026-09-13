@@ -10,7 +10,7 @@ An unrelated package already uses the name `canvas-effects` on npm, so install t
 package's own name, so imports are still `from 'canvas-effects'`.
 
 ```bash
-npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.5.0
+npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.6.0
 ```
 
 ## The effects
