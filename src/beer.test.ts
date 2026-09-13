@@ -730,7 +730,7 @@ describe('popping - what feeds the head', () => {
 });
 
 describe('droplets', () => {
-  it('flies under the waves\' own gravity and comes back down', () => {
+  it("flies under the waves' own gravity and comes back down", () => {
     const beer = empty(FLAT);
     beer.drops.push({ x: 1, y: 0.2, vx: 0, vy: -0.5, radius: 0.01 });
 
@@ -1162,7 +1162,7 @@ describe('nucleation sites', () => {
     expect(beer.bubbles.length).toBeGreaterThan(20);
   });
 
-  it('gives a site\'s bubbles its own size character', () => {
+  it("gives a site's bubbles its own size character", () => {
     const params: BeerParams = { ...FLAT, streaming: 1, radiusVariance: 0, rate: 300, maxBubbles: 1000 };
     const rand = makeRandom(5);
     const beer = createBeer(W, H, rand, params);

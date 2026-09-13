@@ -1183,7 +1183,7 @@ export function popBubbles(beer: Beer, params: BeerParams, rand: () => number = 
   const column = spanX > 0 ? spanX : aspect > 0 ? aspect : 1;
   let popped = 0;
 
-  for (let i = 0; i < bubbles.length; ) {
+  for (let i = 0; i < bubbles.length;) {
     const bubble = bubbles[i];
     const line = surfaceAt(beer, bubble.x);
 

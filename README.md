@@ -196,15 +196,15 @@ screen, and the ramp decides which. `buildPalette(shading, levels)` is exported 
 
 ## Interaction
 
-| Effect     | Press or drag                                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------------------ |
-| Smoke      | Stirs the fluid along the drag. Idle movement is ignored.                                                    |
-| Plasma     | Sends ripples out. A drag leaves a wake.                                                                     |
-| Rain       | Sends lens-like distortions through it.                                                                      |
-| Ridges     | Sets wobbles running through the stack.                                                                      |
-| Metaballs  | Picks the nearest blob up, carries it, and throws it when you let go.                                        |
-| Tunnel     | Steers the vanishing point towards the pointer, easing back on release.                                      |
-| Mandelbrot | Aims the zoom at the nearest filigree to the pointer, on the way in.                                         |
+| Effect     | Press or drag                                                                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Smoke      | Stirs the fluid along the drag. Idle movement is ignored.                                                                                                             |
+| Plasma     | Sends ripples out. A drag leaves a wake.                                                                                                                              |
+| Rain       | Sends lens-like distortions through it.                                                                                                                               |
+| Ridges     | Sets wobbles running through the stack.                                                                                                                               |
+| Metaballs  | Picks the nearest blob up, carries it, and throws it when you let go.                                                                                                 |
+| Tunnel     | Steers the vanishing point towards the pointer, easing back on release.                                                                                               |
+| Mandelbrot | Aims the zoom at the nearest filigree to the pointer, on the way in.                                                                                                  |
 | Beer       | Stirs it: the fizz follows the drag, more of it comes loose, and the beer piles up the leading wall and sloshes back. A press jabs it - splash, spray and fresh fizz. |
 
 `interactive: false` turns any of them off. Emissions are spaced by _distance_ along the drag rather than throttled by
@@ -248,7 +248,7 @@ in it. The dither shrinks itself out of the way as the palette fills: at 256 lev
 `polar` bends the lookup rather than the field. Each effect goes on drawing its rectangle exactly as before, and one
 axis of that rectangle is then read as the angle about a centre and the other as the distance from it. The rain falls
 outwards from the middle of the page, the ridges stack into rings, the tunnel comes back round on itself - and with
-`reverse: true` the whole thing turns inside-out, so the rain falls *in* and the beer pools round the centre with its
+`reverse: true` the whole thing turns inside-out, so the rain falls _in_ and the beer pools round the centre with its
 head ringing it. It works with all eight because none of them is involved.
 
 ```js
@@ -259,14 +259,14 @@ createRidgesBackground(canvas, {
 });
 ```
 
-| Field       | Default      | Does                                                                                                  |
-| ----------- | ------------ | ----------------------------------------------------------------------------------------------------- |
-| `centre`    | `[0.5, 0.5]` | The point it turns about, in fractions of the canvas. Outside `0..1` gives a fan, not a wheel.        |
-| `turns`     | `1`          | Copies of the field in one revolution. Keep it whole.                                                 |
-| `rotate`    | `0`          | Turns the picture clockwise, in turns.                                                                |
-| `radius`    | `1`          | How far out the field reaches. `1` is exactly to the corners.                                         |
-| `seam`      | `'mirror'`   | `'mirror'` folds the join away; `'wrap'` keeps the field the right way round and shows it.            |
-| `angleAxis` | `'x'`        | Which axis carries the angle. `'x'` sends the field's rows out as rings, `'y'` its columns as spokes. |
+| Field       | Default      | Does                                                                                                                  |
+| ----------- | ------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `centre`    | `[0.5, 0.5]` | The point it turns about, in fractions of the canvas. Outside `0..1` gives a fan, not a wheel.                        |
+| `turns`     | `1`          | Copies of the field in one revolution. Keep it whole.                                                                 |
+| `rotate`    | `0`          | Turns the picture clockwise, in turns.                                                                                |
+| `radius`    | `1`          | How far out the field reaches. `1` is exactly to the corners.                                                         |
+| `seam`      | `'mirror'`   | `'mirror'` folds the join away; `'wrap'` keeps the field the right way round and shows it.                            |
+| `angleAxis` | `'x'`        | Which axis carries the angle. `'x'` sends the field's rows out as rings, `'y'` its columns as spokes.                 |
 | `reverse`   | `false`      | Reads the radius inside-out: what sat at the centre wears the rim, and everything that travelled outwards travels in. |
 
 **The seam is the choice worth making deliberately.** A field is a rectangle, and its left and right edges have no
