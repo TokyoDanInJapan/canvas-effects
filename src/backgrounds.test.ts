@@ -266,6 +266,19 @@ describe.each(EFFECTS)('$name', ({ mount }) => {
     expect(bent.greys()).not.toEqual(plain.greys());
   });
 
+  it('still draws when given a frame rate of zero', () => {
+    // The driver and the harness both read a non-positive rate as one frame a
+    // second. An effect that divided by `fps` for itself - to settle on mount -
+    // used to settle on an infinite step and paint one flat grey, with no error.
+    const dom = page();
+    const handle = mount(dom.canvas, makeRandom(12345), { fps: 0 });
+    expect(handle).not.toBeNull();
+    expect(distinct(dom.greys())).toBeGreaterThan(1);
+
+    dom.frame();
+    expect(distinct(dom.greys())).toBeGreaterThan(1);
+  });
+
   it('fills the canvas it was given', () => {
     const dom = page({ width: 900, height: 600 });
     start(dom);

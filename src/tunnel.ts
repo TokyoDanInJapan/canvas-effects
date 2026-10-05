@@ -67,6 +67,7 @@
 // tunnel-background.ts.
 
 import { aspectOf, cellSpansOf } from './background.js';
+import { wrapCell } from './grid.js';
 
 const TAU = Math.PI * 2;
 
@@ -215,8 +216,8 @@ export function buildTunnelTile(size: number): Float32Array {
 /** Nearest sample of the tile, wrapping both axes. */
 export function sampleTile(tile: Float32Array, size: number, u: number, v: number): number {
   // Double modulo: a bare % keeps the sign, and both coordinates go negative.
-  const x = (((Math.floor(u * size) % size) + size) % size) | 0;
-  const y = (((Math.floor(v * size) % size) + size) % size) | 0;
+  const x = wrapCell(Math.floor(u * size), size);
+  const y = wrapCell(Math.floor(v * size), size);
   return tile[y * size + x];
 }
 

@@ -25,7 +25,7 @@ export default defineConfig({
       // untested half is where the bugs were, which is not a coincidence.
       //
       // Nothing is excluded now but the tests themselves and `index.ts`, which is
-      // re-exports only. The six mounts are covered by backgrounds.test.ts, which
+      // re-exports only. The mounts are covered by backgrounds.test.ts, which
       // mounts each of them against a stubbed canvas and reads the bytes back.
       exclude: ['src/**/*.test.ts', 'src/index.ts'],
       // Re-baselined once the driver, the renderer and the six mounts came under

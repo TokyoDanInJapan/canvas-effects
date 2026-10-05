@@ -59,6 +59,7 @@ export {
   aspectOf,
   cellSpansOf,
   approach,
+  fixedStep,
   ringPulse,
   COMMON_BACKGROUND_DEFAULTS,
   type AgeingList,
@@ -232,6 +233,8 @@ export { withDefaults } from './options.js';
 export { BAYER_4X4, darken, orderedDither, quantise } from './dither.js';
 
 export { fbm, hash2, makeRandom, valueNoise } from './noise.js';
+
+export { wrapCell } from './grid.js';
 
 // The fluid solver, in the order a frame uses it.
 export {

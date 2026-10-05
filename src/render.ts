@@ -23,7 +23,7 @@
 // amplitude`, so the effect modulates a page colour rather than replacing it -
 // which is what lets body text sit directly on top of one of these.
 
-import { orderedDither, quantise } from './dither.js';
+import { BAYER_4X4 } from './dither.js';
 import { withDefaults } from './options.js';
 
 /** How the field's 0..1 levels are mapped onto actual greys. */
@@ -97,10 +97,10 @@ export interface Shading {
 /**
  * Expands a shading into one RGB triple per palette level.
  *
- * Built once per frame rather than evaluated per pixel, which is what keeps the
- * inner loop to three array reads however the shading is specified - the tint
- * multiplies and any ramp interpolation happen `levels` times, not a hundred
- * thousand times.
+ * Built once per shading rather than evaluated per pixel, which is what keeps
+ * the inner loop to one palette read however the shading is specified - the
+ * tint multiplies and any ramp interpolation happen `levels` times, not a
+ * hundred thousand times.
  */
 export function buildPalette(shading: Shading, levels: number): Uint8ClampedArray {
   const count = Math.max(1, levels);
@@ -288,7 +288,7 @@ export interface SurfaceOptions {
 // effect knows about any of it: the field is built exactly as before, and only
 // the lookup that reads it changes.
 //
-// That is why it lives here rather than in seven places. It is also why it
+// That is why it lives here rather than in every effect. It is also why it
 // costs a table: the plain lookup is separable - a row of x weights and a
 // column of y ones - and a polar one is not, because the field cell an output
 // pixel reads depends on both of its coordinates at once. So the transform is
@@ -475,6 +475,23 @@ export function polarSample(
   return polar.angleAxis === 'x' ? [angle, radius] : [radius, angle];
 }
 
+/**
+ * True where a `Uint32Array` over pixel bytes reads them back to front - which
+ * is every browser in practice, but the packing below asks rather than assumes.
+ */
+const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
+/**
+ * One opaque RGBA pixel as the single word a `Uint32Array` over `ImageData`
+ * stores it as, so the frame path writes a pixel in one store rather than
+ * three - with alpha in the word, which is what keeps the canvas opaque.
+ */
+function packPixel(r: number, g: number, b: number): number {
+  return LITTLE_ENDIAN
+    ? ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0
+    : ((r << 24) | (g << 16) | (b << 8) | 255) >>> 0;
+}
+
 /** As far along an axis as the polar map is allowed to land. See `buildPolarMap`. */
 const JUST_INSIDE = 1 - 1e-7;
 
@@ -573,6 +590,8 @@ export function createSurface(
   options: SurfaceOptions
 ): Surface {
   let image: ImageData | null = null;
+  // The same bytes a pixel at a time. See `packPixel`.
+  let pixels = new Uint32Array(0);
   let width = 0;
   let height = 0;
   let fieldW = 0;
@@ -580,6 +599,13 @@ export function createSurface(
 
   let mapX: AxisMap = { i0: new Int32Array(0), i1: new Int32Array(0), t: new Float32Array(0) };
   let mapY: AxisMap = mapX;
+
+  // Every field row blended across to the output's width, once a frame. The
+  // plain lookup is separable, and each field row is read by every output row
+  // between it and the next - `fieldScale` of them, two at the defaults - so
+  // doing the horizontal half once per field row rather than twice per output
+  // row is most of the blend's work saved.
+  let rows = new Float64Array(0);
 
   // The polar lookup, when there is one: field coordinates per output pixel,
   // already scaled to the field's axes so the frame path has no multiply in it.
@@ -592,21 +618,27 @@ export function createSurface(
   // Resolved on resize rather than per frame, because it depends on the size
   // the surface settled at. See `dither` in `SurfaceOptions`.
   let dithering = options.dither !== false;
+  // The per-cell dither offsets `shade` fills in. See there.
+  const nudges = new Float64Array(16);
 
   // The palette only changes when the shading does - a handful of times in a
   // page's life - so rebuilding it per frame was the one steady-state allocation
   // in the frame path. Cached against a *copy* of the shading, because the
   // natural way to drive `shade` is to mutate one shading object in place, and
   // comparing an object against itself would wave every change through.
-  let palette: Uint8ClampedArray | null = null;
+  let palette: Uint32Array | null = null;
   let paletteShading: Shading | null = null;
   let paletteLevels = 0;
 
-  function paletteFor(shading: Shading, levels: number): Uint8ClampedArray {
+  function paletteFor(shading: Shading, levels: number): Uint32Array {
     if (palette && paletteLevels === levels && paletteShading && sameShading(shading, paletteShading)) {
       return palette;
     }
-    palette = buildPalette(shading, levels);
+    const triples = buildPalette(shading, levels);
+    palette = new Uint32Array(triples.length / 3);
+    for (let i = 0; i < palette.length; i++) {
+      palette[i] = packPixel(triples[i * 3], triples[i * 3 + 1], triples[i * 3 + 2]);
+    }
     paletteShading = {
       base: shading.base,
       amplitude: shading.amplitude,
@@ -704,37 +736,55 @@ export function createSurface(
     canvas.width = width;
     canvas.height = height;
     image = ctx.createImageData(width, height);
+    pixels = new Uint32Array(image.data.buffer, image.data.byteOffset, width * height);
 
-    // Opaque canvas: every alpha byte is set once here and never touched again.
+    // Opaque from the start. Every palette word carries its own alpha, so this
+    // only matters before the first `shade` - but it costs nothing to be sure.
     const data = image.data;
     for (let i = 3; i < data.length; i += 4) data[i] = 255;
 
     mapX = mapAxis(width, fieldW);
     mapY = mapAxis(height, fieldH);
+    rows = polar ? new Float64Array(0) : new Float64Array(fieldH * width);
     buildPolarMap();
     return true;
   }
 
   function shade(field: Float32Array, shading: Shading, gamma: number): void {
     if (!image) return;
-    const data = image.data;
     const { levels } = options;
 
-    // One triple per level, resolved out here. Greyscale, tinted and ramped
-    // shadings all collapse to the same table, so the inner loop does not care
-    // which was asked for.
+    // One packed pixel per level, resolved out here. Greyscale, tinted and
+    // ramped shadings all collapse to the same table, so the inner loop does
+    // not care which was asked for.
     const palette = paletteFor(shading, levels);
-    const steps = levels > 1 ? levels - 1 : 1;
+    // Zero for a one-level palette, so every pixel lands on its only entry.
+    const steps = levels > 1 ? levels - 1 : 0;
+
+    // The dither as an offset per Bayer cell, in level units: exactly the
+    // nudge `orderedDither` applies, and nothing at all when it is off. Built
+    // per frame because it is sixteen numbers, and `levels` is all it needs.
+    const step = steps > 0 ? 1 / steps : 0;
+    for (let i = 0; i < 16; i++) nudges[i] = dithering ? step * (BAYER_4X4[i] - 0.5) : 0;
 
     const gammaLut = gamma === 1 ? null : gammaTableFor(gamma);
-
-    const x0s = mapX.i0;
-    const x1s = mapX.i1;
-    const txs = mapX.t;
-
-    // The polar lookup, hoisted so the inner loop's test is against a local.
     const px = polarX;
     const py = polarY;
+
+    if (!px || !py) {
+      const x0s = mapX.i0;
+      const x1s = mapX.i1;
+      const txs = mapX.t;
+      for (let fy = 0; fy < fieldH; fy++) {
+        const from = fy * fieldW;
+        const to = fy * width;
+        for (let x = 0; x < width; x++) {
+          const a = field[from + x0s[x]];
+          rows[to + x] = a + (field[from + x1s[x]] - a) * txs[x];
+        }
+      }
+    }
+
     const maxX = fieldW - 1;
     const maxY = fieldH - 1;
 
@@ -742,11 +792,11 @@ export function createSurface(
       // The row-invariant half of the plain lookup. The polar path has no
       // row-invariant half - which field row it reads changes along the row as
       // well as down it - so it reads its own table per pixel instead.
-      const rowA = mapY.i0[y] * fieldW;
-      const rowB = mapY.i1[y] * fieldW;
+      const rowA = mapY.i0[y] * width;
+      const rowB = mapY.i1[y] * width;
       const ty = mapY.t[y];
       const rowStart = y * width;
-      const rowOffset = rowStart * 4;
+      const bayerRow = (y & 3) * 4;
 
       for (let x = 0; x < width; x++) {
         let value: number;
@@ -773,28 +823,20 @@ export function createSurface(
           const bottom = field[below + ax] + (field[below + bx] - field[below + ax]) * fx;
           value = top + (bottom - top) * (gy - ay);
         } else {
-          const x0 = x0s[x];
-          const x1 = x1s[x];
-          const tx = txs[x];
-
-          const top = field[rowA + x0] + (field[rowA + x1] - field[rowA + x0]) * tx;
-          const bottom = field[rowB + x0] + (field[rowB + x1] - field[rowB + x0]) * tx;
-          value = top + (bottom - top) * ty;
+          const top = rows[rowA + x];
+          value = top + (rows[rowB + x] - top) * ty;
         }
 
         value = value < 0 ? 0 : value > 1 ? 1 : value;
         if (gammaLut) value = gammaLut[(value * (GAMMA_STEPS - 1) + 0.5) | 0];
 
-        // Both branches return a value already snapped to the palette, so this
-        // index is exact rather than a re-quantisation. The condition is
-        // loop-invariant; splitting the loop in two to hoist it by hand would
-        // duplicate the body for no measurable gain.
-        const level = dithering ? orderedDither(value, x, y, levels) : quantise(value, levels);
-        const index = Math.round(level * steps) * 3;
-        const offset = rowOffset + x * 4;
-        data[offset] = palette[index];
-        data[offset + 1] = palette[index + 1];
-        data[offset + 2] = palette[index + 2];
+        // `orderedDither` and `quantise`, folded into one: nudge by the cell's
+        // threshold, clamp, and round straight to a palette index rather than
+        // to a 0..1 level that would only be multiplied back up again. The
+        // arithmetic is theirs step for step, so the output is the same bytes.
+        let level = value + nudges[bayerRow + (x & 3)];
+        level = level < 0 ? 0 : level > 1 ? 1 : level;
+        pixels[rowStart + x] = palette[Math.round(level * steps)];
       }
     }
 

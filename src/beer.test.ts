@@ -861,8 +861,8 @@ describe('the head', () => {
 
   it('smooths rather than rings, even at an absurd step', () => {
     // An explicit diffusion step goes unstable past a coefficient of a half and
-    // starts alternating sign along the array. The clamp is what stops that, and
-    // this is the test that would notice it going.
+    // starts alternating sign along the array. The implicit step cannot, and
+    // this is the test that would notice it if the levelling ever went back.
     const params: BeerParams = { ...FLAT, drain: 0, spread: 40 };
     const beer = empty(params);
     beer.head[beer.w >> 1] = 0.1;
@@ -870,6 +870,28 @@ describe('the head', () => {
     for (let i = 0; i < 60; i++) settleHead(beer, params, 1);
 
     for (const thickness of beer.head) expect(thickness).toBeGreaterThanOrEqual(0);
+  });
+
+  it('levels the same distance across the glass at any resolution', () => {
+    // `spread` is in height units, so a heap should flatten the same way on a
+    // fine field as on a coarse one. A ceiling on explicit passes used to hold
+    // any field wider than about 175 columns to a fraction of the rate - a
+    // fourteenth of it at 1080p - so the head looked different on every window.
+    const params: BeerParams = { ...FLAT, drain: 0 };
+    const profile = (w: number, h: number) => {
+      const beer = empty(params, w, h);
+      const [spanX] = cellSpansOf(beer);
+      const middle = aspectOf(beer) / 2;
+      for (let i = 0; i < beer.w; i++) if (Math.abs(i * spanX - middle) < 0.03) beer.head[i] = 0.1;
+      for (let i = 0; i < 48; i++) settleHead(beer, params, 1 / 24);
+      return [0, 0.03, 0.06, 0.1].map((dx) => headAt(beer, middle + dx));
+    };
+
+    const coarse = profile(128, 72);
+    const fine = profile(1024, 576);
+    for (let i = 0; i < coarse.length; i++) expect(fine[i]).toBeCloseTo(coarse[i], 2);
+    // And it has spread at all, rather than both standing still.
+    expect(coarse[3]).toBeGreaterThan(0.001);
   });
 
   it('keeps foam pushed against a wall instead of draining it out of the array', () => {
@@ -1147,6 +1169,33 @@ describe('nucleation sites', () => {
       if (nearest > params.radius * 2) strays++;
     }
     expect(strays).toBeGreaterThan(beer.bubbles.length / 4);
+  });
+
+  it('scatters the share of the fizz that `streaming` leaves over, and no less', () => {
+    // The stray share used to be rolled against `streaming` twice, so a half
+    // and half split came out a quarter stray. Measured against a run with no
+    // streaming at all, because a bubble placed anywhere can still land beside
+    // a site by chance and be counted as streamed.
+    const strayShare = (streaming: number) => {
+      const params: BeerParams = { ...FLAT, streaming, rate: 3000, maxBubbles: 5000 };
+      const rand = makeRandom(5);
+      const beer = createBeer(W, H, rand, params);
+      beer.bubbles.length = 0;
+
+      stepBeer(beer, params, rand, 0.2);
+
+      let strays = 0;
+      for (const b of beer.bubbles) {
+        let nearest = Infinity;
+        for (const site of beer.sites) nearest = Math.min(nearest, Math.abs(b.x - site.x));
+        if (nearest > params.radius * 2 + 1e-6) strays++;
+      }
+      return strays / beer.bubbles.length;
+    };
+
+    const ratio = strayShare(0.5) / strayShare(0);
+    expect(ratio).toBeGreaterThan(0.4);
+    expect(ratio).toBeLessThan(0.6);
   });
 
   it('streams nothing when there are no sites to stream from', () => {
@@ -1490,6 +1539,24 @@ describe('a resize', () => {
 
     expect(after.level).toBe(0.3);
     expect(surfaceAt(after, 1)).toBeCloseTo(0.7, 6);
+  });
+
+  it('lets go of the bubbles a narrower glass no longer has room for', () => {
+    // Carried across as they were, everything past the new right wall was
+    // clamped onto it and fused there into a column of large bubbles.
+    const rand = makeRandom(6);
+    const before = createBeer(W * 2, H, rand, BEER_DEFAULTS);
+    for (let i = 0; i < 48; i++) stepBeer(before, BEER_DEFAULTS, rand, 1 / 24);
+    const within = before.bubbles.filter((b) => b.x <= aspectOf(before) / 2).length;
+    expect(before.bubbles.length).toBeGreaterThan(within);
+
+    const after = createBeer(W, H, rand, BEER_DEFAULTS);
+    carryBeer(before, after);
+
+    expect(after.bubbles).toBe(before.bubbles);
+    expect(after.bubbles).toHaveLength(within);
+    for (const b of after.bubbles) expect(b.x).toBeLessThanOrEqual(aspectOf(after));
+    for (const d of after.drops) expect(d.x).toBeLessThanOrEqual(aspectOf(after));
   });
 
   it('rescales the sites so the streams keep their places on the glass', () => {

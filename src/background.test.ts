@@ -1,7 +1,7 @@
 // The mount harness. Worth testing directly because there is now exactly one of
-// it: every one of the six effects gets its options merged, its surface sized,
-// its loop driven and its listeners cleaned up by this code, so a test here is
-// six tests.
+// it: every effect gets its options merged, its surface sized, its loop driven
+// and its listeners cleaned up by this code, so a test here is a test of all of
+// them.
 //
 // The DOM is stubbed for the same reasons driver.test.ts stubs it - what matters
 // is the sequence of calls made on a canvas and a context, and a fake reports
@@ -14,6 +14,7 @@ import {
   aspectOf,
   cellSpansOf,
   createAgeingList,
+  fixedStep,
   mountBackground,
   ringPulse,
   type BackgroundSpec,
@@ -800,6 +801,17 @@ describe('cellSpansOf', () => {
   it('hands back zero spans for a single-cell axis rather than dividing by zero', () => {
     expect(cellSpansOf({ w: 1, h: 3 })[0]).toBe(0);
     expect(cellSpansOf({ w: 3, h: 1 })[1]).toBe(0);
+  });
+});
+
+describe('fixedStep', () => {
+  it('is one frame at the given rate', () => {
+    expect(fixedStep(24)).toBeCloseTo(1 / 24, 12);
+  });
+
+  it('reads a non-positive rate as one frame a second rather than an infinite step', () => {
+    expect(fixedStep(0)).toBe(1);
+    expect(fixedStep(-5)).toBe(1);
   });
 });
 

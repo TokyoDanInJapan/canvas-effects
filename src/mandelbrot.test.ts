@@ -796,12 +796,16 @@ describe('stepMandelbrot', () => {
     until(m, p, () => m.state.phase === 'cruise', 24 * 30);
 
     const span = m.state.span;
-    const from = [m.state.cx, m.state.cy];
     const entering = Math.abs(m.state.rate);
+    // Measured along the path rather than from where it started: a walk that
+    // follows a contour for a few seconds can curl back towards its start.
+    let travelled = 0;
 
     for (let i = 0; i < 24 * 3 && m.state.phase === 'cruise'; i++) {
+      const [x, y] = [m.state.cx, m.state.cy];
       stepMandelbrot(m, p, 1 / 24);
       renderMandelbrot(m, p);
+      travelled += Math.hypot(m.state.cx - x, m.state.cy - y);
     }
 
     // The magnification coasts to a stop rather than being switched off, and
@@ -812,7 +816,51 @@ describe('stepMandelbrot', () => {
     expect(Math.abs(Math.log2(m.state.span / span))).toBeLessThan(params.speed * params.turnEase * 1.5);
 
     // ...while the view keeps travelling across the picture.
-    expect(Math.hypot(m.state.cx - from[0], m.state.cy - from[1]) / span).toBeGreaterThan(0.01);
+    expect(travelled / span).toBeGreaterThan(0.01);
+  });
+
+  it('does not let the schedule overwrite a decision steering made on the same frame', () => {
+    // Deep inside the main cardioid every cell is interior: there is no
+    // boundary to walk and nothing to aim at, so steering gives up on the
+    // descent. With the next pause also due this frame, the schedule used to
+    // carry on regardless and turn the abandoned descent into a cruise.
+    const p = { ...params, retreatChance: 0 };
+    const m = seeded(4, p);
+    const s = m.state;
+    s.phase = 'in';
+    s.cx = s.goalX = s.aimX = s.pickX = -0.2;
+    s.cy = s.goalY = s.aimY = s.pickY = 0;
+    s.vx = s.vy = 0;
+    s.span = 1e-4;
+    s.blind = 2;
+    s.nextAim = 0;
+    s.nextExplore = 1e-9;
+    renderMandelbrot(m, p);
+
+    stepMandelbrot(m, p, 1 / 24);
+
+    expect(s.phase).toBe('holdDeep');
+  });
+
+  it('pauses for as long as it was told to', () => {
+    // `held` used to be counted down twice a frame while cruising, so every
+    // pause lasted half of `exploreFor` and nothing measured it.
+    const p = { ...params, exploreEvery: 2, retreatChance: 0 };
+    const m = seeded(21, p);
+    until(m, p, () => m.state.phase === 'cruise', 24 * 30);
+
+    const owed = m.state.held;
+    const dt = 1 / 24;
+    let paused = 0;
+    while (m.state.phase === 'cruise' && paused < owed * 3) {
+      stepMandelbrot(m, p, dt);
+      renderMandelbrot(m, p);
+      paused += dt;
+    }
+
+    expect(owed).toBeGreaterThan(p.exploreFor * 0.5);
+    expect(paused).toBeGreaterThanOrEqual(owed - dt);
+    expect(paused).toBeLessThan(owed + 2 * dt);
   });
 
   it('gives up a little depth sometimes without going all the way home', () => {

@@ -87,7 +87,7 @@
 //
 // NOTHING IS SWITCHED, BECAUSE A ZOOM IS ONE COHERENT MOTION
 // ----------------------------------------------------------
-// The six effects beside this one move diffusely - a fluid churns, rain falls
+// The other effects here move diffusely - a fluid churns, rain falls
 // in independent lanes - and the eye does not track any of it. A zoom is a
 // single motion of the entire frame, the eye locks onto it, and every
 // discontinuity in it is visible. Measured as the frame-to-frame change in the
@@ -492,7 +492,7 @@ export function randomizeMandelbrot(
   params: MandelbrotParams = MANDELBROT_DEFAULTS
 ): MandelbrotState {
   // Warmed before the draws this effect makes, and it is not superstition.
-  // Unlike the other six there is nothing here to randomise but the direction
+  // Unlike the other effects there is nothing here to randomise but the direction
   // the autopilot leans - the set is the set - so that single value is the only
   // thing separating one run from another. A weakly seeded generator's first
   // output is not spread over its range: `makeRandom` opens with 0.0002, 0.0004
@@ -640,7 +640,7 @@ export interface Mandelbrot {
   state: MandelbrotState;
   /**
    * Scratch for one complex coordinate. A Float64Array, not a Float32Array: at
-   * the deep end the span is 1e-7 about a coordinate of order 1, and a float32
+   * the deep end the span is 1e-11 about a coordinate of order 1, and a float32
    * cannot hold the difference at all.
    */
   aim: Float64Array;
@@ -1022,6 +1022,10 @@ export function stepMandelbrot(
       }
       s.descended += dt;
       steer(m, params, dt, pointer);
+      // `steer` may have decided the phase already - given up on the descent,
+      // or stopped or backed out of a bad frame - and the schedule must not
+      // overwrite that on the same frame. Likewise in the two cases below.
+      if (s.phase !== 'in') break;
       // Only descending counts down to the next pause: an explore should be
       // separated from the next one by a stretch of actual descending, not by
       // wall-clock time it spent not descending.
@@ -1033,11 +1037,16 @@ export function stepMandelbrot(
       // freeze - it is the zoom easing off while the walk carries on sideways,
       // which is the whole point of it.
       steer(m, params, dt, pointer);
-      if ((s.held -= dt) <= 0) resumeDescent(m, params);
+      if (s.phase !== 'cruise') break;
+      // Read, not counted down: `held` is counted down once for every phase
+      // above. Counting it again here ran every pause at double speed, so an
+      // explore lasted half of `exploreFor` and a rescue half of its hold.
+      if (s.held <= 0) resumeDescent(m, params);
       break;
 
     case 'retreat':
       steer(m, params, dt, pointer);
+      if (s.phase !== 'retreat') break;
       // Far enough back out. Not a hard stop: `rateFor` has already begun
       // easing towards the descent by the time this fires.
       if (s.span >= s.retreatTo) resumeDescent(m, params);
@@ -1063,10 +1072,10 @@ export function stepMandelbrot(
       frame(m, params, dt);
       // Stopped, and actually framed on the whole set rather than merely out of
       // time: the coast is asymptotic, so waiting on the clock alone would
-      // start the next descent from a view still visibly cropped.
-      // Framed on the whole set, or as framed as it is ever going to be. The
-      // second half is not belt and braces: the coast is asymptotic, so a
-      // threshold it happens to fall short of is a cycle that never restarts.
+      // start the next descent from a view still visibly cropped. Or as framed
+      // as it is ever going to be, which is not belt and braces: for the same
+      // reason, a threshold the coast happens to fall short of is a cycle that
+      // never restarts.
       if (s.held <= 0 && (s.span >= params.homeSpan * HOME_ENOUGH || Math.abs(s.rate) < RATE_DEAD)) {
         s.phase = 'in';
         s.goalX = s.cx;
@@ -1097,8 +1106,8 @@ export function stepMandelbrot(
  * uncapped distance grows with `speed`, and past about a third of the range the
  * two turns meet in the middle: the pull-out reaches its own turn before it has
  * built up any rate, its target goes to nothing, and the cycle stalls at the
- * bottom for ever. At the defaults the coast is a fifth of a doubling going in
- * and nine tenths coming out, against a range of twenty-four, so this only
+ * bottom for ever. At the defaults the coast is three tenths of a doubling going
+ * in and 1.2 coming out, against a range of about thirty-eight, so this only
  * comes into play for a caller who has turned `speed` or `turnEase` well up -
  * and there it costs a clamped, slightly abrupt turn rather than a dead one.
  */
@@ -1611,7 +1620,9 @@ function steer(m: Mandelbrot, params: MandelbrotParams, dt: number, pointer: rea
     } else if (due) {
       s.nextAim = params.aimInterval;
       // Not a re-seat: the walk keeps its position and is drawn towards this.
-      repick(m, params);
+      // A pick that found something breaks a run of blind scans as surely as a
+      // re-seat does - the limit is on scans failing one after another.
+      if (repick(m, params)) s.blind = 0;
     }
 
     // Which way the walk is erring, judged from the frame rather than from

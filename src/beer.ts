@@ -269,8 +269,10 @@ export const BEER_DEFAULTS: BeerParams = {
   // several standing columns of fizz, few enough that each one is its own.
   sites: 6,
   // Most of the fizz through the streams, with enough scattered anywhere that
-  // the beer between them still sparkles.
-  streaming: 0.65,
+  // the beer between them still sparkles. The look was tuned at 0.65 while the
+  // stray share was being taken twice over, so what was on screen was 0.35^2,
+  // about an eighth; 0.88 keeps that look now that the dial means what it says.
+  streaming: 0.88,
   maxBubbles: 220,
   // Small - a few cells at the default resolution - because fizz is fizz. The
   // merging is what produces the occasional large one.
@@ -307,12 +309,13 @@ export const BEER_DEFAULTS: BeerParams = {
   // thirds of the way to it.
   headGain: 5.2,
   drain: 0.32,
-  // Levels foam about a sixth of the height sideways in a second - six times
-  // what it was when pops landed anywhere. The fizz arrives up standing
-  // streams now, and at the old rate the head was a range of hills over the
-  // busy streams with bare glass between them. Fast enough to join the hills
-  // into a band, still slow enough to leave the lumps that make it foam.
-  spread: 0.015,
+  // Fast enough to join the hills over the busy streams into a band, still
+  // slow enough to leave the lumps that make it foam: about a twentieth of the
+  // height sideways in a second. The look was tuned at 0.015 while a ceiling
+  // on the levelling passes held every desktop-sized field to a fraction of
+  // that - 0.0011 at 1080p - so this is the value that was actually on screen,
+  // and now it is the value on every screen.
+  spread: 0.0011,
   foamTexture: 0.85,
   foamScale: 26,
   foamDrift: 0.6,
@@ -530,12 +533,19 @@ function nucleate(beer: Beer, params: BeerParams, rand: () => number): { x: numb
         break;
       }
     }
-    // A couple of radii of jitter, or the stream is a bead chain rather than
-    // a column of fizz.
-    const x = site.x + (rand() - 0.5) * 4 * params.radius;
-    return { x: x < 0 ? 0 : x > aspect ? aspect : x, scale: site.size };
+    return { x: nearSite(site, params, aspect, rand), scale: site.size };
   }
   return { x: rand() * aspect, scale: 1 };
+}
+
+/**
+ * Where across the glass a bubble from `site` starts: a couple of radii of
+ * jitter either side of it, or the stream is a bead chain rather than a column
+ * of fizz. Kept inside the walls.
+ */
+function nearSite(site: Site, params: BeerParams, aspect: number, rand: () => number): number {
+  const x = site.x + (rand() - 0.5) * 4 * params.radius;
+  return x < 0 ? 0 : x > aspect ? aspect : x;
 }
 
 /**
@@ -1363,13 +1373,10 @@ export function stepRaft(beer: Beer, dt: number): void {
   }
 }
 
-/**
- * Ceiling on the levelling passes in one step, so that a very fine field cannot
- * turn the head into the expensive part of the frame. Past it the head levels
- * more slowly than `spread` asks for, which is a great deal better than the
- * frame rate quietly halving.
- */
-const MAX_LEVELLING_PASSES = 24;
+// Scratch for the levelling solve, grown to the widest head seen and reused, so
+// the step stays allocation-free.
+let levelGain = new Float64Array(0);
+let levelRhs = new Float64Array(0);
 
 /**
  * Drains and levels the head by `dt`.
@@ -1379,10 +1386,14 @@ const MAX_LEVELLING_PASSES = 24;
  *
  * The levelling is a diffusion step, with its coefficient converted from height
  * units into columns so that it moves foam the same distance across the glass
- * whatever resolution the field settled at. On a fine field that is more than
- * one explicit step can carry, so it is taken in several small ones rather than
- * clamped down to a single large one - clamping would quietly make `spread` mean
- * something different on every window size.
+ * whatever resolution the field settled at. On a fine field that is far more
+ * than an explicit step can carry - about eighty columns squared a frame at
+ * 1080p, where an explicit step is stable to a half - so it is taken as one
+ * implicit step instead: a tridiagonal solve, linear in the width, stable at
+ * any coefficient, and free of the odd-even comb an explicit step leaves at its
+ * limit. It used to be explicit passes under a ceiling, and the ceiling bit on
+ * every field wider than about 175 columns, so `spread` quietly meant something
+ * different on every window size.
  */
 export function settleHead(beer: Beer, params: BeerParams, dt: number): void {
   if (dt <= 0) return;
@@ -1390,31 +1401,34 @@ export function settleHead(beer: Beer, params: BeerParams, dt: number): void {
   const { w, head, headNext } = beer;
   const [spanX] = cellSpansOf(beer);
 
-  // How much levelling this step asks for, in columns squared. On a fine field
-  // it is far more than one explicit step can carry, so it is taken in several -
-  // which is what keeps `spread` a physical rate rather than a number whose
-  // meaning changes with the window size.
-  const wanted = spanX > 0 ? (params.spread * dt) / (spanX * spanX) : 0;
+  // How much levelling this step asks for, in columns squared.
+  const k = spanX > 0 ? (params.spread * dt) / (spanX * spanX) : 0;
 
-  if (wanted > 0) {
-    // A quarter, not the half an explicit diffusion is stable up to. At exactly
-    // a half the step degenerates into "replace each column by the mean of its
-    // neighbours", which decouples the odd columns from the even ones: a spike
-    // then spreads into every other column and leaves a comb along the top of
-    // the head that never fills in.
-    const passes = Math.min(MAX_LEVELLING_PASSES, Math.max(1, Math.ceil(wanted / 0.25)));
-    const k = Math.min(0.25, wanted / passes);
-
-    for (let pass = 0; pass < passes; pass++) {
-      for (let i = 0; i < w; i++) {
-        // Reflected at the walls, so foam pushed against the side of the glass
-        // piles up there instead of draining out of the array.
-        const left = head[i > 0 ? i - 1 : 0];
-        const right = head[i < w - 1 ? i + 1 : w - 1];
-        headNext[i] = head[i] + k * (left - 2 * head[i] + right);
-      }
-      head.set(headNext);
+  if (k > 0 && w > 1) {
+    // Backward Euler: solve `(1 + 2k) h[i] - k h[i-1] - k h[i+1] = old[i]` for
+    // the new head, by the Thomas algorithm. Reflected at the walls - the
+    // missing neighbour is the column itself, which takes one `k` off the
+    // diagonal - so foam pushed against the side of the glass piles up there
+    // instead of draining out of the array. Every column of the system sums to
+    // one, which is what conserves the foam.
+    if (levelGain.length < w) {
+      levelGain = new Float64Array(w);
+      levelRhs = new Float64Array(w);
     }
+    const gain = levelGain;
+    const rhs = levelRhs;
+
+    let pivot = 1 + k;
+    gain[0] = -k / pivot;
+    rhs[0] = head[0] / pivot;
+    for (let i = 1; i < w; i++) {
+      pivot = (i < w - 1 ? 1 + 2 * k : 1 + k) + k * gain[i - 1];
+      gain[i] = -k / pivot;
+      rhs[i] = (head[i] + k * rhs[i - 1]) / pivot;
+    }
+    headNext[w - 1] = rhs[w - 1];
+    for (let i = w - 2; i >= 0; i--) headNext[i] = rhs[i] - gain[i] * headNext[i + 1];
+    head.set(headNext);
   }
 
   const drained = Math.exp(-params.drain * dt);
@@ -1472,22 +1486,24 @@ export function stepBeer(
   beer.owed += supply * (1 - streamed);
   for (const site of beer.sites) site.owed += supply * streamed * site.weight;
 
+  // Off the floor of the glass, and a radius *below* the bottom edge rather
+  // than on it. Nucleating exactly on the last row draws every new bubble at
+  // half strength along the bottom of the canvas, which reads as a dotted line
+  // rather than as fizz coming up off the base.
+  const floor = 1 + params.radius;
   let full = false;
+  // The anywhere share, placed anywhere - not through `nucleate`, which would
+  // roll `streaming` a second time on a share it has already been taken from.
+  // That routed most of it to the sites too, so the stray fizz came out at
+  // `(1 - streaming)^2` of the rate rather than `1 - streaming`.
   while (beer.owed >= 1 && !full) {
     beer.owed -= 1;
-    const start = nucleate(beer, params, rand);
-    // Off the floor of the glass, and a radius *below* the bottom edge rather
-    // than on it. Nucleating exactly on the last row draws every new bubble at
-    // half strength along the bottom of the canvas, which reads as a dotted
-    // line rather than as fizz coming up off the base.
-    full = !addBubble(beer, params, rand, start.x, 1 + params.radius, start.scale);
+    full = !addBubble(beer, params, rand, rand() * aspect, floor, 1);
   }
   for (const site of beer.sites) {
     while (site.owed >= 1 && !full) {
       site.owed -= 1;
-      const jitter = site.x + (rand() - 0.5) * 4 * params.radius;
-      const x = jitter < 0 ? 0 : jitter > aspect ? aspect : jitter;
-      full = !addBubble(beer, params, rand, x, 1 + params.radius, site.size);
+      full = !addBubble(beer, params, rand, nearSite(site, params, aspect, rand), floor, site.size);
     }
   }
   if (full) {
@@ -1522,6 +1538,16 @@ export function carryBeer(from: Beer, to: Beer): void {
 
   const fromAspect = aspectOf(from);
   const toAspect = aspectOf(to);
+
+  // The bubbles and drops are in height units, like the head and the waves
+  // below, and are carried the same way: a narrower window shows less of the
+  // same glass. So whatever is now beyond the right wall goes. Kept, it was
+  // clamped onto the wall by the next drift and fused there into a column of
+  // large fast bubbles and a spike of foam. Compacted in place, so the arrays
+  // handed over are still the ones the old glass had.
+  cropTo(to.bubbles, toAspect);
+  cropTo(to.drops, toAspect);
+
   to.sites = from.sites;
   const stretch = fromAspect > 0 ? toAspect / fromAspect : 1;
   for (const site of to.sites) site.x *= stretch;
@@ -1539,6 +1565,13 @@ export function carryBeer(from: Beer, to: Beer): void {
   for (let k = 0; k < to.w - 1; k++) {
     to.flow[k] = sampleColumn(from.flow, fromSpan, (k + 0.5) * toSpan - fromSpan * 0.5);
   }
+}
+
+/** Removes, in place and in order, every item further across than `aspect`. */
+function cropTo(items: Array<{ x: number }>, aspect: number): void {
+  let kept = 0;
+  for (const item of items) if (item.x <= aspect) items[kept++] = item;
+  items.length = kept;
 }
 
 /** How much foam there is, as an area in height units. Exported for tuning and tests. */

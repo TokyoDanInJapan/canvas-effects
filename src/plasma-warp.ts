@@ -20,6 +20,7 @@
 // plasma-background.ts.
 
 import { ringPulse } from './background.js';
+import { wrapCell } from './grid.js';
 import { fbm } from './noise.js';
 
 /**
@@ -341,11 +342,11 @@ export function buildPlasmaTile(size: number): Float32Array {
  * Nearest-neighbour sample of the tile, wrapping in both axes.
  *
  * Nearest rather than bilinear on purpose: it is cheaper, and the hard edges
- * are the point. Note the double modulo - a single `%` keeps the sign in
- * JavaScript, and the warp produces plenty of negative coordinates.
+ * are the point. Wrapped by `wrapCell`, which copes with the plenty of negative
+ * coordinates the warp produces.
  */
-export function samplePlasma(tile: Float32Array, size: number, u: number, v: number): number {
-  const x = (((Math.floor(u * size) % size) + size) % size) | 0;
-  const y = (((Math.floor(v * size) % size) + size) % size) | 0;
+export function samplePlasma(tile: Float32Array | Float64Array, size: number, u: number, v: number): number {
+  const x = wrapCell(Math.floor(u * size), size);
+  const y = wrapCell(Math.floor(v * size), size);
   return tile[y * size + x];
 }

@@ -38,6 +38,7 @@
 // Kept DOM-free so it can be unit-tested; the canvas and the loop live in
 // smoke-background.ts.
 
+import { wrapCell } from './grid.js';
 import { fbm } from './noise.js';
 
 export interface SmokeParams {
@@ -247,12 +248,10 @@ export function sampleWrapped(field: Float32Array, w: number, h: number, x: numb
   const tx = x - fx;
   const ty = y - fy;
 
-  // Double modulo: a bare % keeps the sign in JavaScript, and back-traced
-  // coordinates are routinely negative.
-  const x0 = (((fx % w) + w) % w) | 0;
-  const y0 = (((fy % h) + h) % h) | 0;
-  const x1 = (x0 + 1) % w;
-  const y1 = (y0 + 1) % h;
+  const x0 = wrapCell(fx, w);
+  const y0 = wrapCell(fy, h);
+  const x1 = x0 + 1 === w ? 0 : x0 + 1;
+  const y1 = y0 + 1 === h ? 0 : y0 + 1;
 
   const a = field[y0 * w + x0];
   const b = field[y0 * w + x1];
@@ -293,14 +292,15 @@ export function advect(
 /**
  * The lowest and highest of the four cells a bilinear sample would read.
  *
- * Used to limit the MacCormack correction below. Writes into `out` to keep the
- * inner loop allocation-free.
+ * The bounds the MacCormack correction below is limited to - which it now
+ * records during its own forward trace rather than asking for here, so this is
+ * the same rule for a single point. Writes into `out` to stay allocation-free.
  */
 export function sampleBounds(field: Float32Array, w: number, h: number, x: number, y: number, out: Float32Array): void {
-  const x0 = (((Math.floor(x) % w) + w) % w) | 0;
-  const y0 = (((Math.floor(y) % h) + h) % h) | 0;
-  const x1 = (x0 + 1) % w;
-  const y1 = (y0 + 1) % h;
+  const x0 = wrapCell(Math.floor(x), w);
+  const y0 = wrapCell(Math.floor(y), h);
+  const x1 = x0 + 1 === w ? 0 : x0 + 1;
+  const y1 = y0 + 1 === h ? 0 : y0 + 1;
 
   const a = field[y0 * w + x0];
   const b = field[y0 * w + x1];
@@ -330,25 +330,57 @@ export function sampleBounds(field: Float32Array, w: number, h: number, x: numbe
  * sharp edges it is meant to preserve, producing values outside the original
  * range - here, densities outside 0..1, and eventually a field that blows up.
  */
-// Scratch for the limiter below, hoisted so the advection stays allocation-free
-// like every other per-frame pass.
-const macCormackBounds = new Float32Array(2);
+// The limiter's bounds, per cell, recorded by the forward trace below. Grown to
+// the largest grid seen and reused, so the advection stays allocation-free like
+// every other per-frame pass.
+let lowest = new Float32Array(0);
+let highest = new Float32Array(0);
 
 export function advectMacCormack(fluid: Fluid, dt: number): void {
   const { density, densityNext, densityBack, u, v, w, h } = fluid;
-  const bounds = macCormackBounds;
 
-  advect(density, densityNext, u, v, w, h, dt);
-  advect(densityNext, densityBack, u, v, w, h, -dt);
+  if (lowest.length < density.length) {
+    lowest = new Float32Array(density.length);
+    highest = new Float32Array(density.length);
+  }
 
+  // The forward trace, written out rather than left to `advect`, so that the
+  // limiter's bounds come from the four cells it has just read. Asking
+  // `sampleBounds` afterwards meant tracing every cell a second time to the
+  // same place, for the same four reads - the same answer at twice the cost.
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       const k = j * w + i;
-      const corrected = densityNext[k] + 0.5 * (density[k] - densityBack[k]);
+      const x = i - u[k] * dt;
+      const y = j - v[k] * dt;
+      const fx = Math.floor(x);
+      const fy = Math.floor(y);
+      const x0 = wrapCell(fx, w);
+      const y0 = wrapCell(fy, h);
+      const x1 = x0 + 1 === w ? 0 : x0 + 1;
+      const y1 = y0 + 1 === h ? 0 : y0 + 1;
 
-      sampleBounds(density, w, h, i - u[k] * dt, j - v[k] * dt, bounds);
-      densityNext[k] = corrected < bounds[0] ? bounds[0] : corrected > bounds[1] ? bounds[1] : corrected;
+      const a = density[y0 * w + x0];
+      const b = density[y0 * w + x1];
+      const c = density[y1 * w + x0];
+      const d = density[y1 * w + x1];
+
+      const tx = x - fx;
+      const top = a + (b - a) * tx;
+      const bottom = c + (d - c) * tx;
+      densityNext[k] = top + (bottom - top) * (y - fy);
+      lowest[k] = Math.min(a, b, c, d);
+      highest[k] = Math.max(a, b, c, d);
     }
+  }
+
+  advect(densityNext, densityBack, u, v, w, h, -dt);
+
+  for (let k = 0; k < density.length; k++) {
+    const corrected = densityNext[k] + 0.5 * (density[k] - densityBack[k]);
+    const lo = lowest[k];
+    const hi = highest[k];
+    densityNext[k] = corrected < lo ? lo : corrected > hi ? hi : corrected;
   }
 }
 
@@ -393,9 +425,28 @@ export function solvePressure(fluid: Fluid, iterations: number): void {
   let p = fluid.pressure;
   let next = fluid.pressureNext;
 
+  const { w, h } = fluid;
+
   for (let iter = 0; iter < iterations; iter++) {
-    for (let k = 0; k < p.length; k++) {
-      next[k] = (p[left[k]] + p[right[k]] + p[up[k]] + p[down[k]] - divergence[k]) * 0.25;
+    for (let j = 0; j < h; j++) {
+      const row = j * w;
+      // The rows above and below, as offsets: wrapping vertically depends only
+      // on the row, so one lookup serves every cell along it.
+      const above = up[row] - row;
+      const below = down[row] - row;
+
+      // The two edge columns wrap sideways, so they read the tables. Everything
+      // between them is the plain stencil - the same four reads in the same
+      // order, so the same sums - without the indirection, which was most of
+      // what this loop cost.
+      next[row] = (p[left[row]] + p[right[row]] + p[up[row]] + p[down[row]] - divergence[row]) * 0.25;
+      const last = row + w - 1;
+      for (let k = row + 1; k < last; k++) {
+        next[k] = (p[k - 1] + p[k + 1] + p[k + above] + p[k + below] - divergence[k]) * 0.25;
+      }
+      if (last > row) {
+        next[last] = (p[left[last]] + p[right[last]] + p[up[last]] + p[down[last]] - divergence[last]) * 0.25;
+      }
     }
     const swap = p;
     p = next;
@@ -642,14 +693,14 @@ export function applyJet(fluid: Fluid, jet: Jet, dt: number): void {
 
   for (let dy = -reach; dy <= reach; dy++) {
     const gy = Math.round(jet.y) + dy;
-    const row = (((gy % h) + h) % h) * w;
+    const row = wrapCell(gy, h) * w;
 
     for (let dx = -reach; dx <= reach; dx++) {
       const squared = dx * dx + dy * dy;
       if (squared > radius2) continue;
 
       const gx = Math.round(jet.x) + dx;
-      const k = row + (((gx % w) + w) % w);
+      const k = row + wrapCell(gx, w);
 
       // Smooth across the nozzle, so it has no hard rim.
       const falloff = (1 - squared / radius2) ** 2;
@@ -706,14 +757,14 @@ export function applyStroke(fluid: Fluid, stroke: Stroke, params: SmokeParams, _
 
   for (let dy = -reach; dy <= reach; dy++) {
     const gy = Math.round(stroke.y) + dy;
-    const row = (((gy % h) + h) % h) * w;
+    const row = wrapCell(gy, h) * w;
 
     for (let dx = -reach; dx <= reach; dx++) {
       const squared = dx * dx + dy * dy;
       if (squared > radius2) continue;
 
       const gx = Math.round(stroke.x) + dx;
-      const k = row + (((gx % w) + w) % w);
+      const k = row + wrapCell(gx, w);
 
       // Smooth to nothing at the rim, so the cursor has no hard edge.
       const falloff = (1 - squared / radius2) ** 2;

@@ -10,6 +10,7 @@
 import {
   COMMON_BACKGROUND_DEFAULTS,
   createAgeingList,
+  fixedStep,
   mountBackground,
   type CommonBackgroundOptions,
 } from './background.js';
@@ -105,7 +106,7 @@ export function createRainBackground(
 ): BackgroundHandle | null {
   const config: RainBackgroundOptions = withDefaults(RAIN_BACKGROUND_DEFAULTS, options);
   const params: RainParams = withDefaults(RAIN_DEFAULTS, config.rain);
-  const dt = 1 / config.fps;
+  const dt = fixedStep(config.fps);
 
   let rain: Rain | null = null;
 
@@ -120,7 +121,17 @@ export function createRainBackground(
     rebuild(fieldW, fieldH) {
       // A resize changes the lane count, so the storm is rebuilt rather than
       // stretched - and settled, so it does not restart as a dry screen.
+      const previous = rain;
       rain = createRain(fieldW, fieldH, config.random, params);
+      // Live distortions are placed in cells, so they move with the grid -
+      // otherwise one near the right edge of a wider window lands somewhere
+      // else entirely, or wraps, in a narrower one.
+      if (previous) {
+        for (const d of distortions.items) {
+          d.x *= fieldW / previous.w;
+          d.y *= fieldH / previous.h;
+        }
+      }
       for (let i = 0; i < config.settleSteps; i++) stepRain(rain, params, config.random, dt);
     },
 

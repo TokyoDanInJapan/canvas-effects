@@ -106,16 +106,21 @@ export function createPlasmaBackground(
   const params: PlasmaWarpConfig = withDefaults(PLASMA_WARP_DEFAULTS, config.warp);
 
   const state = randomizePlasmaWarp(config.random);
-  const tile = buildPlasmaTile(config.tileSize);
+  // Darkened once, here, rather than per cell per frame. The tile is sampled
+  // nearest-neighbour, so every value the field takes is one of these and the
+  // bias can be applied to the tile instead - a few thousand `Math.pow` calls
+  // on mount rather than forty thousand every frame. Kept in doubles, which is
+  // what the per-cell value was, so the picture is the same to the last bit.
+  const tile = Float64Array.from(buildPlasmaTile(config.tileSize), (value) => darken(value, config.gamma));
   const grid = new Float32Array(WARP_GRID_X * WARP_GRID_Y * 2);
   const uv = new Float32Array(2);
 
   // Live click ripples. Aged in real seconds, not animation time - see `Ripple`.
   const ripples = createAgeingList<Ripple>(config.maxRipples, params.rippleLifetime);
 
-  // The low-resolution field, and the previous frame of it for the blur.
+  // The low-resolution field. It is also the previous frame the blur mixes
+  // from, because nothing between frames changes it: the shading only reads it.
   let field = new Float32Array(0);
-  let previous = new Float32Array(0);
   let width = 0;
   let height = 0;
   let aspect = 1;
@@ -142,12 +147,11 @@ export function createPlasmaBackground(
       for (let i = 0; i < width; i++) {
         const index = j * width + i;
         sampleDisplacementGrid(grid, i * sx, t, uv);
-        // Darkened here rather than at shade time, so the blur below carries
-        // the biased value forward and successive frames agree with each other.
-        const sampled = darken(samplePlasma(tile, config.tileSize, uv[0], uv[1]), config.gamma);
-        const smoothed = sampled + (previous[index] - sampled) * keep;
-        previous[index] = smoothed;
-        field[index] = smoothed;
+        // Already darkened - see `tile` - rather than darkened at shade time,
+        // so the blur carries the biased value forward and successive frames
+        // agree with each other.
+        const sampled = samplePlasma(tile, config.tileSize, uv[0], uv[1]);
+        field[index] = sampled + (field[index] - sampled) * keep;
       }
     }
   }
@@ -168,7 +172,6 @@ export function createPlasmaBackground(
       // window, whatever shape that is.
       aspect = aspectOf({ w: fieldW, h: fieldH });
       field = new Float32Array(fieldW * fieldH);
-      previous = new Float32Array(fieldW * fieldH);
       // Filled as well as allocated, so the frame painted straight after a resize
       // is this field rather than an empty one - and with the blur off, because
       // blending against the zeroed buffer would paint it at a fraction of its
