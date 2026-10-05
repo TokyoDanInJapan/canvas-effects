@@ -19,6 +19,7 @@ import * as background from './background.js';
 import * as beer from './beer.js';
 import * as dither from './dither.js';
 import * as driver from './driver.js';
+import * as grid from './grid.js';
 import * as mandelbrot from './mandelbrot.js';
 import * as metaballs from './metaballs.js';
 import * as noise from './noise.js';
@@ -50,6 +51,7 @@ const MODULES: Array<{ name: string; module: Record<string, unknown> }> = [
   { name: 'beer-background', module: beerBackground },
   { name: 'dither', module: dither },
   { name: 'driver', module: driver },
+  { name: 'grid', module: grid },
   { name: 'mandelbrot', module: mandelbrot },
   { name: 'mandelbrot-background', module: mandelbrotBackground },
   { name: 'metaballs', module: metaballs },

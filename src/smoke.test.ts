@@ -15,6 +15,7 @@ import {
   nextJetDelay,
   planJet,
   randomizeSmoke,
+  sampleBounds,
   sampleWrapped,
   solvePressure,
   stepFluid,
@@ -103,6 +104,33 @@ describe('sampleWrapped', () => {
     for (let x = -60; x < 60; x += 0.37) {
       for (let y = -40; y < 40; y += 0.53) {
         expect(Number.isFinite(sampleWrapped(field, w, h, x, y))).toBe(true);
+      }
+    }
+  });
+});
+
+describe('sampleBounds', () => {
+  const w = 4;
+  const h = 3;
+  // Distinct values, so the wrong four cells could not give the right answer.
+  const field = Float32Array.from({ length: w * h }, (_, k) => (k * 7) % 12);
+  const out = new Float32Array(2);
+
+  it('brackets the four cells a bilinear sample reads, wrapping like it', () => {
+    sampleBounds(field, w, h, 3.5, 2.5, out);
+    // Cells (3,2), (0,2), (3,0) and (0,0): the far corner wraps both ways.
+    const four = [field[2 * w + 3], field[2 * w + 0], field[3], field[0]];
+    expect(out[0]).toBe(Math.min(...four));
+    expect(out[1]).toBe(Math.max(...four));
+  });
+
+  it('always contains the sample it bounds', () => {
+    for (let x = -9; x < 9; x += 0.41) {
+      for (let y = -7; y < 7; y += 0.37) {
+        const value = sampleWrapped(field, w, h, x, y);
+        sampleBounds(field, w, h, x, y, out);
+        expect(value).toBeGreaterThanOrEqual(out[0] - 1e-6);
+        expect(value).toBeLessThanOrEqual(out[1] + 1e-6);
       }
     }
   });

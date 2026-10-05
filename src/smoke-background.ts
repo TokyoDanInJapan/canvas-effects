@@ -14,7 +14,7 @@
 //     lurch. Hence the fixed timestep: a slow frame makes the smoke drift
 //     slower, never further.
 
-import { COMMON_BACKGROUND_DEFAULTS, mountBackground, type CommonBackgroundOptions } from './background.js';
+import { COMMON_BACKGROUND_DEFAULTS, fixedStep, mountBackground, type CommonBackgroundOptions } from './background.js';
 import { withDefaults } from './options.js';
 import { type BackgroundHandle } from './render.js';
 import {
@@ -87,6 +87,9 @@ export const SMOKE_BACKGROUND_DEFAULTS: SmokeBackgroundOptions = {
  */
 const RESIZE_SETTLE_STEPS = 6;
 
+/** Most strokes waiting for the next step. See `onEmit`. */
+const MAX_PENDING_STROKES = 16;
+
 /**
  * Mounts the smoke on a canvas. The canvas keeps whatever size CSS gives it;
  * this only ever sets its backing-store dimensions.
@@ -103,7 +106,7 @@ export function createSmokeBackground(
   const params: SmokeParams = withDefaults(SMOKE_DEFAULTS, config.simulation);
 
   const state = randomizeSmoke(config.random);
-  const dt = 1 / config.fps;
+  const dt = fixedStep(config.fps);
 
   let fluid: Fluid | null = null;
   let elapsed = 0;
@@ -151,7 +154,23 @@ export function createSmokeBackground(
     timestep: 'fixed',
 
     rebuild(fieldW, fieldH) {
+      const previous = fluid;
       fluid = createFluid(fieldW, fieldH);
+
+      // A jet in flight is measured in the old grid's cells. Carried across
+      // unscaled, a nozzle on the far edge of a wider grid wraps to somewhere
+      // inside the narrower one and blows out of the middle of the screen for
+      // the rest of its run. Its speed is in cells a second whatever the grid,
+      // so only where it is and how wide it is change.
+      if (jet && previous) {
+        jet.x *= fieldW / previous.w;
+        jet.y *= fieldH / previous.h;
+        jet.radius = Math.max(2, jet.radius * (Math.min(fieldW, fieldH) / Math.min(previous.w, previous.h)));
+      }
+      // Strokes are spent on the next step, so there are only ever a frame's
+      // worth waiting. Dropped rather than rescaled: the settle below would
+      // spend them on its first step, in a field that has not started moving.
+      pending.length = 0;
 
       // Rebuilding throws the simulation away, so run the fresh one up to
       // speed rather than opening on still, unmoved source noise. The full
@@ -192,7 +211,10 @@ export function createSmokeBackground(
       onEmit(u, v, du, dv) {
         if (!fluid) return;
         // A long stall between events would otherwise arrive as one huge drag.
-        if (pending.length > 16) return;
+        // The oldest goes, not the newest: dropping the newest leaves the
+        // shove behind the cursor, and the drag reads as having stopped working
+        // halfway along - see `createAgeingList`.
+        if (pending.length >= MAX_PENDING_STROKES) pending.shift();
 
         pending.push({
           x: u * fluid.w,

@@ -22,7 +22,7 @@
 // picture's apparent speed: 39.5% on 60Hz against 1.0% on 144Hz, where 24 does
 // divide the refresh. On the clock it is 0.8% on both. A zoom is one coherent
 // motion across the whole frame and the eye tracks it, which is why this shows
-// here and not in the six effects whose motion is diffuse.
+// here and not in the other effects, whose motion is diffuse.
 //
 // The clamp `mountBackground` applies is what makes this safe: a tab that comes
 // back after a minute advances 100ms, which at half a doubling a second is a

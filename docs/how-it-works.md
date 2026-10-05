@@ -676,10 +676,12 @@ fix spreads the foam over the columns that the bubble covers and divides by thei
 same at any resolution. A test bursts one bubble on a 64-column field and on a 512-column field, and requires the same
 volume.
 
-**The spreading must not run at its stability limit.** Explicit diffusion is stable up to a coefficient of 0.5. At
-exactly 0.5, each column becomes the mean of its neighbours. Odd and even columns separate, and a spike leaves a comb
-pattern that does not fill in. The step is limited to 0.25 and runs several times, so `spread` stays a physical rate at
-any window size.
+**The spreading is one implicit step per frame.** `spread` is a rate in height units, so a fine field needs far more
+diffusion per frame in column units than a coarse one. At 1080p that is about 80 columns squared. Explicit diffusion is
+only stable up to 0.5, and at exactly 0.5 a spike leaves a comb pattern that does not fill in. The head therefore takes
+one backward-Euler step, solved as a tridiagonal system in time proportional to the width. The step is stable at any
+coefficient, conserves the foam and cannot form a comb, so `spread` means the same at every window size. An earlier
+version ran capped explicit passes, and the cap held every desktop-sized field to a fraction of `spread`.
 
 **The surface is shallow water.** Each column has a height, and each face between columns has a depth-averaged flow.
 The walls reflect. The first version was a plucked string, with one wave speed everywhere and no amount of beer.

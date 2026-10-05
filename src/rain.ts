@@ -29,6 +29,7 @@
 // rain-background.ts.
 
 import { ringPulse } from './background.js';
+import { wrapCell } from './grid.js';
 
 export interface RainParams {
   /**
@@ -270,7 +271,7 @@ function sampleField(field: Float32Array, w: number, h: number, x: number, y: nu
   // guard.
   const ty = fy < 0 ? 0 : y - fy;
 
-  const x0 = (((fx % w) + w) % w) | 0;
+  const x0 = wrapCell(fx, w);
   const x1 = (x0 + 1) % w;
   const y0 = fy < 0 ? 0 : fy > h - 1 ? h - 1 : fy;
   const y1 = y0 + 1 > h - 1 ? h - 1 : y0 + 1;
@@ -357,7 +358,7 @@ export function distortField(rain: Rain, distortions: readonly Distortion[], par
 
       if (ox === 0 && oy === 0) continue;
       // Read from where the content came from, so it appears pushed outward.
-      const gx = (((xi % w) + w) % w) | 0;
+      const gx = wrapCell(xi, w);
       warped[y * w + gx] = sampleField(field, w, h, xi - ox, y - oy);
     }
   }

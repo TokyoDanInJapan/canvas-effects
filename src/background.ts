@@ -1,6 +1,6 @@
 // What every background here does identically, in one place.
 //
-// Each of the six effects differs in three ways and three only: what its field
+// Each effect differs in three ways and three only: what its field
 // is, how time reaches it, and what a pointer does to it. Everything else - the
 // options, the context, the surface, the loop, the theme watching, the boot
 // sequence, the handle - was the same code six times over, which is six places
@@ -11,7 +11,7 @@
 // is then its own options, its own defaults, and a spec - which is the part that
 // is genuinely about smoke, or rain, or a tunnel.
 //
-// It is exported because writing a seventh effect should not mean writing this
+// It is exported because writing another effect should not mean writing this
 // again. Hand it a field and it will size it, shade it, animate it and clean up
 // after it.
 
@@ -130,7 +130,7 @@ export interface CommonBackgroundOptions {
  * The shared half of every effect's defaults.
  *
  * Each effect spreads this and overrides what it needs, so a value here is one
- * that genuinely suits all six rather than one nobody revisited. Where an effect
+ * that genuinely suits every effect rather than one nobody revisited. Where one
  * differs - the line-art effects want `fieldScale: 1`, the field effects want a
  * gamma above 1 - it says so, with the reasoning, at the override.
  */
@@ -166,6 +166,20 @@ export const COMMON_BACKGROUND_DEFAULTS: CommonBackgroundOptions = {
  * whose field is a pure function of time.
  */
 export type Timestep = 'fixed' | 'clock';
+
+/**
+ * The seconds a `'fixed'` effect advances by each frame: `1 / fps`.
+ *
+ * Guarded the way the driver guards its interval - a non-positive rate is taken
+ * as one frame a second - because the unguarded division hands a fixed-step
+ * effect an infinite `dt`, and that becomes `NaN` in the first multiply that
+ * meets a zero. A solver full of `NaN` paints one flat grey with no error, so
+ * every effect that needs its own `dt` before the first frame - to settle on
+ * mount, say - takes it from here rather than dividing for itself.
+ */
+export function fixedStep(fps: number): number {
+  return 1 / (fps > 0 ? fps : 1);
+}
 
 /** What an effect has to supply for the harness to run it. */
 export interface BackgroundSpec {
@@ -311,9 +325,7 @@ export function mountBackground(
 
   /** Seconds to advance by on this frame. */
   function elapse(): number {
-    // The same guard the driver applies: a non-positive rate would hand a
-    // fixed-step effect an infinite dt.
-    if (spec.timestep === 'fixed') return 1 / (config.fps > 0 ? config.fps : 1);
+    if (spec.timestep === 'fixed') return fixedStep(config.fps);
 
     const now = performance.now();
     // Clamped, so a backgrounded tab does not lurch on return.
@@ -439,7 +451,11 @@ export interface Ageing {
  * which reads as the effect having died.
  */
 export interface AgeingList<T extends Ageing> {
-  /** The live items, oldest first. Safe to read every frame; do not mutate. */
+  /**
+   * The live items, oldest first. Safe to read every frame. Change the list only
+   * through the methods below; adjusting an item's own fields - moving one
+   * when the grid it is measured in changes, say - is fine.
+   */
   readonly items: readonly T[];
   /** Adds one, retiring the oldest if the list is full. */
   add(item: T): void;

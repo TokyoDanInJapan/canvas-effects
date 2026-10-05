@@ -14,6 +14,7 @@ import {
   type Shading,
   type SurfaceOptions,
 } from './render.js';
+import { orderedDither, quantise } from './dither.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -706,6 +707,39 @@ describe('createSurface', () => {
       const seen = new Set<number>();
       for (let i = 0; i < image.data.length; i += 4) seen.add(image.data[i]);
       expect(seen.size).toBeGreaterThan(1);
+    });
+
+    it('paints exactly what orderedDither and quantise would, pixel for pixel', () => {
+      // The frame path folds both into one rounding straight to a palette
+      // index, for speed. This is what holds it to the functions it inlines:
+      // at one field cell per pixel the blend is the identity, so each pixel
+      // has to be precisely the reference's level of its own cell's value.
+      for (const levels of [1, 2, 5, 17, 256]) {
+        for (const dither of [true, false]) {
+          const dom = fake(600, 300);
+          const surface = createSurface(dom.canvas, dom.ctx, options({ levels, dither, fieldScale: 1 }));
+          surface.resize();
+          expect(surface.fieldW).toBe(surface.width);
+
+          const field = new Float32Array(surface.fieldW * surface.fieldH);
+          for (let k = 0; k < field.length; k++) field[k] = ((k * 7919) % 1000) / 999;
+          const shading = { base: 0, amplitude: 255 };
+          const palette = buildPalette(shading, levels);
+          const steps = levels > 1 ? levels - 1 : 1;
+          surface.shade(field, shading, 1);
+
+          const image = dom.painted()!;
+          let wrong = 0;
+          for (let y = 0; y < surface.height; y++) {
+            for (let x = 0; x < surface.width; x++) {
+              const k = y * surface.width + x;
+              const level = dither ? orderedDither(field[k], x, y, levels) : quantise(field[k], levels);
+              if (image.data[k * 4] !== palette[Math.round(level * steps) * 3]) wrong++;
+            }
+          }
+          expect(wrong, `levels ${levels}, dither ${dither}`).toBe(0);
+        }
+      }
     });
 
     it('holds up at a 256-entry palette', () => {

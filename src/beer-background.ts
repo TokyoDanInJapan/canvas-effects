@@ -15,7 +15,9 @@
 
 import {
   COMMON_BACKGROUND_DEFAULTS,
+  aspectOf,
   createAgeingList,
+  fixedStep,
   mountBackground,
   type CommonBackgroundOptions,
 } from './background.js';
@@ -143,7 +145,7 @@ export function createBeerBackground(
 ): BackgroundHandle | null {
   const config: BeerBackgroundOptions = withDefaults(BEER_BACKGROUND_DEFAULTS, options);
   const params: BeerParams = withDefaults(BEER_DEFAULTS, config.beer);
-  const dt = 1 / (config.fps > 0 ? config.fps : 1);
+  const dt = fixedStep(config.fps);
 
   let beer: Beer | null = null;
 
@@ -209,7 +211,7 @@ export function createBeerBackground(
       onEmit(u, v) {
         if (!beer) return;
 
-        const aspect = beer.h > 0 ? beer.w / beer.h : 1;
+        const aspect = aspectOf(beer);
         const x = u * aspect;
         const y = v;
         const now = performance.now();

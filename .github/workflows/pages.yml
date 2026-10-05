@@ -2,7 +2,7 @@
 #
 # `ci.yml` already builds the demo on every push, to prove it still compiles, and
 # then throws the output away. This keeps it: the same build, deployed, so the
-# repository's own link shows six effects moving rather than a description of them.
+# repository's own link shows the effects moving rather than a description of them.
 #
 # The demo is the only honest way to look at these. They are tuned by eye - the
 # gamma values in the defaults were solved by measuring output, but whether the
