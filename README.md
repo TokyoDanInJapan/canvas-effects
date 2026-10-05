@@ -4,13 +4,13 @@ Eight animated greyscale backgrounds for a 2D canvas, with ordered dithering. Th
 changes the page colour slightly and does not become a picture, so a reader should not notice it.
 
 There is no WebGL, no shaders and no dependencies. The library uses a 2D context, typed arrays and `putImageData`. All
-eight effects together are 23.0 kB minified and gzipped.
+eight effects together are 23.7 kB minified and gzipped.
 
 An unrelated package already uses the name `canvas-effects` on npm, so install this one from GitHub. npm keeps the
 package's own name, so imports are still `from 'canvas-effects'`.
 
 ```bash
-npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.6.0
+npm install canvas-effects@github:TokyoDanInJapan/canvas-effects#v2.7.0
 ```
 
 ## The effects
